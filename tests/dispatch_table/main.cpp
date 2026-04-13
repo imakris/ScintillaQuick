@@ -289,6 +289,96 @@ void test_tracked_scroll_width_reset_table()
     SQ_EXPECT(!tracked_scroll_width_should_reset(SCI_INSERTTEXT));
 }
 
+// Exhaustive sweep over Scintilla's entire public message range.
+//
+// The property enforced here is the single structural invariant of
+// the dispatch table:
+//
+//   Every SCI_* message in the public range must either
+//   (a) be classified as a known read-only query
+//       (scene_graph_message_is_known_read_only() returns true and
+//       scene_graph_update_request() returns `needed=false`), OR
+//   (b) be classified as needing a scene-graph update
+//       (scene_graph_update_request() returns `needed=true`).
+//
+// There must be no third case — no silent "not read-only AND not
+// scheduling a resync" fall-through. That third case is the
+// historical bug: a default branch that returned an empty request,
+// meaning messages absent from the allow-list silently skipped the
+// resync they needed.
+//
+// This sweep does NOT police the specific combination of
+// `static_content_dirty` / `needs_style_sync` / `scrolling` flags,
+// because individual classifications in the table are permitted to be
+// narrower than the conservative default when the table author knows
+// exactly what a message touches. The conservative-default shape
+// (`needed`+`static_content_dirty`+`needs_style_sync`) is asserted by
+// test_unknown_messages_trigger_conservative_full_resync().
+void test_full_scintilla_message_range_is_classified()
+{
+    // Scintilla's public message numbers start at SCI_START (= 2000)
+    // and, at the time this test was written, top out around 4033.
+    // We sweep a generous upper bound to catch both today's messages
+    // and reasonably near-future additions, and we count every
+    // classification so a regression is visible in the test log even
+    // without reading every SQ_EXPECT failure.
+    //
+    // If Scintilla ever introduces a sentinel macro for the top of
+    // the message range, prefer that over the hard-coded constant.
+    constexpr unsigned int sweep_upper_bound = 4300;
+
+    unsigned int classified_as_read_only = 0;
+    unsigned int classified_as_resync = 0;
+    unsigned int silently_ignored = 0;
+
+    for (unsigned int msg = SCI_START; msg <= sweep_upper_bound; ++msg) {
+        const bool read_only = scene_graph_message_is_known_read_only(msg);
+        const scene_graph_update_request_t req = scene_graph_update_request(msg);
+
+        if (read_only) {
+            ++classified_as_read_only;
+            SQ_EXPECT(!req.needed);
+            SQ_EXPECT(!req.static_content_dirty);
+            SQ_EXPECT(!req.needs_style_sync);
+            SQ_EXPECT(!req.scrolling);
+            continue;
+        }
+
+        if (req.needed) {
+            ++classified_as_resync;
+            continue;
+        }
+
+        // Neither a known read-only query, nor scheduling a resync:
+        // this is exactly the historical silent-default bug.
+        ++silently_ignored;
+        std::fprintf(
+            stderr,
+            "FAIL: SCI_ message %u is neither known-read-only nor "
+            "scheduling a resync. Add it to "
+            "scene_graph_message_is_known_read_only() in "
+            "src/core/scintillaquick_dispatch_table.h if it is a "
+            "query, or make sure the conservative default still "
+            "fires for it.\n",
+            msg);
+        SQ_EXPECT(false);
+    }
+
+    std::fprintf(
+        stderr,
+        "dispatch sweep: %u read-only, %u scheduled-resync, %u silently-ignored\n",
+        classified_as_read_only,
+        classified_as_resync,
+        silently_ignored);
+
+    SQ_EXPECT(silently_ignored == 0);
+    // Sanity: we should be seeing at least some traffic on both
+    // branches. If the sweep reports zero read-only classifications,
+    // the allow-list has probably been wiped.
+    SQ_EXPECT(classified_as_read_only > 0);
+    SQ_EXPECT(classified_as_resync > 0);
+}
+
 } // namespace
 
 int main()
@@ -301,6 +391,7 @@ int main()
     test_unknown_messages_trigger_conservative_full_resync();
     test_read_only_and_mutating_lists_are_disjoint();
     test_tracked_scroll_width_reset_table();
+    test_full_scintilla_message_range_is_classified();
 
     if (g_failures > 0) {
         std::fprintf(stderr, "%d dispatch table test(s) failed.\n", g_failures);
