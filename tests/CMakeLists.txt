@@ -134,11 +134,17 @@ target_link_libraries(
         Qt6::Quick)
 
 # --- Benchmark-backed validation ---
-
-scintillaquick_register_validation_test(
-    scintillaquick_embedded_benchmark
-    scintillaquick_embedded_benchmark
-    ";QT_FONT_DPI=96;QT_SCALE_FACTOR=1;QT_ENABLE_HIGHDPI_SCALING=0")
+#
+# The embedded benchmark executable is declared at the top-level
+# CMakeLists.txt and is gated on SCINTILLAQUICK_BUILD_BENCHMARKS. If
+# benchmarks are disabled, skip registering the test rather than
+# failing CMake with "target does not exist".
+if(TARGET scintillaquick_embedded_benchmark)
+    scintillaquick_register_validation_test(
+        scintillaquick_embedded_benchmark
+        scintillaquick_embedded_benchmark
+        ";QT_FONT_DPI=96;QT_SCALE_FACTOR=1;QT_ENABLE_HIGHDPI_SCALING=0")
+endif()
 
 # --- Phase 2 frame validation (structural + semantic) ---
 

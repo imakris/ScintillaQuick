@@ -9,18 +9,36 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(CTest)
 
+# Project-level options. Each option has a deliberate default so that the
+# common in-tree case (configure -> build everything) still works without
+# the user having to know any of this exists.
+option(SCINTILLAQUICK_BUILD_EXAMPLES
+    "Build the example applications (scintillaquick_minimal_editor)" ON)
+option(SCINTILLAQUICK_BUILD_BENCHMARKS
+    "Build the benchmark applications (scintillaquick_embedded_benchmark)" ON)
+option(SCINTILLAQUICK_BUILD_TESTS
+    "Build the test suite (gated on BUILD_TESTING as well)" ON)
+# Expose Scintilla's vendored sources as an OBJECT library instead of
+# dropping them into the main target. Set to OFF only if you want a
+# flatter single-target static build and are willing to inherit
+# Scintilla's compile warnings into the glue layer.
+option(SCINTILLAQUICK_USE_SCINTILLA_OBJECT_LIBRARY
+    "Compile the vendored Scintilla sources as a separate OBJECT library" ON)
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 # CMAKE_AUTOUIC is intentionally NOT enabled: the project contains no .ui
 # files, so running `uic` on every build is pure overhead.
-set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 # Qt 6.5 is the oldest LTS line in wide use and covers everything this
 # library relies on (QQuickItem, QSGNode, QSGTextNode, QSGImageNode,
 # updatePaintNode, inputMethodQuery). If you bump the floor, please
-# document the specific API that requires it.
+# document the specific API that requires it, and update the variable
+# below so that the generated package config inherits the new floor.
+set(scintillaquick_qt6_minimum_version 6.5)
+
 find_package(
-    Qt6 6.5 REQUIRED
+    Qt6 ${scintillaquick_qt6_minimum_version} REQUIRED
     COMPONENTS
         Core
         Gui
@@ -61,15 +79,52 @@ set(scintillaquick_scintilla_sources
     third_party/scintilla/src/ViewStyle.cxx
     third_party/scintilla/src/XPM.cxx)
 
+# Optionally compile Scintilla as an OBJECT library so we can apply
+# compile flags/warnings that should only affect the vendored code, not
+# the ScintillaQuick glue layer. The OBJECT target is a private
+# implementation detail (not exported, not installed).
+if(SCINTILLAQUICK_USE_SCINTILLA_OBJECT_LIBRARY)
+    add_library(scintillaquick_scintilla_objects OBJECT
+        ${scintillaquick_scintilla_sources})
+    # Scintilla relies on C++20.
+    target_compile_features(scintillaquick_scintilla_objects PUBLIC cxx_std_20)
+    target_include_directories(
+        scintillaquick_scintilla_objects
+        PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/src)
+    target_compile_definitions(
+        scintillaquick_scintilla_objects
+        PRIVATE
+            SCINTILLA_QT_QML=1
+            MAKING_LIBRARY=1
+            _CRT_SECURE_NO_DEPRECATE=1)
+    # Scintilla must see the Qt Core headers (used by its Qt platform
+    # bits in our glue layer) even though this OBJECT target itself
+    # does not link Qt.
+    target_link_libraries(scintillaquick_scintilla_objects
+        PUBLIC Qt6::Core Qt6::Gui)
+    if(MSVC)
+        target_compile_options(scintillaquick_scintilla_objects PRIVATE /FS)
+    endif()
+    set(scintillaquick_scintilla_sources_for_main_target "")
+    set(scintillaquick_scintilla_objects_for_main_target
+        $<TARGET_OBJECTS:scintillaquick_scintilla_objects>)
+else()
+    set(scintillaquick_scintilla_sources_for_main_target
+        ${scintillaquick_scintilla_sources})
+    set(scintillaquick_scintilla_objects_for_main_target "")
+endif()
+
+# BUILD_SHARED_LIBS (CMake built-in) switches the library between static
+# and shared. Default to static to preserve the historical behaviour.
+if(NOT DEFINED BUILD_SHARED_LIBS)
+    set(BUILD_SHARED_LIBS OFF)
+endif()
+
 add_library(
-    ScintillaQuick STATIC
+    ScintillaQuick
     include/scintillaquick/ScintillaQuickItem.h
-    # Deprecated compatibility header for the old
-    # `include/scintilla_quick/` path and `scintilla_quick::` namespace.
-    # Listed here for IDE visibility only; the file is a thin shim that
-    # re-exports the canonical constants from
-    # `scintillaquick::version_*`.
-    include/scintilla_quick/scintilla_quick.h
     src/core/ScintillaQuickCore.cpp
     src/core/scintillaquick_dispatch_table.h
     src/core/ScintillaQuickCore.h
@@ -78,7 +133,8 @@ add_library(
     src/render/scintillaquick_scene_graph_renderer.cpp
     src/render/scintillaquick_scene_graph_renderer.h
     src/public/ScintillaQuickItem.cpp
-    ${scintillaquick_scintilla_sources})
+    ${scintillaquick_scintilla_sources_for_main_target}
+    ${scintillaquick_scintilla_objects_for_main_target})
 
 add_library(ScintillaQuick::ScintillaQuick ALIAS ScintillaQuick)
 
@@ -95,10 +151,16 @@ target_compile_definitions(
         MAKING_LIBRARY=1
         _CRT_SECURE_NO_DEPRECATE=1)
 
-target_compile_definitions(
-    ScintillaQuick
-    PUBLIC
-        SCINTILLAQUICK_STATIC_DEFINE=1)
+# When building as a static library the SCINTILLAQUICK_EXPORT macro needs
+# to resolve to an empty expansion on Windows. When building shared, the
+# macro must expand to dllexport/dllimport on the library/consumer side
+# respectively; the header already handles that via MAKING_LIBRARY.
+if(NOT BUILD_SHARED_LIBS)
+    target_compile_definitions(
+        ScintillaQuick
+        PUBLIC
+            SCINTILLAQUICK_STATIC_DEFINE=1)
+endif()
 
 target_include_directories(
     ScintillaQuick
@@ -138,41 +200,45 @@ target_link_libraries(
 set(scintillaquick_example_common_include_dir
     ${CMAKE_CURRENT_SOURCE_DIR}/examples/common)
 
-add_executable(
-    scintillaquick_minimal_editor
-    examples/minimal_editor/main.cpp)
+if(SCINTILLAQUICK_BUILD_EXAMPLES)
+    add_executable(
+        scintillaquick_minimal_editor
+        examples/minimal_editor/main.cpp)
 
-target_include_directories(
-    scintillaquick_minimal_editor
-    PRIVATE
-        ${scintillaquick_example_common_include_dir})
+    target_include_directories(
+        scintillaquick_minimal_editor
+        PRIVATE
+            ${scintillaquick_example_common_include_dir})
 
-target_link_libraries(
-    scintillaquick_minimal_editor
-    PRIVATE
-        ScintillaQuick::ScintillaQuick
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Quick)
+    target_link_libraries(
+        scintillaquick_minimal_editor
+        PRIVATE
+            ScintillaQuick::ScintillaQuick
+            Qt6::Core
+            Qt6::Gui
+            Qt6::Quick)
+endif()
 
-add_executable(
-    scintillaquick_embedded_benchmark
-    benchmarks/embedded_editor/main.cpp)
+if(SCINTILLAQUICK_BUILD_BENCHMARKS)
+    add_executable(
+        scintillaquick_embedded_benchmark
+        benchmarks/embedded_editor/main.cpp)
 
-target_include_directories(
-    scintillaquick_embedded_benchmark
-    PRIVATE
-        ${scintillaquick_example_common_include_dir})
+    target_include_directories(
+        scintillaquick_embedded_benchmark
+        PRIVATE
+            ${scintillaquick_example_common_include_dir})
 
-target_link_libraries(
-    scintillaquick_embedded_benchmark
-    PRIVATE
-        ScintillaQuick::ScintillaQuick
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Quick)
+    target_link_libraries(
+        scintillaquick_embedded_benchmark
+        PRIVATE
+            ScintillaQuick::ScintillaQuick
+            Qt6::Core
+            Qt6::Gui
+            Qt6::Quick)
+endif()
 
-if(BUILD_TESTING)
+if(BUILD_TESTING AND SCINTILLAQUICK_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 

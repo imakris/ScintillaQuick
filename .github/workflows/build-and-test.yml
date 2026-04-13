@@ -1,0 +1,98 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }} / Qt ${{ matrix.qt-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            qt-version: 6.5.3
+            qt-arch: gcc_64
+          - os: ubuntu-latest
+            qt-version: 6.7.2
+            qt-arch: gcc_64
+          - os: windows-latest
+            qt-version: 6.5.3
+            qt-arch: win64_msvc2019_64
+          - os: macos-latest
+            qt-version: 6.5.3
+            qt-arch: clang_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ matrix.qt-version }}
+          arch: ${{ matrix.qt-arch }}
+          cache: true
+          modules: qtdeclarative
+
+      - name: Install offscreen platform dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon0 libegl1 libgl1 libdbus-1-3 libfontconfig1
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=ON
+          -DSCINTILLAQUICK_BUILD_EXAMPLES=ON
+          -DSCINTILLAQUICK_BUILD_BENCHMARKS=ON
+          -DSCINTILLAQUICK_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Run unit tests (dispatch table)
+        working-directory: build
+        run: ctest -C Release --output-on-failure -R scintillaquick_dispatch_table_test
+
+      - name: Run smoke + frame-validation tests (offscreen)
+        working-directory: build
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_FONT_DPI: 96
+          QT_SCALE_FACTOR: 1
+          QT_ENABLE_HIGHDPI_SCALING: 0
+        run: >
+          ctest -C Release --output-on-failure
+          -E "scintillaquick_visual_regression_test|scintillaquick_embedded_benchmark"
+
+      - name: Install & test downstream consumer (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          cmake --install build --prefix "$PWD/build/_install"
+          mkdir -p build/_consumer
+          cat > build/_consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.24)
+          project(scintillaquick_consumer_smoke LANGUAGES CXX)
+          find_package(ScintillaQuick CONFIG REQUIRED)
+          add_executable(consumer_smoke consumer.cpp)
+          target_link_libraries(consumer_smoke PRIVATE ScintillaQuick::ScintillaQuick)
+          EOF
+          cat > build/_consumer/consumer.cpp <<'EOF'
+          #include <scintillaquick/ScintillaQuickItem.h>
+          int main() { return scintillaquick::version_major >= 0 ? 0 : 1; }
+          EOF
+          cmake -S build/_consumer -B build/_consumer/_build \
+            -DCMAKE_PREFIX_PATH="$PWD/build/_install"
+          cmake --build build/_consumer/_build
+          ./build/_consumer/_build/consumer_smoke
