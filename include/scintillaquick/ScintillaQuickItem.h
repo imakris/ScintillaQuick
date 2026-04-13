@@ -1,0 +1,310 @@
+//
+//          Copyright (c) 1990-2011, Scientific Toolworks, Inc.
+//
+// The License.txt file describes the conditions under which this software may be distributed.
+//
+// Author: Jason Haslam
+//
+// Additions Copyright (c) 2011 Archaeopteryx Software, Inc. d/b/a Wingware
+// @file ScintillaQuickItem.h - Qt widget that wraps ScintillaQuickCore and provides events and scrolling
+//
+// Additions Copyright (c) 2020 Michael Neuroth
+// Scintilla platform layer for Qt QML/Quick
+
+
+#ifndef SCINTILLAQUICK_SCINTILLAQUICKITEM_H
+#define SCINTILLAQUICK_SCINTILLAQUICKITEM_H
+
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "Debugging.h"
+#include "Geometry.h"
+#include "Scintilla.h"
+#include "ScintillaTypes.h"
+#include "ScintillaMessages.h"
+#include "ScintillaStructures.h"
+#include "Platform.h"
+
+#include <QFont>
+#include <QElapsedTimer>
+#include <QMimeData>
+#include <QPoint>
+#include <QQuickItem>
+#include <QTimer>
+#include <QVariant>
+
+class QDragEnterEvent;
+class QDragLeaveEvent;
+class QDragMoveEvent;
+class QDropEvent;
+class QFocusEvent;
+class QInputMethodEvent;
+class QKeyEvent;
+class QMouseEvent;
+class QSGNode;
+class QTouchEvent;
+class QWheelEvent;
+
+namespace Scintilla::Internal {
+
+class ScintillaQuickCore;
+class SurfaceImpl;
+struct Render_frame;
+struct displayed_row_for_test_t
+{
+    int document_line = 0;
+    int subline_index = 0;
+    double top = 0.0;
+    double bottom = 0.0;
+    QString text;
+};
+#ifdef SCINTILLAQUICK_ENABLE_TEST_ACCESS
+class ScintillaQuick_validation_access;
+#endif
+
+}
+
+#ifndef SCINTILLAQUICK_EXPORT
+#if defined(SCINTILLAQUICK_STATIC_DEFINE)
+#define SCINTILLAQUICK_EXPORT
+#elif defined(WIN32)
+#ifdef MAKING_LIBRARY
+#define SCINTILLAQUICK_EXPORT __declspec(dllexport)
+#else
+// Defining dllimport upsets moc
+#define SCINTILLAQUICK_EXPORT __declspec(dllimport)
+#endif
+#else
+#define SCINTILLAQUICK_EXPORT
+#endif
+#endif
+
+// REMARK:
+// In Qt QML/Quick modus the scrollbar handling should be handled outside
+// the scintilla editor control, for example in a ScrolView component.
+// This is needed to optimize the user interaction on touch devices.
+// In this modus the scintilla editor control runs alway with a (maximal)
+// surface area to show the control completely. Rendering is handled through the
+// Qt Quick scene graph in updatePaintNode().
+class SCINTILLAQUICK_EXPORT ScintillaQuickItem : public QQuickItem {
+	Q_OBJECT
+
+	Q_PROPERTY(QString text READ getText WRITE setText NOTIFY textChanged)
+	Q_PROPERTY(QFont font READ getFont WRITE setFont NOTIFY fontChanged)
+	Q_PROPERTY(bool readonly READ getReadonly WRITE setReadonly NOTIFY readonlyChanged)
+	Q_PROPERTY(int logicalWidth READ getLogicalWidth NOTIFY logicalWidthChanged)
+	Q_PROPERTY(int logicalHeight READ getLogicalHeight NOTIFY logicalHeightChanged)
+	Q_PROPERTY(int charHeight READ getCharHeight NOTIFY charHeightChanged)
+	Q_PROPERTY(int charWidth READ getCharWidth NOTIFY charWidthChanged)
+	Q_PROPERTY(int totalLines READ getTotalLines NOTIFY totalLinesChanged)
+	Q_PROPERTY(int totalColumns READ getTotalColumns NOTIFY totalColumnsChanged)
+	Q_PROPERTY(int visibleLines READ getVisibleLines NOTIFY visibleLinesChanged)
+	Q_PROPERTY(int visibleColumns READ getVisibleColumns NOTIFY visibleColumnsChanged)
+	Q_PROPERTY(int firstVisibleLine READ getFirstVisibleLine WRITE setFirstVisibleLine NOTIFY firstVisibleLineChanged)
+	Q_PROPERTY(int firstVisibleColumn READ getFirstVisibleColumn NOTIFY firstVisibleColumnChanged)
+	Q_PROPERTY(bool profilingActive READ profilingActive NOTIFY profilingActiveChanged)
+	Q_PROPERTY(Qt::InputMethodHints inputMethodHints READ inputMethodHints WRITE setInputMethodHints NOTIFY inputMethodHintsChanged)
+
+public:
+	explicit ScintillaQuickItem(QQuickItem *parent = nullptr);
+	virtual ~ScintillaQuickItem();
+
+	virtual sptr_t send(
+		unsigned int iMessage,
+		uptr_t wParam = 0,
+		sptr_t lParam = 0) const;
+
+	virtual sptr_t sends(
+		unsigned int iMessage,
+		uptr_t wParam = 0,
+		const char *s = 0) const;
+
+	Q_INVOKABLE void scrollRow(int deltaLines);
+	Q_INVOKABLE void scrollColumn(int deltaColumns);
+	Q_INVOKABLE void enableUpdate(bool enable);
+	Q_INVOKABLE virtual void cmdContextMenu(int menuID);
+	Q_INVOKABLE bool startProfilingSession(const QString &outputDirectory = QString(), double durationSeconds = 10.0);
+	Q_INVOKABLE void stopProfilingSession();
+	Q_INVOKABLE bool profilingActive() const;
+	void request_scene_graph_update(
+		bool static_content_dirty = false,
+		bool needs_style_sync = false,
+		bool scrolling = false);
+
+public slots:
+	// Scroll events coming from GUI to be sent to Scintilla.
+	void scrollHorizontal(int value);
+	void scrollVertical(int value);
+
+	// Emit Scintilla notifications as signals.
+	void notifyParent(Scintilla::NotificationData scn);
+	void event_command(Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
+
+signals:
+	void cursorPositionChanged();
+	void horizontalScrolled(int value);
+	void verticalScrolled(int value);
+	void horizontalRangeChanged(int max, int page);
+	void verticalRangeChanged(int max, int page);
+	void notifyChange();
+	void linesAdded(Scintilla::Position linesAdded);
+
+	// Clients can use this hook to add additional
+	// formats (e.g. rich text) to the MIME data.
+	void aboutToCopy(QMimeData *data);
+
+	// Scintilla Notifications
+	void styleNeeded(Scintilla::Position position);
+	void charAdded(int ch);
+	void savePointChanged(bool dirty);
+	void modifyAttemptReadOnly();
+	void key(int key);
+	void doubleClick(Scintilla::Position position, Scintilla::Position line);
+	void updateUi(Scintilla::Update updated);
+	void modified(Scintilla::ModificationFlags type, Scintilla::Position position, Scintilla::Position length, Scintilla::Position linesAdded,
+		      const QByteArray &text, Scintilla::Position line, Scintilla::FoldLevel foldNow, Scintilla::FoldLevel foldPrev);
+	void macroRecord(Scintilla::Message message, Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
+	void marginClicked(Scintilla::Position position, Scintilla::KeyMod modifiers, int margin);
+	void textAreaClicked(Scintilla::Position line, int modifiers);
+	void needShown(Scintilla::Position position, Scintilla::Position length);
+	void painted();
+	void userListSelection(); // Wants some args.
+	void uriDropped(const QString &uri);
+	void dwellStart(int x, int y);
+	void dwellEnd(int x, int y);
+	void zoom(int zoom);
+	void hotSpotClick(Scintilla::Position position, Scintilla::KeyMod modifiers);
+	void hotSpotDoubleClick(Scintilla::Position position, Scintilla::KeyMod modifiers);
+	void callTipClick();
+	void autoCompleteSelection(Scintilla::Position position, const QString &text);
+	void autoCompleteCancelled();
+	void focusChanged(bool focused);
+
+	// Base notifications for compatibility with other Scintilla implementations
+	void notify(Scintilla::NotificationData *pscn);
+	void command(Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
+
+	// GUI event notifications needed under Qt
+	void buttonPressed(QMouseEvent *event);
+	void buttonReleased(QMouseEvent *event);
+	void keyPressed(QKeyEvent *event);
+	void resized();
+	void textChanged();
+	void fontChanged();
+	void readonlyChanged();
+	void profilingActiveChanged();
+	void profilingFinished(const QString &reportPath);
+	void logicalWidthChanged();
+	void logicalHeightChanged();
+	void charHeightChanged();
+	void charWidthChanged();
+	void totalLinesChanged();
+	void firstVisibleLineChanged();
+	void firstVisibleColumnChanged();
+	void totalColumnsChanged();
+	void visibleLinesChanged();
+	void visibleColumnsChanged();
+	void inputMethodHintsChanged();
+	void enableScrollViewInteraction(bool value);
+	void showContextMenu(const QPoint & pos);
+	void addToContextMenu(int menuId, const QString & txt, bool enabled);
+	void clearContextMenu();
+
+protected:
+	bool event(QEvent *event) override;
+	void wheelEvent(QWheelEvent *event) override;
+	void focusInEvent(QFocusEvent *event) override;
+	void focusOutEvent(QFocusEvent *event) override;
+	void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
+	void keyPressEvent(QKeyEvent *event) override;
+	void mousePressEvent(QMouseEvent *event) override;
+	void mouseReleaseEvent(QMouseEvent *event) override;
+	void mouseDoubleClickEvent(QMouseEvent *event) override;
+	void mouseMoveEvent(QMouseEvent *event) override;
+	void dragEnterEvent(QDragEnterEvent *event) override;
+	void dragLeaveEvent(QDragLeaveEvent *event) override;
+	void dragMoveEvent(QDragMoveEvent *event) override;
+	void dropEvent(QDropEvent *event) override;
+	void inputMethodEvent(QInputMethodEvent *event) override;
+	QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
+	Q_INVOKABLE QVariant inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const;
+	void touchEvent(QTouchEvent *event) override;
+	void updatePolish() override;
+	QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *updatePaintNodeData) override;
+
+private:
+#ifdef SCINTILLAQUICK_ENABLE_TEST_ACCESS
+	friend class Scintilla::Internal::ScintillaQuick_validation_access;
+#endif
+
+	class Render_data;
+	class Profiling_state;
+
+	QString getText() const;
+	void setText(const QString & txt);
+	QFont getFont() const { return aFont; }
+	void setFont(const QFont & newFont);
+	void setStylesFont(const QFont &f, int style);
+	int getLogicalWidth() const;
+	int getLogicalHeight() const;
+	int getCharHeight() const;
+	int getCharWidth() const;
+	int getFirstVisibleLine() const;
+	void setFirstVisibleLine(int lineNo);
+	int getTotalLines() const;
+	int getFirstVisibleColumn() const;
+	int getTotalColumns() const;
+	int getVisibleLines() const;
+	int getVisibleColumns() const;
+	Qt::InputMethodHints inputMethodHints() const;
+	void setInputMethodHints(Qt::InputMethodHints hints);
+	bool getReadonly() const;
+	void setReadonly(bool value);
+
+	void cursorChangedUpdateMarker();
+    void syncCaretBlinkTimer(bool resetPhase = false);
+	void updateQuickView(Scintilla::Update updated);
+	void build_render_snapshot();
+	std::vector<Scintilla::Internal::displayed_row_for_test_t> displayed_rows_for_test() const;
+	const Scintilla::Internal::Render_frame &rendered_frame_for_test() const;
+    void reset_tracked_scroll_width();
+
+	bool enableUpdateFlag;
+	int logicalWidth;
+	int logicalHeight;
+	int m_cached_char_height = -1;
+	int m_cached_char_width = -1;
+	int m_cached_total_lines = -1;
+	int m_cached_total_columns = -1;
+	int m_cached_visible_lines = -1;
+	int m_cached_visible_columns = -1;
+	int m_cached_first_visible_line = -1;
+	int m_cached_first_visible_column = -1;
+	QFont aFont;
+	Qt::InputMethodHints dataInputMethodHints;
+	qint64 aLastTouchPressTime;
+
+	Scintilla::Internal::ScintillaQuickCore *sqt;
+
+	QElapsedTimer time;
+
+	Scintilla::Position preeditPos;
+	std::unique_ptr<Render_data> m_render_data;
+	std::unique_ptr<Profiling_state> m_profiling_state;
+    QTimer m_caret_blink_timer;
+    bool m_caret_blink_visible = true;
+
+	static bool IsHangul(const QChar qchar);
+	void MoveImeCarets(Scintilla::Position offset);
+	void DrawImeIndicator(int indicator, int len);
+	static Scintilla::KeyMod ModifiersOfKeyboard();
+	void syncQuickViewProperties();
+};
+
+void RegisterScintillaType();
+
+#endif

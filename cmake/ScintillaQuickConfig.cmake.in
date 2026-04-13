@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(Qt6 6.10 REQUIRED COMPONENTS Core Gui Qml Quick)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ScintillaQuickTargets.cmake")
+
+check_required_components(ScintillaQuick)
