@@ -86,6 +86,10 @@ set(scintillaquick_scintilla_sources
 if(SCINTILLAQUICK_USE_SCINTILLA_OBJECT_LIBRARY)
     add_library(scintillaquick_scintilla_objects OBJECT
         ${scintillaquick_scintilla_sources})
+    if(BUILD_SHARED_LIBS)
+        set_target_properties(scintillaquick_scintilla_objects PROPERTIES
+            POSITION_INDEPENDENT_CODE ON)
+    endif()
     # Scintilla relies on C++20.
     target_compile_features(scintillaquick_scintilla_objects PUBLIC cxx_std_20)
     target_include_directories(

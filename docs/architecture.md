@@ -191,7 +191,7 @@ What this architecture is intended to provide:
 
 What it is not intended to be:
 
-- a hidden-widget compatibility layer
+- a hidden-widget wrapper
 - a generic captured-widget bridge
 - a brand-new editor implementation independent of Scintilla
 

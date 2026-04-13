@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: ${{ matrix.os }} / Qt ${{ matrix.qt-version }}
+    name: ${{ matrix.os }} / Qt ${{ matrix.qt-version }} / shared=${{ matrix.build-shared }}
     strategy:
       fail-fast: false
       matrix:
@@ -20,15 +20,31 @@ jobs:
           - os: ubuntu-latest
             qt-version: 6.5.3
             qt-arch: gcc_64
+            build-shared: OFF
           - os: ubuntu-latest
             qt-version: 6.7.2
             qt-arch: gcc_64
+            build-shared: OFF
           - os: windows-latest
             qt-version: 6.5.3
             qt-arch: win64_msvc2019_64
+            build-shared: OFF
+          - os: windows-latest
+            qt-version: 6.5.3
+            qt-arch: win64_msvc2019_64
+            build-shared: ON
           - os: macos-latest
             qt-version: 6.5.3
             qt-arch: clang_64
+            build-shared: OFF
+          - os: macos-latest
+            qt-version: 6.5.3
+            qt-arch: clang_64
+            build-shared: ON
+          - os: ubuntu-latest
+            qt-version: 6.5.3
+            qt-arch: gcc_64
+            build-shared: ON
 
     runs-on: ${{ matrix.os }}
 
@@ -53,6 +69,7 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_SHARED_LIBS=${{ matrix.build-shared }}
           -DBUILD_TESTING=ON
           -DSCINTILLAQUICK_BUILD_EXAMPLES=ON
           -DSCINTILLAQUICK_BUILD_BENCHMARKS=ON
@@ -76,8 +93,8 @@ jobs:
           ctest -C Release --output-on-failure
           -E "scintillaquick_visual_regression_test|scintillaquick_embedded_benchmark"
 
-      - name: Install & test downstream consumer (Linux only)
-        if: runner.os == 'Linux'
+      - name: Install & test downstream consumer
+        shell: bash
         run: |
           cmake --install build --prefix "$PWD/build/_install"
           mkdir -p build/_consumer
@@ -94,5 +111,10 @@ jobs:
           EOF
           cmake -S build/_consumer -B build/_consumer/_build \
             -DCMAKE_PREFIX_PATH="$PWD/build/_install"
-          cmake --build build/_consumer/_build
-          ./build/_consumer/_build/consumer_smoke
+          cmake --build build/_consumer/_build --config Release
+          export PATH="$PWD/build/_install/bin:$PATH"
+          if [ -x ./build/_consumer/_build/consumer_smoke ]; then
+            ./build/_consumer/_build/consumer_smoke
+          else
+            ./build/_consumer/_build/Release/consumer_smoke.exe
+          fi

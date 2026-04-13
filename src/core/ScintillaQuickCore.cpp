@@ -22,6 +22,7 @@
 #include <QImage>
 #include <QMimeData>
 #include <QPainter>
+#include <QPointer>
 #include <QPixmap>
 #include <QQuickWindow>
 #include <QSGImageNode>
@@ -1328,12 +1329,14 @@ void ScintillaQuickCore::StartDrag()
 		// object goes away. `setMimeData` takes ownership of the
 		// released raw pointer; `exec()` is synchronous and returns
 		// once the drop has been processed.
-		QDrag *dragon = new QDrag(m_owner);
+		QPointer<QDrag> dragon = new QDrag(m_owner);
 		dragon->setMimeData(mimeData.release());
 
 		const Qt::DropAction dropAction = dragon->exec(
 			static_cast<Qt::DropActions>(Qt::CopyAction|Qt::MoveAction));
-		dragon->deleteLater();
+		if (dragon) {
+			dragon->deleteLater();
+		}
 
 		if ((dropAction == Qt::MoveAction) && dropWentOutside) {
 			// Remove dragged out text

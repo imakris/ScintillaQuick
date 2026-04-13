@@ -208,7 +208,7 @@ signals:
 	void autoCompleteCancelled();
 	void focusChanged(bool focused);
 
-	// Base notifications for compatibility with other Scintilla implementations
+	// Base Scintilla notifications exposed by this item.
 	void notify(Scintilla::NotificationData *pscn);
 	void command(Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
 
