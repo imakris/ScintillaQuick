@@ -72,13 +72,17 @@
 #include "render_frame.h"
 
 #include <QObject>
-#include <QAction>
-#include <QClipboard>
-#include <QMimeData>
-#include <QPaintEvent>
-#include <QPainter>
-#include <QQuickItem>
-#include <QTimerEvent>
+#include <QClipboard>  // QClipboard::Mode enum is used by-value below.
+
+// All of these only appear as pointer parameters, pointer return types,
+// or override parameters in this header, so forward declarations are
+// sufficient. The full headers are included from the .cpp files that
+// actually need them.
+class QAction;
+class QMimeData;
+class QPainter;
+class QQuickItem;
+class QTimerEvent;
 
 class ScintillaQuickItem;
 
@@ -88,9 +92,8 @@ class ScintillaQuickCore : public QObject, public ScintillaBase {
 	Q_OBJECT
 
 public:
-	explicit ScintillaQuickCore(QQuickItem *parent);
+	explicit ScintillaQuickCore(::ScintillaQuickItem *parent);
 	void UpdateInfos(int winId);
-	QQuickItem *GetScrollArea() { return scrollArea; }
 	void ensure_visible_range_styled(bool scrolling);
 	void selectCurrentWord();
 	void reset_tracked_scroll_width_to_viewport();
@@ -196,7 +199,13 @@ protected:
 	void timerEvent(QTimerEvent *event) override;
 
 private:
-	QQuickItem *scrollArea;      // is a ScintillaQuickItem
+	// Non-owning back-pointer to the enclosing QQuickItem. Historically
+	// named `scrollArea` because upstream Scintilla's Qt integration
+	// embedded the editor in a QScrollArea-shaped widget; in the Qt
+	// Quick build the "scroll area" and the editor item are the same
+	// object. Parenting is handled by the QObject parent link set up
+	// in the constructor.
+	::ScintillaQuickItem *m_owner;
 
 	int vMax, hMax;   // Scroll bar maximums.
 	int vPage, hPage; // Scroll bar page sizes.

@@ -11,11 +11,16 @@ include(CTest)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
-set(CMAKE_AUTOUIC ON)
+# CMAKE_AUTOUIC is intentionally NOT enabled: the project contains no .ui
+# files, so running `uic` on every build is pure overhead.
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
+# Qt 6.5 is the oldest LTS line in wide use and covers everything this
+# library relies on (QQuickItem, QSGNode, QSGTextNode, QSGImageNode,
+# updatePaintNode, inputMethodQuery). If you bump the floor, please
+# document the specific API that requires it.
 find_package(
-    Qt6 6.10 REQUIRED
+    Qt6 6.5 REQUIRED
     COMPONENTS
         Core
         Gui
@@ -59,8 +64,14 @@ set(scintillaquick_scintilla_sources
 add_library(
     ScintillaQuick STATIC
     include/scintillaquick/ScintillaQuickItem.h
+    # Deprecated compatibility header for the old
+    # `include/scintilla_quick/` path and `scintilla_quick::` namespace.
+    # Listed here for IDE visibility only; the file is a thin shim that
+    # re-exports the canonical constants from
+    # `scintillaquick::version_*`.
     include/scintilla_quick/scintilla_quick.h
     src/core/ScintillaQuickCore.cpp
+    src/core/scintillaquick_dispatch_table.h
     src/core/ScintillaQuickCore.h
     src/platform/scintillaquick_platqt.cpp
     src/platform/scintillaquick_platqt.h
@@ -92,12 +103,22 @@ target_compile_definitions(
 target_include_directories(
     ScintillaQuick
     PUBLIC
+        # Consumers get the main header and the Scintilla *public* API
+        # (Scintilla.h, ScintillaTypes.h, ScintillaMessages.h,
+        # ScintillaStructures.h) which the public header references.
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/src>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/scintillaquick/third_party/scintilla/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/scintillaquick/third_party/scintilla/src>
+        # Scintilla's *internal* src/ headers (Debugging.h, Geometry.h,
+        # Platform.h, Editor.h, ...) are only needed by in-tree TUs that
+        # include ScintillaQuickCore.h (the core .cpp itself and the
+        # test-support validation access). Expose them on the
+        # BUILD_INTERFACE so those in-tree consumers compile, but deliberately
+        # do NOT expose them on the INSTALL_INTERFACE: downstream consumers
+        # should not need to know about Scintilla's internals to link the
+        # installed package.
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/src>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core
         ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
@@ -175,11 +196,10 @@ install(
     FILES_MATCHING
         PATTERN "*.h")
 
-install(
-    DIRECTORY third_party/scintilla/src/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/scintillaquick/third_party/scintilla/src
-    FILES_MATCHING
-        PATTERN "*.h")
+# Note: third_party/scintilla/src/ headers are deliberately NOT installed.
+# They are Scintilla's internal implementation and should not be visible to
+# downstream consumers of the installed package. See target_include_directories
+# above for the BUILD_INTERFACE-only exposure used by in-tree tests.
 
 set(scintillaquick_package_install_dir
     ${CMAKE_INSTALL_LIBDIR}/cmake/ScintillaQuick)

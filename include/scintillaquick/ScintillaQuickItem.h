@@ -6,7 +6,12 @@
 // Author: Jason Haslam
 //
 // Additions Copyright (c) 2011 Archaeopteryx Software, Inc. d/b/a Wingware
-// @file ScintillaQuickItem.h - Qt widget that wraps ScintillaQuickCore and provides events and scrolling
+// @file ScintillaQuickItem.h - Qt Quick item (QQuickItem) that wraps
+// ScintillaQuickCore and drives events, input method handling and
+// scene-graph rendering. This is NOT a QWidget; earlier revisions of
+// upstream Scintilla-Qt were widget-based and the comment used to say
+// "Qt widget" — the current integration is fully Qt Quick / scene-graph
+// native.
 //
 // Additions Copyright (c) 2020 Michael Neuroth
 // Scintilla platform layer for Qt QML/Quick
@@ -21,13 +26,18 @@
 #include <string_view>
 #include <vector>
 
-#include "Debugging.h"
-#include "Geometry.h"
+// Public header only pulls the Scintilla *public* API surface
+// (third_party/scintilla/include). Internal Scintilla headers such as
+// Debugging.h, Geometry.h and Platform.h live under
+// third_party/scintilla/src and are NOT required for the types referenced
+// below (Scintilla::Position, NotificationData, Message, uptr_t, sptr_t,
+// Update, ModificationFlags, FoldLevel, KeyMod). Keeping them out of the
+// public header removes ~3 internal includes from every consumer TU and
+// lets the install set drop `third_party/scintilla/src`.
 #include "Scintilla.h"
 #include "ScintillaTypes.h"
 #include "ScintillaMessages.h"
 #include "ScintillaStructures.h"
-#include "Platform.h"
 
 #include <QFont>
 #include <QElapsedTimer>
@@ -49,11 +59,24 @@ class QSGNode;
 class QTouchEvent;
 class QWheelEvent;
 
+namespace scintillaquick {
+
+// Library version. Keep in sync with the CMake project() VERSION.
+inline constexpr int version_major = 0;
+inline constexpr int version_minor = 1;
+inline constexpr int version_patch = 0;
+
+} // namespace scintillaquick
+
 namespace Scintilla::Internal {
 
 class ScintillaQuickCore;
 class SurfaceImpl;
 struct Render_frame;
+
+// Test / benchmark support type. Consumed by the in-tree benchmark harness
+// and by test_support/scintillaquick_validation_access.h. Not intended as
+// part of the long-term public API; treat as internal.
 struct displayed_row_for_test_t
 {
     int document_line = 0;
@@ -62,6 +85,7 @@ struct displayed_row_for_test_t
     double bottom = 0.0;
     QString text;
 };
+
 #ifdef SCINTILLAQUICK_ENABLE_TEST_ACCESS
 class ScintillaQuick_validation_access;
 #endif
@@ -297,6 +321,21 @@ private:
 	std::unique_ptr<Profiling_state> m_profiling_state;
     QTimer m_caret_blink_timer;
     bool m_caret_blink_visible = true;
+    // Re-entry guard for `send()`'s dispatch -> `syncQuickViewProperties()`
+    // path. `syncQuickViewProperties()` itself issues SCI_* queries
+    // through `send()` to read the geometry cache (SCI_TEXTHEIGHT /
+    // SCI_LINESONSCREEN / ...). If a query message is not in the
+    // `scene_graph_message_is_known_read_only()` allow-list, the
+    // dispatch's conservative "unknown -> full resync" default would
+    // call `syncQuickViewProperties()` again, causing unbounded
+    // recursion and a stack overflow. The allow-list in the dispatch
+    // table is the primary defence; this flag is a defence-in-depth so
+    // that a future missed entry degrades into "no resync for that one
+    // nested call" instead of a crash.
+    //
+    // Declared mutable because `send()` is const (see the long comment
+    // at the top of `send()` for why).
+    mutable bool m_in_sync_quick_view_properties = false;
 
 	static bool IsHangul(const QChar qchar);
 	void MoveImeCarets(Scintilla::Position offset);

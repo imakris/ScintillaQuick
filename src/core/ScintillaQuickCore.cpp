@@ -16,6 +16,7 @@
 #include "scintillaquick_platqt.h"
 #include <scintillaquick/ScintillaQuickItem.h>
 
+#include <QAction>
 #include <QDrag>
 #include <QGuiApplication>
 #include <QImage>
@@ -26,6 +27,7 @@
 #include <QSGImageNode>
 #include <QStyleHints>
 #include <QTimer>
+#include <QTimerEvent>
 
 #include <array>
 #include <cmath>
@@ -325,13 +327,13 @@ private:
 
 }
 
-ScintillaQuickCore::ScintillaQuickCore(QQuickItem *parent)
-: QObject(parent), scrollArea(parent), vMax(0),  hMax(0), vPage(0), hPage(0),
+ScintillaQuickCore::ScintillaQuickCore(::ScintillaQuickItem *parent)
+: QObject(parent), m_owner(parent), vMax(0),  hMax(0), vPage(0), hPage(0),
  haveMouseCapture(false), dragWasDropped(false),
  rectangularSelectionModifier(SCMOD_ALT),
  currentPainter(nullptr)
 {
-	wMain = scrollArea; // == parent
+	wMain = static_cast<QQuickItem *>(m_owner); // Scintilla wMain stores the platform window handle.
 
 	imeInteraction = IMEInteraction::Inline;
 
@@ -739,7 +741,7 @@ Capture_frame ScintillaQuickCore::capture_current_frame(
 
     Capture_frame frame;
 
-    if (!scrollArea) {
+    if (!m_owner) {
         return frame;
     }
 
@@ -1261,7 +1263,7 @@ void ScintillaQuickCore::StartDrag()
 			AddRectangularToMime(mimeData, sText);
 		}
 		// This QDrag is not freed as that causes a crash on Linux
-		QDrag *dragon = new QDrag(scrollArea);
+		QDrag *dragon = new QDrag(m_owner);
 		dragon->setMimeData(mimeData);
 
 		Qt::DropAction dropAction = dragon->exec(static_cast<Qt::DropActions>(Qt::CopyAction|Qt::MoveAction));
@@ -1328,7 +1330,7 @@ void ScintillaQuickCore::CreateCallTipWindow(PRectangle rc)
 {
 
 	if (!ct.wCallTip.Created()) {
-		QQuickItem *parentItem = scrollArea->window() ? scrollArea->window()->contentItem() : scrollArea;
+		QQuickItem *parentItem = m_owner->window() ? m_owner->window()->contentItem() : static_cast<QQuickItem *>(m_owner);
 		QQuickItem *pCallTip = new CallTipItem(&ct, parentItem);
 		ct.wCallTip = pCallTip;
 		pCallTip->setPosition(QPointF(rc.left, rc.top));
@@ -1362,8 +1364,8 @@ sptr_t ScintillaQuickCore::WndProc(Message iMessage, uptr_t wParam, sptr_t lPara
 			break;
 
 		case Message::GrabFocus:
-			scrollArea->setFocus(true);
-			scrollArea->forceActiveFocus(Qt::OtherFocusReason);
+			m_owner->setFocus(true);
+			m_owner->forceActiveFocus(Qt::OtherFocusReason);
 			break;
 
 		case Message::GetDirectFunction:
@@ -1446,7 +1448,7 @@ void ScintillaQuickCore::PartialPaintQml(const PRectangle & rect, QPainter *pain
 		surface->Release();
 
 		// Queue a full repaint.
-		scrollArea->update();
+		m_owner->update();
 	}
 
     paintState = PaintState::notPainting;
@@ -1496,13 +1498,13 @@ void ScintillaQuickCore::timerEvent(QTimerEvent *event)
             const Sci::Line previous_top_line = topLine;
             const int previous_x_offset = xOffset;
 			TickFor(static_cast<TickReason>(tr));
-            if (auto *item = qobject_cast<ScintillaQuickItem *>(scrollArea)) {
+            if (m_owner) {
                 const bool vertical_scroll_changed = topLine != previous_top_line;
                 const bool horizontal_scroll_changed = xOffset != previous_x_offset;
                 if (vertical_scroll_changed || horizontal_scroll_changed) {
-                    item->request_scene_graph_update(true, false, vertical_scroll_changed);
+                    m_owner->request_scene_graph_update(true, false, vertical_scroll_changed);
                 } else {
-                    item->request_scene_graph_update();
+                    m_owner->request_scene_graph_update();
                 }
             }
 		}

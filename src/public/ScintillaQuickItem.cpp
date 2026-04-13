@@ -6,7 +6,9 @@
 // Author: Jason Haslam
 //
 // Additions Copyright (c) 2011 Archaeopteryx Software, Inc. d/b/a Wingware
-// @file ScintillaQuickItem.cpp - Qt widget that wraps ScintillaQuickCore and provides events and scrolling
+// @file ScintillaQuickItem.cpp - Qt Quick item (QQuickItem) that wraps
+// ScintillaQuickCore and drives events, input method handling and
+// scene-graph rendering. This is NOT a QWidget.
 //
 // Additions Copyright (c) 2020 Michael Neuroth
 // Scintilla platform layer for Qt QML/Quick
@@ -14,9 +16,16 @@
 #include <scintillaquick/ScintillaQuickItem.h>
 #include "../core/scintillaquick_hierarchical_profiler.h"
 #include "ScintillaQuickCore.h"
+#include "scintillaquick_dispatch_table.h"
 #include "scintillaquick_platqt.h"
 #include "scintillaquick_scene_graph_renderer.h"
 
+// Internal Scintilla headers that used to be pulled in transitively via the
+// public ScintillaQuickItem.h. They are required here for Platform::,
+// Scintilla::Internal::Point, and PRectangle references in this TU.
+#include "Debugging.h"
+#include "Geometry.h"
+#include "Platform.h"
 #include "Position.h"
 
 #include <QClipboard>
@@ -172,118 +181,12 @@ namespace {
 constexpr int k_margin_count = SC_MAX_MARGIN + 1;
 constexpr int k_vertical_scroll_reuse_buffer_min_lines = 16;
 
-struct scene_graph_update_request_t
-{
-    bool needed = false;
-    bool static_content_dirty = false;
-    bool needs_style_sync = false;
-    bool scrolling = false;
-};
-
-scene_graph_update_request_t scene_graph_update_request(unsigned int iMessage)
-{
-    switch (iMessage) {
-        case SCI_SETXOFFSET:
-            return {true, true, false, false};
-
-        case SCI_SETDOCPOINTER:
-            return {true, true, true, false};
-
-        case SCI_SETFIRSTVISIBLELINE:
-            return {true, true, true, true};
-
-        case SCI_SETSEL:
-        case SCI_SETEMPTYSELECTION:
-        case SCI_GOTOPOS:
-        case SCI_SETCURRENTPOS:
-        case SCI_SETANCHOR:
-            return {true, false, false, false};
-
-        case SCI_SETSELFORE:
-        case SCI_SETSELBACK:
-        case SCI_SETCARETFORE:
-        case SCI_SETCARETWIDTH:
-        case SCI_SETCARETLINEVISIBLE:
-        case SCI_SETCARETLINEBACK:
-            return {true, false, false, false};
-
-        case SCI_SETTEXT:
-        case SCI_CLEARALL:
-        case SCI_INSERTTEXT:
-        case SCI_APPENDTEXT:
-        case SCI_REPLACESEL:
-        case SCI_DELETERANGE:
-        case SCI_STYLECLEARALL:
-        case SCI_STYLESETFORE:
-        case SCI_STYLESETBACK:
-        case SCI_STYLESETFONT:
-        case SCI_STYLESETSIZE:
-        case SCI_STYLESETSIZEFRACTIONAL:
-        case SCI_STYLESETBOLD:
-        case SCI_STYLESETWEIGHT:
-        case SCI_STYLESETITALIC:
-        case SCI_STYLESETUNDERLINE:
-        case SCI_STYLESETVISIBLE:
-        case SCI_STYLESETEOLFILLED:
-        case SCI_STYLESETCHARACTERSET:
-        case SCI_SETTABWIDTH:
-        case SCI_SETUSETABS:
-        case SCI_SETWRAPMODE:
-        case SCI_SETBIDIRECTIONAL:
-        case SCI_SETSCROLLWIDTH:
-        case SCI_SETMARGINWIDTHN:
-        case SCI_SETMARGINTYPEN:
-        case SCI_SETMARGINMASKN:
-        case SCI_SETMARGINSENSITIVEN:
-        case SCI_SETMARGINLEFT:
-        case SCI_SETMARGINRIGHT:
-        case SCI_MARKERDEFINE:
-        case SCI_MARKERSETFORE:
-        case SCI_MARKERSETBACK:
-        case SCI_MARKERSETBACKSELECTED:
-        case SCI_MARKERSETFORETRANSLUCENT:
-        case SCI_MARKERSETBACKTRANSLUCENT:
-        case SCI_MARKERSETBACKSELECTEDTRANSLUCENT:
-        case SCI_MARKERENABLEHIGHLIGHT:
-        case SCI_MARKERADD:
-        case SCI_MARKERADDSET:
-        case SCI_MARKERDELETE:
-        case SCI_MARKERDELETEALL:
-        case SCI_MARKERDELETEHANDLE:
-        case SCI_MARKERDEFINEPIXMAP:
-        case SCI_MARKERDEFINERGBAIMAGE:
-        case SCI_SETREADONLY:
-            return {true, true, true, false};
-        default:
-            return {};
-    }
-}
-
-bool tracked_scroll_width_should_reset(unsigned int iMessage)
-{
-    switch (iMessage) {
-        case SCI_SETTEXT:
-        case SCI_CLEARALL:
-        case SCI_STYLECLEARALL:
-        case SCI_STYLESETFONT:
-        case SCI_STYLESETSIZE:
-        case SCI_STYLESETSIZEFRACTIONAL:
-        case SCI_STYLESETBOLD:
-        case SCI_STYLESETWEIGHT:
-        case SCI_STYLESETITALIC:
-        case SCI_STYLESETCHARACTERSET:
-        case SCI_SETTABWIDTH:
-        case SCI_SETUSETABS:
-        case SCI_SETWRAPMODE:
-        case SCI_SETMARGINWIDTHN:
-        case SCI_SETMARGINLEFT:
-        case SCI_SETMARGINRIGHT:
-        case SCI_SETDOCPOINTER:
-            return true;
-        default:
-            return false;
-    }
-}
+// `scene_graph_update_request`, `scene_graph_update_request_t` and
+// `tracked_scroll_width_should_reset` now live in
+// src/core/scintillaquick_dispatch_table.h (included above) so that they
+// can be covered by dedicated unit tests without spinning up a Qt Quick
+// window. They are reachable here via the file-scope
+// `using namespace Scintilla::Internal;` above.
 
 void translate_rect(QRectF &rect, qreal dy)
 {
@@ -640,20 +543,38 @@ sptr_t ScintillaQuickItem::send(
 	uptr_t wParam,
 	sptr_t lParam) const
 {
+	// NOTE: `send()` is declared `const` because Qt's Q_PROPERTY READ getters
+	// in this class funnel through it for SCI_GET* queries and READ functions
+	// must be const. A subset of messages (SCI_SET*, mutators) do observably
+	// change editor state and will also schedule scene-graph updates here, so
+	// this method is not logically const for those messages. We cast `this`
+	// once, in a single, well-marked place.
+	ScintillaQuickItem *self = const_cast<ScintillaQuickItem *>(this);
+
 	const sptr_t result = sqt->WndProc(static_cast<Message>(iMessage), wParam, lParam);
-    if (tracked_scroll_width_should_reset(iMessage)) {
-        const_cast<ScintillaQuickItem *>(this)->reset_tracked_scroll_width();
-    }
+	if (tracked_scroll_width_should_reset(iMessage)) {
+		self->reset_tracked_scroll_width();
+	}
 	const scene_graph_update_request_t update_request = scene_graph_update_request(iMessage);
-	if (update_request.needed) {
-		const_cast<ScintillaQuickItem *>(this)->syncQuickViewProperties();
+	// Re-entry guard (defence-in-depth): `syncQuickViewProperties()`
+	// itself issues SCI_* queries through `send()`. If any of those
+	// queries is not in the read-only allow-list, the dispatch's
+	// "unknown -> full resync" default would call
+	// `syncQuickViewProperties()` again, recursing until the stack
+	// overflows. The primary defence is the allow-list
+	// (`scene_graph_message_is_known_read_only()` in
+	// scintillaquick_dispatch_table.h); this guard ensures that a
+	// future missed entry degrades into "no nested resync" rather than
+	// a crash.
+	if (update_request.needed && !m_in_sync_quick_view_properties) {
+		self->syncQuickViewProperties();
 		if (update_request.static_content_dirty && m_render_data) {
 			m_render_data->content_modified_since_last_capture = true;
 		}
-		const_cast<ScintillaQuickItem *>(this)->request_scene_graph_update(
-            update_request.static_content_dirty,
-            update_request.needs_style_sync,
-            update_request.scrolling);
+		self->request_scene_graph_update(
+			update_request.static_content_dirty,
+			update_request.needs_style_sync,
+			update_request.scrolling);
 	}
 	return result;
 }
@@ -2416,6 +2337,22 @@ void ScintillaQuickItem::syncQuickViewProperties()
     if (!sqt) {
         return;
     }
+
+    // Re-entry guard: the SCI_* queries issued below go back through
+    // `send()`, which in turn consults the scene-graph update dispatch.
+    // If any of those queries is not in the read-only allow-list, the
+    // dispatch's conservative default would call back into this
+    // function, causing unbounded recursion and a stack overflow.
+    // Setting the flag here makes the `send()` re-entry guard short-
+    // circuit the nested dispatch.
+    if (m_in_sync_quick_view_properties) {
+        return;
+    }
+    m_in_sync_quick_view_properties = true;
+    struct Scope_guard {
+        bool &flag;
+        ~Scope_guard() { flag = false; }
+    } scope_guard{m_in_sync_quick_view_properties};
 
     const int charHeight = getCharHeight();
     const int charWidth = getCharWidth();

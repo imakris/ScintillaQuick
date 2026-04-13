@@ -1,56 +1,172 @@
 # ScintillaQuick
 
-`ScintillaQuick` is intended to be a permissively licensed Qt Quick integration of
-the Scintilla editing engine.
+`ScintillaQuick` is a Qt Quick-native integration of the
+[Scintilla](https://www.scintilla.org/) editing engine.
 
-The aim is to provide a real Qt Quick-native editor path instead of embedding a
-hidden `QWidget` and showing captured frames of it. That means:
+It is intended for applications that want Scintilla behavior inside a real
+`QQuickItem` instead of embedding a hidden `QWidget` and forwarding pixels and
+input through a bridge.
 
-- Scintilla core stays intact.
-- Qt Quick owns the visible item, input routing, focus, IME, and scrolling.
-- The integration should be usable from C++ first, with optional QML registration
-  layered on top.
+## What It Provides
+
+- A `ScintillaQuickItem` that derives from `QQuickItem`
+- Scintilla's editing model and message API on top of a Qt Quick surface
+- Qt Quick-native focus, input, IME, and scene-graph rendering
+- CMake package export for `find_package(ScintillaQuick)`
+- A minimal example application, benchmark target, and validation tests
 
 ## Status
 
-The repository now contains a first working implementation:
+`ScintillaQuick` is usable today, but it is still an early-stage library.
 
-- a standalone `ScintillaQuick` static library
-- a minimal Qt Quick example application
-- an embedded benchmark executable
-- a vendored Scintilla source snapshot
-- a Qt 6-native build surface without `Qt6::Core5Compat`
+Current repository state:
 
-The main design note lives at
-[`docs/scintillaquick_design.md`](docs/scintillaquick_design.md), and the code is
-currently using a pragmatic first working path based on Scintilla's Qt Quick
-platform layer while the architecture is tightened further.
+- Version `0.1.0`
+- Qt `6.5+`
+- Static library build
+- C++ integration first
+- Optional QML type registration helper is available
 
-The current text-encoding policy is deliberately UTF-8-first.
+The project is actively focused on rendering fidelity, behavior parity with
+Scintilla, and performance.
 
-## Intended Scope
+## Requirements
 
-- Qt Quick-native Scintilla surface
-- Full text input and cursor handling
-- IME support
-- Scroll integration suitable for Qt Quick applications
-- Clean standalone library packaging
+- CMake `3.24+`
+- A C++20 compiler
+- Qt `6.5+` with:
+  - `Core`
+  - `Gui`
+  - `Qml`
+  - `Quick`
 
-## Out of Scope
+Target platforms:
 
-- Hidden-widget snapshot bridges
-- Process-hosted editor transport
-- QML-only design constraints
+- Windows
+- Linux
+- macOS
+
+## Build
+
+```bash
+cmake -S . -B build
+cmake --build build
+```
+
+This builds:
+
+- `ScintillaQuick` static library
+- `scintillaquick_minimal_editor`
+- `scintillaquick_embedded_benchmark`
+- test executables when `BUILD_TESTING=ON`
+
+To install the package:
+
+```bash
+cmake --install build --prefix <install-prefix>
+```
+
+Installed consumers can then use `find_package(ScintillaQuick CONFIG REQUIRED)`.
+
+## Use From CMake
+
+```cmake
+find_package(ScintillaQuick CONFIG REQUIRED)
+
+target_link_libraries(my_app PRIVATE ScintillaQuick::ScintillaQuick)
+```
+
+Public headers:
+
+- [`include/scintillaquick/ScintillaQuickItem.h`](include/scintillaquick/ScintillaQuickItem.h)
+- [`include/scintilla_quick/scintilla_quick.h`](include/scintilla_quick/scintilla_quick.h)
+
+Installed packages expose Scintilla's public headers alongside the library.
+Scintilla internal implementation headers are intentionally not installed.
+
+## Minimal C++ Usage
+
+```cpp
+#include <QGuiApplication>
+#include <QQuickWindow>
+#include <scintillaquick/ScintillaQuickItem.h>
+
+#include "Scintilla.h"
+
+int main(int argc, char **argv) {
+    QGuiApplication app(argc, argv);
+
+    QQuickWindow window;
+    window.resize(1100, 720);
+    window.setColor(Qt::white);
+
+    ScintillaQuickItem editor;
+    editor.setParentItem(window.contentItem());
+    editor.setWidth(window.width());
+    editor.setHeight(window.height());
+    editor.setProperty("text", "hello from ScintillaQuick\n");
+    editor.send(SCI_STYLECLEARALL);
+
+    window.show();
+    editor.forceActiveFocus();
+    return app.exec();
+}
+```
+
+For a runnable example, see
+[`examples/minimal_editor/main.cpp`](examples/minimal_editor/main.cpp).
+
+## QML Registration
+
+The library exposes `RegisterScintillaType()` in
+[`ScintillaQuickItem.h`](include/scintillaquick/ScintillaQuickItem.h), which
+registers:
+
+- module: `ScintillaQuick`
+- version: `1.0`
+- type: `ScintillaQuickItem`
+
+## Testing
+
+CTest currently registers:
+
+- `scintillaquick_smoke_test`
+- `scintillaquick_embedded_benchmark`
+- `scintillaquick_frame_validation_test`
+- `scintillaquick_visual_regression_test`
+
+Run them with:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+Notes:
+
+- Visual-regression coverage uses Qt's software scene graph for deterministic
+  output.
+- On Windows, the visual tests use the normal `windows` Qt platform plugin, so
+  they require a desktop session rather than a truly headless environment.
 
 ## Repository Layout
 
 - [`include/`](include): public headers
 - [`src/`](src): library implementation
-- [`docs/`](docs): design notes and architecture documents
-- [`examples/`](examples): runnable example applications
-- [`benchmarks/`](benchmarks): embedded performance tooling
-- [`third_party/`](third_party): vendored upstream code and licenses
+- [`examples/`](examples): sample applications
+- [`benchmarks/`](benchmarks): benchmark application
+- [`tests/`](tests): validation and regression tests
+- [`docs/`](docs): public project documentation
+- [`third_party/`](third_party): vendored dependencies
+
+## Documentation
+
+- [Getting Started](docs/getting_started.md)
+- [Architecture](docs/architecture.md)
 
 ## License
 
-`ScintillaQuick` uses the BSD 2-Clause license. See [`LICENSE`](LICENSE).
+Project code is released under the BSD 2-Clause license. See
+[`LICENSE`](LICENSE).
+
+The repository also vendors Scintilla under its own license. See
+[`third_party/scintilla/LICENSE`](third_party/scintilla/LICENSE).

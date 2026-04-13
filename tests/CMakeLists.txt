@@ -79,6 +79,38 @@ scintillaquick_register_validation_test(
     scintillaquick_smoke_test
     "")
 
+# --- Dispatch table unit tests -------------------------------------------
+#
+# Pure-function tests against the scene-graph update dispatch table at
+# src/core/scintillaquick_dispatch_table.h. No Qt event loop required.
+# This is the first piece of the "move correctness-critical logic into
+# unit-testable helpers" direction called out in the review notes.
+
+add_executable(
+    scintillaquick_dispatch_table_test
+    dispatch_table/main.cpp)
+
+target_include_directories(
+    scintillaquick_dispatch_table_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/scintilla/include)
+
+# Deliberately link only Qt6::Core here: the dispatch table unit tests do
+# NOT create QQuickWindow or touch the scene graph, so Gui/Quick are not
+# needed at link time. If future tests in this target grow into Qt Quick
+# territory, add Qt6::Gui / Qt6::Quick here and re-register with
+# scintillaquick_register_validation_test (which sets QT_QPA_PLATFORM).
+target_link_libraries(
+    scintillaquick_dispatch_table_test
+    PRIVATE
+        ScintillaQuick::ScintillaQuick
+        Qt6::Core)
+
+add_test(
+    NAME scintillaquick_dispatch_table_test
+    COMMAND scintillaquick_dispatch_table_test)
+
 # --- Review capture utility ---
 
 add_executable(
