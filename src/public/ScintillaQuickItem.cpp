@@ -556,16 +556,21 @@ sptr_t ScintillaQuickItem::send(
 		self->reset_tracked_scroll_width();
 	}
 	const scene_graph_update_request_t update_request = scene_graph_update_request(iMessage);
-	// Re-entry guard (defence-in-depth): `syncQuickViewProperties()`
-	// itself issues SCI_* queries through `send()`. If any of those
-	// queries is not in the read-only allow-list, the dispatch's
-	// "unknown -> full resync" default would call
-	// `syncQuickViewProperties()` again, recursing until the stack
-	// overflows. The primary defence is the allow-list
-	// (`scene_graph_message_is_known_read_only()` in
-	// scintillaquick_dispatch_table.h); this guard ensures that a
-	// future missed entry degrades into "no nested resync" rather than
-	// a crash.
+	// Re-entry guard (defence-in-depth). The dispatch in
+	// scintillaquick_dispatch_table.h is a pre-scheduling fast path
+	// for messages we statically know are mutators; unknowns fall
+	// through to `{}` (no dispatch scheduling) and rely on
+	// Scintilla's `NotifyParent()` callback to drive the scene-graph
+	// update. That callback path does NOT re-enter `send()`, so the
+	// common case cannot recurse. BUT if some future edit
+	// accidentally marks one of the messages that
+	// `syncQuickViewProperties()` itself sends (SCI_TEXTHEIGHT,
+	// SCI_LINESONSCREEN, ...) as a mutator in the dispatch table,
+	// the guard degrades that into "one missed nested schedule"
+	// instead of unbounded recursion -> stack overflow. See also the
+	// `m_in_sync_quick_view_properties` comment in the header and
+	// the unit test
+	// `test_sync_quick_view_properties_path_is_recursion_safe`.
 	if (update_request.needed && !m_in_sync_quick_view_properties) {
 		self->syncQuickViewProperties();
 		if (update_request.static_content_dirty && m_render_data) {
@@ -2338,13 +2343,20 @@ void ScintillaQuickItem::syncQuickViewProperties()
         return;
     }
 
-    // Re-entry guard: the SCI_* queries issued below go back through
-    // `send()`, which in turn consults the scene-graph update dispatch.
-    // If any of those queries is not in the read-only allow-list, the
-    // dispatch's conservative default would call back into this
-    // function, causing unbounded recursion and a stack overflow.
-    // Setting the flag here makes the `send()` re-entry guard short-
-    // circuit the nested dispatch.
+    // Re-entry guard. The SCI_* queries issued below (SCI_TEXTHEIGHT,
+    // SCI_LINESONSCREEN, SCI_GETLINECOUNT, ...) go back through
+    // `send()`, which in turn consults
+    // scintillaquick_dispatch_table.h. The dispatch's default for
+    // unknown messages is `{}` (no dispatch scheduling), so today
+    // none of these nested calls triggers a nested
+    // `syncQuickViewProperties()`. This guard is defence-in-depth: if
+    // a future edit accidentally tags one of the sync-path messages
+    // as a mutator in the dispatch table, the guard downgrades the
+    // resulting re-entry from "crash" to "one nested schedule is
+    // skipped". The regression test
+    // `test_sync_quick_view_properties_path_is_recursion_safe` in
+    // tests/dispatch_table/main.cpp enforces the dispatch-table
+    // invariant directly.
     if (m_in_sync_quick_view_properties) {
         return;
     }

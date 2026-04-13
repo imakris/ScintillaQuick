@@ -322,16 +322,23 @@ private:
     QTimer m_caret_blink_timer;
     bool m_caret_blink_visible = true;
     // Re-entry guard for `send()`'s dispatch -> `syncQuickViewProperties()`
-    // path. `syncQuickViewProperties()` itself issues SCI_* queries
-    // through `send()` to read the geometry cache (SCI_TEXTHEIGHT /
-    // SCI_LINESONSCREEN / ...). If a query message is not in the
-    // `scene_graph_message_is_known_read_only()` allow-list, the
-    // dispatch's conservative "unknown -> full resync" default would
-    // call `syncQuickViewProperties()` again, causing unbounded
-    // recursion and a stack overflow. The allow-list in the dispatch
-    // table is the primary defence; this flag is a defence-in-depth so
-    // that a future missed entry degrades into "no resync for that one
-    // nested call" instead of a crash.
+    // path. `syncQuickViewProperties()` issues SCI_* queries through
+    // `send()` to read the geometry cache (SCI_TEXTHEIGHT /
+    // SCI_LINESONSCREEN / ...). If any of those messages ever takes
+    // the "mutator" branch in `scene_graph_update_request()` (because
+    // someone added it to the wrong allow-list, or because a future
+    // Scintilla upgrade overloads one of those IDs as a mutator), the
+    // dispatch would call `syncQuickViewProperties()` again and
+    // recurse until the stack overflows. The primary defence is the
+    // notification-path default in scintillaquick_dispatch_table.h
+    // (unknown messages return `{}`, so nothing recurses). This
+    // boolean is defence-in-depth: if some future edit accidentally
+    // marks one of the sync-path messages as a mutator, the worst
+    // case is a single missed nested schedule instead of a crash.
+    // The regression test
+    // `test_sync_quick_view_properties_path_is_recursion_safe` in
+    // tests/dispatch_table/main.cpp enforces the invariant at unit
+    // test time.
     //
     // Declared mutable because `send()` is const (see the long comment
     // at the top of `send()` for why).

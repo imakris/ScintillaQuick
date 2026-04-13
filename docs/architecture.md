@@ -114,15 +114,67 @@ This avoids the old captured-widget pattern:
 [`src/core/scintillaquick_dispatch_table.h`](../src/core/scintillaquick_dispatch_table.h)
 to classify Scintilla messages for rendering purposes.
 
-The dispatch has three categories:
+The dispatch is a **fast-path pre-scheduler**, not a correctness mechanism. For
+messages we statically know are mutators (the allow-list), `send()` uses it to
+schedule a scene-graph update synchronously, without waiting for Scintilla's
+own `NotifyParent()` round-trip.
 
-- known mutating messages: request the specific scene-graph update needed
-- known read-only messages used internally by the library: take a fast path and
-  do not trigger a resync
-- unknown messages: fall back to a conservative full resync
+The authoritative mutation → scene-graph link for every other message is
+Scintilla's own notification path:
 
-That conservative default favors visual correctness over missing an update when
-new Scintilla messages are introduced.
+```text
+Editor state change
+    -> ScintillaQuickCore::NotifyParent(scn)
+        -> emit notifyParent(scn)             (signal/slot hop)
+            -> ScintillaQuickItem::notifyParent(scn)
+                -> case Modified / StyleNeeded / UpdateUI:
+                     m_render_data->content_modified_since_last_capture = true;
+                     request_scene_graph_update(...)
+```
+
+That slot is wired up in the item constructor and fires for every Scintilla
+mutation regardless of which message triggered it. Messages **not** in the
+dispatch allow-list fall through to `return {}` (no dispatch scheduling) and
+rely on the notification round-trip. This is the correct outcome for two
+audiences at once:
+
+- **Unknown mutators** — correctness is preserved by the notification path.
+  One extra callback hop is paid; no scene-graph update is missed.
+- **Unknown read-only queries** — public-API callers issuing common queries
+  like `send(SCI_GETLENGTH)`, `send(SCI_GETSELECTIONS)`,
+  `send(SCI_GETMODEVENTMASK)` and similar pay nothing. The dispatch does not
+  mark content dirty, does not set `static_content_dirty`, does not schedule a
+  scene-graph update. Read queries stay cheap.
+
+Adding a new entry to the dispatch allow-list is a latency optimisation:
+"this message is a mutator we want to schedule immediately instead of waiting
+for the notification callback". If you forget to add one, correctness is
+still preserved; you just pay the callback hop.
+
+### Recursion Invariant
+
+`ScintillaQuickItem::syncQuickViewProperties()` itself issues several read
+queries through `send()`: `SCI_TEXTHEIGHT`, `SCI_TEXTWIDTH`, `SCI_LINESONSCREEN`,
+`SCI_GETLINECOUNT`, `SCI_GETSCROLLWIDTH`, `SCI_GETFIRSTVISIBLELINE`,
+`SCI_GETXOFFSET`. Today none of those are in the mutator allow-list, so each
+returns `{}` from the dispatch and the nested calls are fine. If a future edit
+accidentally marks one of them as a mutator, `send()` would call
+`syncQuickViewProperties()` again and recurse.
+
+Two layers of defence protect against this:
+
+1. **Runtime re-entry guard**:
+   `ScintillaQuickItem::m_in_sync_quick_view_properties` is set for the
+   duration of `syncQuickViewProperties()`, and `send()` skips the nested
+   schedule while it is set. This degrades a potential stack overflow into
+   "one missed nested schedule".
+
+2. **Build-time regression test**:
+   `test_sync_quick_view_properties_path_is_recursion_safe` in
+   [`tests/dispatch_table/main.cpp`](../tests/dispatch_table/main.cpp)
+   enumerates the sync-path messages and asserts that each one returns
+   `!needed` from the dispatch. A future accidental mutator tag surfaces as a
+   clear unit-test failure with the failing `SCI_` id.
 
 ## Input And IME
 

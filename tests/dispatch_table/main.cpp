@@ -1,19 +1,46 @@
 // Unit tests for the scene-graph update dispatch table
 // (src/core/scintillaquick_dispatch_table.h).
 //
-// These tests deliberately do NOT spin up a Qt Quick window; the dispatch
-// table is a pure function and we assert against it directly. The key
-// correctness property being protected here is:
+// These tests deliberately do NOT spin up a Qt Quick window; the
+// dispatch table is a pure function and we assert against it directly.
 //
-//     Unknown Scintilla messages MUST fall through to a conservative
-//     full resync (`needed=true`, `static_content_dirty=true`,
-//     `needs_style_sync=true`).
+// Role of the dispatch table
+// --------------------------
 //
-// Historically the `default:` branch returned `{}` (no update), meaning
-// any Scintilla message that happened not to be in the allow-list was
-// silently skipped for scene-graph resync. New mutating messages added
-// upstream by Scintilla would then leave the editor rendering stale
-// content until the next unrelated update.
+// The dispatch in scintillaquick_dispatch_table.h is a FAST-PATH
+// PRE-SCHEDULER. For messages we statically know are mutators, the
+// entries let `ScintillaQuickItem::send()` schedule a scene-graph
+// update synchronously, without waiting for Scintilla's own
+// `NotifyParent()` round-trip.
+//
+// The AUTHORITATIVE mutation-to-scene-graph link for every other
+// message is Scintilla's own notification path
+// (`ScintillaQuickCore::NotifyParent()` ->
+// `ScintillaQuickItem::notifyParent()` ->
+// `request_scene_graph_update(...)` for
+// Modified/StyleNeeded/UpdateUI). That path fires for any Scintilla
+// mutation regardless of how it was triggered, so messages NOT in the
+// explicit allow-list fall through to `return {}` (no dispatch
+// scheduling) and rely on the notification round-trip. That is the
+// correct outcome for both:
+//
+//   * unknown mutators (correctness preserved by notification path)
+//   * unknown read-only queries (no spurious repaint work, no
+//     content_modified_since_last_capture churn, no cost to callers
+//     who issue e.g. SCI_GETLENGTH / SCI_GETSELECTIONS /
+//     SCI_GETMODEVENTMASK from outside the library).
+//
+// The tests below protect three invariants:
+//
+//   1. Known mutators in the allow-list return `needed=true`.
+//   2. Unknown messages return `{}` (no dispatch scheduling), so the
+//      public `send()` API stays cheap for read-only queries.
+//   3. Messages issued from `syncQuickViewProperties()` and its
+//      helper callees DO NOT return `needed=true`. If they did, the
+//      nested `send()` call would re-enter `syncQuickViewProperties`
+//      and recurse until the stack overflows. (The `send()` re-entry
+//      guard catches this at runtime; this test catches it at build
+//      time.)
 
 #include "scintillaquick_dispatch_table.h"
 
@@ -36,7 +63,6 @@ int g_failures = 0;
 
 using Scintilla::Internal::scene_graph_update_request;
 using Scintilla::Internal::scene_graph_update_request_t;
-using Scintilla::Internal::scene_graph_message_is_known_read_only;
 using Scintilla::Internal::tracked_scroll_width_should_reset;
 
 void test_known_mutating_messages_request_update()
@@ -90,52 +116,49 @@ void test_specific_scroll_dispatch()
     SQ_EXPECT(!set_xoff.scrolling);
 }
 
-void test_known_read_only_messages_take_fast_path()
+void test_unknown_messages_take_no_op_fast_path()
 {
-    // Every message in the known read-only allow-list must return no
-    // update request at all (so that internal getters don't thrash the
-    // scene graph).
-    const unsigned int read_only[] = {
-        SCI_GETTEXT,
-        SCI_GETTEXTLENGTH,
-        SCI_GETTEXTRANGE,
-        SCI_GETSELTEXT,
-        SCI_GETCURRENTPOS,
-        SCI_GETANCHOR,
-        SCI_GETFIRSTVISIBLELINE,
-        SCI_GETLINECOUNT,
-        SCI_GETXOFFSET,
-        SCI_GETSCROLLWIDTH,
-        SCI_GETSTYLEAT,
-        SCI_GETCARETWIDTH,
-        SCI_GETCARETPERIOD,
-        SCI_GETZOOM,
-        SCI_GETREADONLY,
-        SCI_GETMARGINWIDTHN,
-        SCI_GETMARGINTYPEN,
-        SCI_GETMARGINMASKN,
-        SCI_GETMARGINBACKN,
-        // Geometry / layout queries added to fix the recursion crash.
-        SCI_TEXTHEIGHT,
-        SCI_TEXTWIDTH,
-        SCI_LINESONSCREEN,
-        SCI_LINEFROMPOSITION,
-        SCI_POSITIONFROMPOINT,
-        // Style queries added for the same reason (they are called
-        // from the per-style font / colour sync helper).
-        SCI_STYLEGETFORE,
-        SCI_STYLEGETBACK,
-        SCI_STYLEGETSIZE,
-        SCI_STYLEGETSIZEFRACTIONAL,
-        SCI_STYLEGETWEIGHT,
-        SCI_STYLEGETITALIC,
-        SCI_STYLEGETUNDERLINE,
+    // THE public-API correctness invariant the reviewer flagged on
+    // d7f1975: unknown messages must return `{}` so that
+    // `editor.send(SCI_GETLENGTH)` / `send(SCI_GETSELECTIONS)` /
+    // `send(SCI_GETMODEVENTMASK)` / etc. from application code do NOT
+    // spuriously mark content dirty and schedule repaint work.
+    //
+    // For unknown MUTATORS this is also fine: Scintilla's own
+    // NotifyParent() path catches the mutation and calls
+    // request_scene_graph_update() from
+    // ScintillaQuickItem::notifyParent(). See the header comment in
+    // src/core/scintillaquick_dispatch_table.h for the full story.
+    const unsigned int unknown_messages[] = {
+        // Real SCI_GET* messages issued by external callers that the
+        // library itself does not use internally. These are the exact
+        // classes of message the reviewer called out.
+        SCI_GETLENGTH,
+        SCI_GETSELECTIONS,
+        SCI_GETMODEVENTMASK,
+        // A handful of other SCI_GET* messages that the library does
+        // not currently whitelist anywhere.
+        SCI_GETEOLMODE,
+        SCI_GETMOUSEDOWNCAPTURES,
+        SCI_GETTARGETSTART,
+        SCI_GETTARGETEND,
+        // Synthetic out-of-range numbers as a sanity check.
+        0xFFFFu,
+        0xFFFEu,
     };
 
-    for (unsigned int msg : read_only) {
-        SQ_EXPECT(scene_graph_message_is_known_read_only(msg));
-
+    for (unsigned int msg : unknown_messages) {
         const scene_graph_update_request_t req = scene_graph_update_request(msg);
+        if (req.needed) {
+            std::fprintf(
+                stderr,
+                "FAIL: SCI_ message %u returned `needed=true` from the "
+                "dispatch. Unknown messages MUST return `{}` so public "
+                "`send()` API callers do not pay for spurious repaint "
+                "scheduling on read-only queries. See the header "
+                "comment in src/core/scintillaquick_dispatch_table.h.\n",
+                msg);
+        }
         SQ_EXPECT(!req.needed);
         SQ_EXPECT(!req.static_content_dirty);
         SQ_EXPECT(!req.needs_style_sync);
@@ -145,17 +168,18 @@ void test_known_read_only_messages_take_fast_path()
 
 // Regression: every SCI_* message that ScintillaQuickItem issues
 // internally via `send()` from inside `syncQuickViewProperties()` or a
-// getter called by it MUST take the fast path, otherwise `send()` will
-// re-enter `syncQuickViewProperties()` and recurse until the stack
-// overflows.
+// getter called by it MUST NOT return `needed=true` from the dispatch.
+// If it did, `send()` would call `syncQuickViewProperties()` again
+// (through the re-entry guard) and the nested call would skip its work,
+// which is strictly worse than the intended "notification path handles
+// it" design.
 //
-// This is not the same test as `test_known_read_only_messages_take_fast_path`
-// above: that one enumerates the entire allow-list. This one enumerates
-// the EXACT set of messages that the library itself currently sends from
-// the re-entry path, so that a future edit which adds a new internal
-// query and forgets to put it on the allow-list trips this test
-// immediately with a clear failure message instead of crashing one of
-// the integration tests.
+// At the crash level, this used to be enforced by a big read-only
+// allow-list; after the course correction, the invariant is enforced
+// by the default-no-op branch, but we keep this test so that a future
+// edit which accidentally adds e.g. SCI_TEXTHEIGHT to the mutator list
+// surfaces immediately with a clear failure instead of crashing at
+// runtime under the re-entry guard.
 //
 // If you add a new `send(SCI_FOO)` call inside syncQuickViewProperties()
 // or anything it calls, add SCI_FOO here too.
@@ -172,66 +196,21 @@ void test_sync_quick_view_properties_path_is_recursion_safe()
     };
 
     for (unsigned int msg : sync_path_messages) {
-        SQ_EXPECT(scene_graph_message_is_known_read_only(msg));
         const scene_graph_update_request_t req = scene_graph_update_request(msg);
         if (req.needed) {
-            // Log the failing message so that a future regression
-            // surfaces with a concrete SCI_ id instead of an opaque
-            // assertion failure.
             std::fprintf(
                 stderr,
-                "FAIL: SCI_ message %u requests a scene-graph resync "
-                "from the sync-quick-view-properties call path and "
-                "will recurse via send(). Add it to "
-                "`scene_graph_message_is_known_read_only()` in "
-                "src/core/scintillaquick_dispatch_table.h.\n",
+                "FAIL: SCI_ message %u returned `needed=true` from the "
+                "dispatch, but it is issued from inside "
+                "syncQuickViewProperties() via send(). That will "
+                "re-enter syncQuickViewProperties() on the nested "
+                "send() call. Either drop it from the mutator "
+                "allow-list in scene_graph_update_request(), or stop "
+                "calling send() for it from inside "
+                "syncQuickViewProperties() and its helpers.\n",
                 msg);
         }
         SQ_EXPECT(!req.needed);
-    }
-}
-
-void test_unknown_messages_trigger_conservative_full_resync()
-{
-    // This is THE correctness property the new default is protecting.
-    //
-    // Use raw synthetic message numbers that are clearly outside
-    // Scintilla's SCI_START..SCI_LASTKEYMASK message range. If Scintilla
-    // upstream ever extends the message range to cover one of these
-    // numbers, update the test; but the property being tested
-    // (unknown -> full resync) still holds regardless.
-    const unsigned int unknown_messages[] = {
-        0xFFFFu,
-        0xFFFEu,
-        0xFFFDu,
-    };
-
-    for (unsigned int msg : unknown_messages) {
-        const scene_graph_update_request_t req = scene_graph_update_request(msg);
-        SQ_EXPECT(req.needed);
-        SQ_EXPECT(req.static_content_dirty);
-        SQ_EXPECT(req.needs_style_sync);
-        SQ_EXPECT(!req.scrolling);
-    }
-}
-
-void test_read_only_and_mutating_lists_are_disjoint()
-{
-    // Sanity check: a message cannot be both "known read-only" and an
-    // explicit mutator. If this ever fires, one of the two lists has
-    // been corrupted.
-    const unsigned int mutators[] = {
-        SCI_SETTEXT,
-        SCI_CLEARALL,
-        SCI_STYLECLEARALL,
-        SCI_SETWRAPMODE,
-        SCI_SETREADONLY,
-        SCI_SETFIRSTVISIBLELINE,
-        SCI_SETXOFFSET,
-    };
-
-    for (unsigned int msg : mutators) {
-        SQ_EXPECT(!scene_graph_message_is_known_read_only(msg));
     }
 }
 
@@ -250,6 +229,10 @@ void test_tracked_scroll_width_reset_table()
     SQ_EXPECT(!tracked_scroll_width_should_reset(SCI_GOTOPOS));
     SQ_EXPECT(!tracked_scroll_width_should_reset(SCI_SETSEL));
     SQ_EXPECT(!tracked_scroll_width_should_reset(SCI_INSERTTEXT));
+    // SCI_GETLENGTH / SCI_GETSELECTIONS (the public-API callers the
+    // reviewer flagged) must also not touch the scroll-width tracker.
+    SQ_EXPECT(!tracked_scroll_width_should_reset(SCI_GETLENGTH));
+    SQ_EXPECT(!tracked_scroll_width_should_reset(SCI_GETSELECTIONS));
 }
 
 } // namespace
@@ -258,10 +241,8 @@ int main()
 {
     test_known_mutating_messages_request_update();
     test_specific_scroll_dispatch();
-    test_known_read_only_messages_take_fast_path();
+    test_unknown_messages_take_no_op_fast_path();
     test_sync_quick_view_properties_path_is_recursion_safe();
-    test_unknown_messages_trigger_conservative_full_resync();
-    test_read_only_and_mutating_lists_are_disjoint();
     test_tracked_scroll_width_reset_table();
 
     if (g_failures > 0) {

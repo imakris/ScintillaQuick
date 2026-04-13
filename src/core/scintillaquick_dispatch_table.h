@@ -1,17 +1,60 @@
 // ScintillaQuick dispatch table for scene-graph update requests.
 //
-// Extracted from ScintillaQuickItem.cpp so that the table can be unit
-// tested directly without spinning up a Qt Quick window.
+// Extracted from ScintillaQuickItem.cpp so the table can be unit tested
+// without spinning up a Qt Quick window.
 //
-// The key correctness property the tests guard is:
+// ROLE OF THIS FILE
+// -----------------
 //
-//   For every Scintilla message that is not explicitly known to be a
-//   mutator and not explicitly known to be a pure read-only query, the
-//   dispatch function must fall back to a CONSERVATIVE FULL RESYNC.
+// This is a FAST-PATH PRE-SCHEDULER, not a correctness mechanism. For
+// messages we statically know are mutators, the entries below let
+// `send()` schedule a scene-graph update synchronously, without waiting
+// for Scintilla's own `NotifyParent()` round-trip.
 //
-// Historically the default branch returned "no update needed", which
-// meant any Scintilla message not in the allow-list silently skipped a
-// required scene-graph resync.
+// The AUTHORITATIVE mutation-to-scene-graph link for every other
+// message is Scintilla's own notification path:
+//
+//     ScintillaQuickCore::NotifyParent()           (src/core)
+//         -> emit notifyParent(scn)
+//             -> ScintillaQuickItem::notifyParent() (src/public)
+//                 -> case Notification::Modified / StyleNeeded / UpdateUI:
+//                      m_render_data->content_modified_since_last_capture = true;
+//                      request_scene_graph_update(...);
+//
+// That slot is already set up in the item constructor and runs for
+// every Scintilla mutation regardless of whether the message that
+// caused the mutation was in the allow-list below. Any message not
+// listed here therefore falls through to `return {}` (no dispatch
+// scheduling) and relies on the notification path.
+//
+// This is IMPORTANT for the public `send()` API: external callers may
+// issue common read-only queries that are NOT listed below
+// (SCI_GETLENGTH, SCI_GETSELECTIONS, SCI_GETMODEVENTMASK, ...). The
+// default MUST be a no-op so those queries don't spuriously mark
+// content dirty and force repaint work -- that was the regression
+// Codex flagged on d7f1975.
+//
+// Consequences for adding new messages
+// ------------------------------------
+//
+// * If a new message MUTATES state and is called frequently enough to
+//   matter for scheduling latency, add it to
+//   `scene_graph_update_request()` with the appropriate fields. If you
+//   forget, correctness is still preserved by the notification path;
+//   you just pay one extra callback hop.
+//
+// * If a new message is READ-ONLY, you do not need to do anything.
+//   The default `return {}` is the correct answer.
+//
+// * If an internal library helper issues a new `send(SCI_FOO)` from
+//   inside `syncQuickViewProperties()` or a function it calls, it
+//   MUST either be read-only (default path) or your newly-added
+//   mutator entry must NOT set `needed=true` for that message.
+//   Otherwise you will re-enter the dispatch and recurse; the
+//   re-entry guard in ScintillaQuickItem::send() catches this and
+//   the regression test
+//   `test_sync_quick_view_properties_path_is_recursion_safe` in
+//   tests/dispatch_table/main.cpp will fail with a clear message.
 
 #ifndef SCINTILLAQUICK_DISPATCH_TABLE_H
 #define SCINTILLAQUICK_DISPATCH_TABLE_H
@@ -27,82 +70,6 @@ struct scene_graph_update_request_t
     bool needs_style_sync = false;
     bool scrolling = false;
 };
-
-// Known read-only / pure-query Scintilla messages that the library itself
-// issues on the hot path. Messages listed here take the fast path and
-// skip scene-graph resync.
-//
-// CRITICAL invariant: every SCI_* message that ScintillaQuickItem or its
-// helper getters call INTERNALLY via `send()` must appear in this list
-// if it is a read-only query. If it does not, the conservative default
-// in `scene_graph_update_request()` will trigger a full resync, which
-// in turn calls `syncQuickViewProperties()` which itself issues SCI_*
-// queries through `send()` -- recursing until the stack overflows.
-//
-// The "internal callers" we must cover today are:
-//
-//   * ScintillaQuickItem::syncQuickViewProperties()
-//   * ScintillaQuickItem::getCharHeight() / getCharWidth()
-//   * ScintillaQuickItem::getVisibleLines() / getVisibleColumns()
-//   * ScintillaQuickItem::getFirstVisibleColumn() / getFirstVisibleLine()
-//   * ScintillaQuickItem::getTotalLines() / getTotalColumns()
-//   * ScintillaQuickItem::getText() / getReadonly()
-//   * style_attributes_for() (helper in ScintillaQuickItem.cpp)
-//   * ProcessScintillaContextMenu() and IME query helpers
-//
-// External callers issuing *other* SCI_GET* messages will pay the cost
-// of a conservative full-sync (which is safe because `send()` guards
-// against recursion below the dispatch, see `syncQuickViewProperties`'s
-// re-entry guard).
-inline bool scene_graph_message_is_known_read_only(unsigned int iMessage)
-{
-    switch (iMessage) {
-        // Core document queries.
-        case SCI_GETTEXT:
-        case SCI_GETTEXTLENGTH:
-        case SCI_GETTEXTRANGE:
-        case SCI_GETSELTEXT:
-        case SCI_GETCURRENTPOS:
-        case SCI_GETANCHOR:
-        case SCI_GETFIRSTVISIBLELINE:
-        case SCI_GETLINECOUNT:
-        case SCI_GETXOFFSET:
-        case SCI_GETSCROLLWIDTH:
-        case SCI_GETSTYLEAT:
-        case SCI_GETCARETWIDTH:
-        case SCI_GETCARETPERIOD:
-        case SCI_GETZOOM:
-        case SCI_GETREADONLY:
-        case SCI_GETMARGINWIDTHN:
-        case SCI_GETMARGINTYPEN:
-        case SCI_GETMARGINMASKN:
-        case SCI_GETMARGINBACKN:
-        // Geometry / layout queries called from getCharHeight(),
-        // getCharWidth(), getVisibleLines() and the mouse-event / IME
-        // helpers. Omitting any of these produced a stack-overflow
-        // recursion when the conservative resync default was added,
-        // because `syncQuickViewProperties()` re-enters `send()` via
-        // these same calls.
-        case SCI_TEXTHEIGHT:
-        case SCI_TEXTWIDTH:
-        case SCI_LINESONSCREEN:
-        case SCI_LINEFROMPOSITION:
-        case SCI_POSITIONFROMPOINT:
-        // Style queries called from style_attributes_for() so that
-        // per-style font / colour sync during
-        // `syncQuickViewProperties()` does not recurse.
-        case SCI_STYLEGETFORE:
-        case SCI_STYLEGETBACK:
-        case SCI_STYLEGETSIZE:
-        case SCI_STYLEGETSIZEFRACTIONAL:
-        case SCI_STYLEGETWEIGHT:
-        case SCI_STYLEGETITALIC:
-        case SCI_STYLEGETUNDERLINE:
-            return true;
-        default:
-            return false;
-    }
-}
 
 inline scene_graph_update_request_t scene_graph_update_request(unsigned int iMessage)
 {
@@ -179,19 +146,20 @@ inline scene_graph_update_request_t scene_graph_update_request(unsigned int iMes
         case SCI_SETREADONLY:
             return {true, true, true, false};
         default:
-            break;
+            // Fall through to the notification-path default. Scintilla's
+            // NotifyParent() will call back with Notification::Modified /
+            // StyleNeeded / UpdateUI for any message that actually mutates
+            // state, and ScintillaQuickItem::notifyParent() will mark the
+            // render data dirty and schedule the scene-graph update from
+            // that callback.
+            //
+            // For read-only queries this is the correct outcome too: no
+            // dispatch work, no repaint scheduling, no spurious marking
+            // of content as dirty. This is what keeps
+            // `editor.send(SCI_GETLENGTH)` and similar public-API calls
+            // cheap.
+            return {};
     }
-
-    // Fast path for the read-only messages the library itself calls frequently.
-    if (scene_graph_message_is_known_read_only(iMessage)) {
-        return {};
-    }
-
-    // Unknown message: default to a conservative full resync. Repainting
-    // too often is a performance bug; repainting too rarely is a visual
-    // correctness bug, and new Scintilla messages that mutate state would
-    // otherwise be silently skipped here.
-    return {true, true, true, false};
 }
 
 inline bool tracked_scroll_width_should_reset(unsigned int iMessage)
