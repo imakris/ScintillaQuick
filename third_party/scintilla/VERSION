@@ -1,0 +1,40 @@
+ScintillaQuick vendored Scintilla snapshot
+==========================================
+
+This directory contains a vendored copy of the Scintilla editing
+component (https://www.scintilla.org/) imported for ScintillaQuick's
+build. Only the subset of files that ScintillaQuick actually compiles
+is committed here — Scintilla's lexers, documentation, test suite,
+and build scripts are intentionally not part of the snapshot.
+
+Upstream project: https://www.scintilla.org/
+Upstream VCS:     https://sourceforge.net/projects/scintilla/ (Mercurial)
+                  https://github.com/ScintillaOrg/lexilla (mirror; lexers)
+License:          See ./LICENSE
+
+Compatibility targets (library API used by ScintillaQuick):
+  - ScintillaBase / Editor / EditView / MarginView / EditModel
+  - Document / CellBuffer / ContractionState / PerLine / RunStyles
+  - PositionCache / Style / ViewStyle / Selection / KeyMap
+  - AutoComplete / CallTip / Indicator / LineMarker
+  - CaseConvert / CaseFolder / CharacterCategoryMap / CharacterType
+    / UniConversion / UniqueString / DBCS
+  - Geometry / Platform / RESearch / ChangeHistory / Decoration / XPM
+
+When updating this vendored snapshot:
+
+  1. Record the new upstream tag or commit here along with the date
+     of the import and the name of the person doing the update.
+  2. Re-run the full test suite (ctest) on all supported platforms
+     before committing the update.
+  3. If Scintilla adds new SCI_* messages in the import, run the
+     dispatch-table test (scintillaquick_dispatch_table_test) and
+     classify any new messages that show up in the sweep.
+  4. Update this file with the new version record.
+
+Version history
+---------------
+
+- TBD: initial import. The exact upstream tag/commit for the current
+  snapshot was not recorded by the original import. The next update
+  should record the diff anchor so future pins are reproducible.
