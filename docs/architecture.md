@@ -172,7 +172,6 @@ register `ScintillaQuickItem` as a QML type.
 Installed packages expose:
 
 - `include/scintillaquick/`
-- the compatibility include path `include/scintilla_quick/`
 - Scintilla's public headers from `third_party/scintilla/include/`
 
 Installed packages intentionally do not expose Scintilla internal implementation
