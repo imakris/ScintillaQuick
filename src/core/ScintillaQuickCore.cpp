@@ -840,8 +840,30 @@ Render_frame ScintillaQuickCore::current_render_frame(
 
 ScintillaQuickCore::~ScintillaQuickCore()
 {
+	// Belt-and-braces: prepare_for_owner_destruction() is the correct
+	// path and runs from ~ScintillaQuickItem() before the derived
+	// subobject dies. If, for some reason, that path was skipped (for
+	// instance, a direct user-managed ScintillaQuickCore deletion),
+	// still try to clean up here.
 	CancelTimers();
 	ChangeIdle(false);
+}
+
+void ScintillaQuickCore::prepare_for_owner_destruction()
+{
+	// Break the clipboard connection first so a pending SelectionChanged
+	// delivery cannot land between here and the final teardown.
+	if (QClipboard *clipboard = QGuiApplication::clipboard()) {
+		disconnect(clipboard, nullptr, this, nullptr);
+	}
+
+	CancelTimers();
+	ChangeIdle(false);
+
+	// After this point, timerEvent / onIdle / any queued slot that
+	// checks `m_owner` will short-circuit rather than dereference a
+	// sliced-down QQuickItem.
+	m_owner = nullptr;
 }
 
 void ScintillaQuickCore::execCommand(QAction *action)
@@ -1030,20 +1052,27 @@ void ScintillaQuickCore::CopyToModeClipboard(const SelectionText &selectedText, 
 {
 	QClipboard *clipboard = QGuiApplication::clipboard();
 	QString su = StringFromSelectedText(selectedText);
-	QMimeData *mimeData = new QMimeData();
+
+	// Owned by this function until the final hand-off to
+	// QClipboard::setMimeData (which takes ownership of the raw
+	// pointer). If any of the helper calls below throws — unlikely
+	// with pure Qt data types, but reachable through the
+	// `aboutToCopy` signal, which QML/C++ client code may connect to —
+	// the unique_ptr will free the mime data instead of leaking it.
+	std::unique_ptr<QMimeData> mimeData = std::make_unique<QMimeData>();
 	mimeData->setText(su);
 	if (selectedText.rectangular) {
-		AddRectangularToMime(mimeData, su);
+		AddRectangularToMime(mimeData.get(), su);
 	}
 
 	if (selectedText.lineCopy) {
-		AddLineCutCopyToMime(mimeData);
+		AddLineCutCopyToMime(mimeData.get());
 	}
 
 	// Allow client code to add additional data (e.g rich text).
-	emit aboutToCopy(mimeData);
+	emit aboutToCopy(mimeData.get());
 
-	clipboard->setMimeData(mimeData, clipboardMode_);
+	clipboard->setMimeData(mimeData.release(), clipboardMode_);
 }
 
 void ScintillaQuickCore::Copy()
@@ -1170,7 +1199,13 @@ void ScintillaQuickCore::FineTickerCancel(TickReason reason)
 
 void ScintillaQuickCore::onIdle()
 {
-	bool continueIdling = Idle();
+	// Guard against onIdle() being invoked after
+	// prepare_for_owner_destruction() has nulled m_owner but before
+	// the idle timer has actually stopped (queued signals).
+	if (!m_owner) {
+		return;
+	}
+	const bool continueIdling = Idle();
 	if (!continueIdling) {
 		SetIdle(false);
 	}
@@ -1182,19 +1217,35 @@ bool ScintillaQuickCore::ChangeIdle(bool on)
 		// Start idler, if it's not running.
 		if (!idler.state) {
 			idler.state = true;
-			QTimer *qIdle = new QTimer;
-			connect(qIdle, SIGNAL(timeout()), this, SLOT(onIdle()));
-			qIdle->start(0);
-			idler.idlerID = qIdle;
+			// QTimer is parented to `this` and tracked via unique_ptr
+			// so it is cleaned up on destruction even if
+			// ChangeIdle(false) is never called. The timer fires on
+			// the GUI thread; onIdle()'s return value may decide to
+			// stop the timer from inside its own timeout slot via
+			// SetIdle(false) -> ChangeIdle(false), which is why the
+			// stop path below uses deleteLater() rather than
+			// destroying the object directly.
+			QTimer *timer = new QTimer(this);
+			m_idle_timer.reset(timer);
+			connect(timer, &QTimer::timeout,
+				this, &ScintillaQuickCore::onIdle);
+			timer->start(0);
+			idler.idlerID = timer;
 		}
 	} else {
-		// Stop idler, if it's running
+		// Stop idler, if it's running.
 		if (idler.state) {
 			idler.state = false;
-			QTimer *qIdle = static_cast<QTimer *>(idler.idlerID);
-			qIdle->stop();
-			disconnect(qIdle, SIGNAL(timeout()), nullptr, nullptr);
-			delete qIdle;
+			if (m_idle_timer) {
+				QTimer *timer = m_idle_timer.release();
+				timer->stop();
+				// deleteLater() defers actual destruction to the
+				// next event-loop iteration so we do not destroy
+				// the QTimer from inside its own timeout signal
+				// handler (which is undefined behaviour for a
+				// direct-connection slot).
+				timer->deleteLater();
+			}
 			idler.idlerID = {};
 		}
 	}
@@ -1255,18 +1306,35 @@ void ScintillaQuickCore::StartDrag()
 {
 	inDragDrop = DragDrop::dragging;
 	dropWentOutside = true;
-	if (drag.Length()) {
-		QMimeData *mimeData = new QMimeData;
-		QString sText = StringFromSelectedText(drag);
+	if (drag.Length() && m_owner) {
+		// Build the mime data under unique_ptr ownership so an
+		// exception thrown from StringFromSelectedText/setText or
+		// from the rectangular-marker helper does not leak it.
+		std::unique_ptr<QMimeData> mimeData = std::make_unique<QMimeData>();
+		const QString sText = StringFromSelectedText(drag);
 		mimeData->setText(sText);
 		if (drag.rectangular) {
-			AddRectangularToMime(mimeData, sText);
+			AddRectangularToMime(mimeData.get(), sText);
 		}
-		// This QDrag is not freed as that causes a crash on Linux
-		QDrag *dragon = new QDrag(m_owner);
-		dragon->setMimeData(mimeData);
 
-		Qt::DropAction dropAction = dragon->exec(static_cast<Qt::DropActions>(Qt::CopyAction|Qt::MoveAction));
+		// QDrag is parented to the owning QQuickItem so Qt's object
+		// tree handles the worst-case cleanup if anything below
+		// throws. A stack-allocated QDrag is the shape the Qt docs
+		// recommend, but the previous code had explicit
+		// "not freed — crashes on Linux" behaviour indicating an
+		// async platform-side reference issue; using deleteLater()
+		// schedules deletion after the current event-loop tick so
+		// any platform drag helpers have safely finished before the
+		// object goes away. `setMimeData` takes ownership of the
+		// released raw pointer; `exec()` is synchronous and returns
+		// once the drop has been processed.
+		QDrag *dragon = new QDrag(m_owner);
+		dragon->setMimeData(mimeData.release());
+
+		const Qt::DropAction dropAction = dragon->exec(
+			static_cast<Qt::DropActions>(Qt::CopyAction|Qt::MoveAction));
+		dragon->deleteLater();
+
 		if ((dropAction == Qt::MoveAction) && dropWentOutside) {
 			// Remove dragged out text
 			ClearSelection();
@@ -1493,6 +1561,14 @@ void ScintillaQuickCore::DropUrls(const QMimeData *data)
 
 void ScintillaQuickCore::timerEvent(QTimerEvent *event)
 {
+	// If the owning item is already destructing, do not dispatch any
+	// ticks. prepare_for_owner_destruction() cancels all timers and
+	// nulls m_owner before the derived ScintillaQuickItem subobject
+	// dies, but a timer event that was already queued before the
+	// killTimer() call can still be delivered here.
+	if (!m_owner) {
+		return;
+	}
 	for (size_t tr=static_cast<size_t>(TickReason::caret); tr<=static_cast<size_t>(TickReason::dwell); tr++) {
 		if (timers[tr] == event->timerId()) {
             const Sci::Line previous_top_line = topLine;

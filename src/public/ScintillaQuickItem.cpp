@@ -536,6 +536,18 @@ ScintillaQuickItem::ScintillaQuickItem(QQuickItem *parent)
 ScintillaQuickItem::~ScintillaQuickItem()
 {
     stopProfilingSession();
+
+    // Tell the core to stop all of its timers and disconnect from the
+    // clipboard before the ScintillaQuickItem subobject finishes
+    // destructing. `sqt` is a child QObject (parented to `this`) and
+    // Qt will destroy it as part of ~QObject(), which runs AFTER this
+    // derived destructor body. Without this step, a queued timerEvent
+    // or clipboard SelectionChanged slot can reach `sqt` between the
+    // derived teardown and Qt's child-deletion pass and dispatch into
+    // a sliced-down QQuickItem.
+    if (sqt) {
+        sqt->prepare_for_owner_destruction();
+    }
 }
 
 sptr_t ScintillaQuickItem::send(
@@ -755,11 +767,11 @@ void ScintillaQuickItem::scrollColumn(int deltaColumns)
 {
     int currentColumnInPixel = send(SCI_GETXOFFSET);
     int newValue = currentColumnInPixel + deltaColumns * getCharWidth();
-    if(newValue < 0)
-    {
+    if (newValue < 0) {
         newValue = 0;
     }
-//    send(SCI_SETXOFFSET,newValue);
+    // Go through scrollHorizontal() rather than SCI_SETXOFFSET so the
+    // horizontal scroll signal is emitted on the Qt side.
     scrollHorizontal(newValue);
 }
 
@@ -1411,38 +1423,33 @@ void ScintillaQuickItem::inputMethodEvent(QInputMethodEvent *event)
 		return;
 	}
 
-    // used from QQuickTextControlPrivate::inputMethodEvent()
+    // Follows the shape of QQuickTextControlPrivate::inputMethodEvent().
+    // Only Selection attributes are actioned here; Cursor attributes
+    // from the IME are intentionally ignored because the caret is
+    // driven by the ScintillaQuick selection model after Scintilla
+    // applies the composition, and there is no public Scintilla hook
+    // to override the cursor visibility while a composition is in
+    // progress. The loop still inspects every attribute so that new
+    // Qt attribute types do not silently cause us to skip a Selection
+    // that follows them.
     for (int i = 0; i < event->attributes().size(); ++i) {
         const QInputMethodEvent::Attribute &a = event->attributes().at(i);
         if (a.type == QInputMethodEvent::Selection) {
-            Sci::Position curPos = sqt->CurrentPosition();
-            SelectionPosition selStart = sqt->SelectionStart();
-            SelectionPosition selEnd = sqt->SelectionEnd();
+            const Sci::Position curPos = sqt->CurrentPosition();
+            const int paraStart = sqt->pdoc->ParaUp(curPos);
 
-            int paraStart = sqt->pdoc->ParaUp(curPos);
-
-            //selStart.Add(a.length);
             SelectionPosition newStart(paraStart + a.start);
             SelectionPosition newEnd(paraStart + a.start + a.length);
-            if(newStart>newEnd)
-            {
+            if (newStart > newEnd) {
                 sqt->SetSelection(newEnd, newStart);
-            }
-            else
-            {
+            } else {
                 sqt->SetSelection(newStart, newEnd);
             }
-            curPos = sqt->CurrentPosition();
 
             // update markers by triggering QtAndroidInputContext::updateSelectionHandles()
 #ifdef PLAT_QT_QML
             cursorChangedUpdateMarker();
 #endif
-        }
-        if (a.type == QInputMethodEvent::Cursor) {
-            //hasImState = true;
-            //preeditCursor = a.start;
-            //cursorVisible = a.length != 0;
         }
     }
 
@@ -2178,7 +2185,10 @@ void ScintillaQuickItem::setText(const QString & txt)
 
 void ScintillaQuickItem::setFont(const QFont & newFont)
 {
-//TODO: maybe    QApplication::setFont(newFont);
+    // Intentionally scoped to this editor item only — we deliberately
+    // do NOT touch QGuiApplication::setFont(), because the editor
+    // font should not bleed into unrelated Quick items in the same
+    // application.
     if (newFont == aFont) {
         return;
     }
@@ -2372,14 +2382,14 @@ void ScintillaQuickItem::syncQuickViewProperties()
         }
     };
 
-    emit_if_changed(m_cached_char_height, charHeight, &ScintillaQuickItem::charHeightChanged);
-    emit_if_changed(m_cached_char_width, charWidth, &ScintillaQuickItem::charWidthChanged);
-    emit_if_changed(m_cached_total_lines, lineCount, &ScintillaQuickItem::totalLinesChanged);
-    emit_if_changed(m_cached_total_columns, totalColumns, &ScintillaQuickItem::totalColumnsChanged);
-    emit_if_changed(m_cached_visible_lines, visibleLines, &ScintillaQuickItem::visibleLinesChanged);
-    emit_if_changed(m_cached_visible_columns, visibleColumns, &ScintillaQuickItem::visibleColumnsChanged);
-    emit_if_changed(m_cached_first_visible_line, firstVisibleLine, &ScintillaQuickItem::firstVisibleLineChanged);
-    emit_if_changed(m_cached_first_visible_column, firstVisibleColumn, &ScintillaQuickItem::firstVisibleColumnChanged);
+    emit_if_changed(m_last_emitted_char_height, charHeight, &ScintillaQuickItem::charHeightChanged);
+    emit_if_changed(m_last_emitted_char_width, charWidth, &ScintillaQuickItem::charWidthChanged);
+    emit_if_changed(m_last_emitted_total_lines, lineCount, &ScintillaQuickItem::totalLinesChanged);
+    emit_if_changed(m_last_emitted_total_columns, totalColumns, &ScintillaQuickItem::totalColumnsChanged);
+    emit_if_changed(m_last_emitted_visible_lines, visibleLines, &ScintillaQuickItem::visibleLinesChanged);
+    emit_if_changed(m_last_emitted_visible_columns, visibleColumns, &ScintillaQuickItem::visibleColumnsChanged);
+    emit_if_changed(m_last_emitted_first_visible_line, firstVisibleLine, &ScintillaQuickItem::firstVisibleLineChanged);
+    emit_if_changed(m_last_emitted_first_visible_column, firstVisibleColumn, &ScintillaQuickItem::firstVisibleColumnChanged);
 
     if (logicalWidth != textWidth) {
         logicalWidth = textWidth;

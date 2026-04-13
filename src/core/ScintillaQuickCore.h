@@ -103,6 +103,18 @@ public:
 		bool ensure_styled = true,
 		bool scrolling = false,
 		int extra_capture_lines = 0);
+
+	// Called from `~ScintillaQuickItem()` before the derived
+	// `ScintillaQuickItem` subobject finishes destructing. Stops all
+	// timers (which may otherwise fire via Qt's event loop between the
+	// derived destructor body and Qt's child-deletion pass) and nulls
+	// the back-pointer so that any still-queued slot invocations that
+	// reach `ScintillaQuickCore` after this point are inert. Without
+	// this step, a queued `timerEvent` or clipboard `SelectionChanged`
+	// can race against the owning `ScintillaQuickItem` destructor and
+	// reach a sliced-down QQuickItem.
+	void prepare_for_owner_destruction();
+
 	virtual ~ScintillaQuickCore();
 
 signals:
@@ -206,6 +218,14 @@ private:
 	// object. Parenting is handled by the QObject parent link set up
 	// in the constructor.
 	::ScintillaQuickItem *m_owner;
+
+	// Owning idle timer. Previously this was a bare `new QTimer`
+	// stashed through `idler.idlerID` as `void*`, which leaked if
+	// `SetIdle(false)` was never called before destruction and could
+	// fire with a dangling receiver. The unique_ptr is parented to
+	// `this` so Qt's object tree handles cleanup as a fallback even
+	// if `ChangeIdle(false)` is somehow missed.
+	std::unique_ptr<QTimer> m_idle_timer;
 
 	int vMax, hMax;   // Scroll bar maximums.
 	int vPage, hPage; // Scroll bar page sizes.

@@ -300,14 +300,20 @@ private:
 	bool enableUpdateFlag;
 	int logicalWidth;
 	int logicalHeight;
-	int m_cached_char_height = -1;
-	int m_cached_char_width = -1;
-	int m_cached_total_lines = -1;
-	int m_cached_total_columns = -1;
-	int m_cached_visible_lines = -1;
-	int m_cached_visible_columns = -1;
-	int m_cached_first_visible_line = -1;
-	int m_cached_first_visible_column = -1;
+	// The following members are NOT a read cache — `getCharHeight()`,
+	// `getCharWidth()`, etc. re-query Scintilla on every call. They
+	// are the "last value we emitted a NOTIFY signal for" so that
+	// `syncQuickViewProperties()` can avoid spurious property-change
+	// notifications when nothing has actually changed between two
+	// consecutive sync passes. Name reflects the role.
+	int m_last_emitted_char_height = -1;
+	int m_last_emitted_char_width = -1;
+	int m_last_emitted_total_lines = -1;
+	int m_last_emitted_total_columns = -1;
+	int m_last_emitted_visible_lines = -1;
+	int m_last_emitted_visible_columns = -1;
+	int m_last_emitted_first_visible_line = -1;
+	int m_last_emitted_first_visible_column = -1;
 	QFont aFont;
 	Qt::InputMethodHints dataInputMethodHints;
 	qint64 aLastTouchPressTime;
