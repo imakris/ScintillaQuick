@@ -75,7 +75,6 @@ target_link_libraries(my_app PRIVATE ScintillaQuick::ScintillaQuick)
 Public headers:
 
 - [`include/scintillaquick/ScintillaQuickItem.h`](include/scintillaquick/ScintillaQuickItem.h)
-- [`include/scintilla_quick/scintilla_quick.h`](include/scintilla_quick/scintilla_quick.h)
 
 Installed packages expose Scintilla's public headers alongside the library.
 Scintilla internal implementation headers are intentionally not installed.
@@ -159,6 +158,7 @@ Notes:
 
 - [Getting Started](docs/getting_started.md)
 - [Architecture](docs/architecture.md)
+- [Known Limitations](docs/limitations.md)
 
 ## License
 
