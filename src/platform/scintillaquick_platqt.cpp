@@ -59,26 +59,24 @@
 
 extern void ProcessScintillaContextMenu(Scintilla::Internal::Point pt, const Scintilla::Internal::Window & w, const QList<QPair<QString, QPair<int, bool>>> & menu);
 
-using namespace Scintilla;
-
 namespace Scintilla::Internal {
 
 //----------------------------------------------------------------------
 
-bool IsASCIIText(std::string_view text) {
+bool is_ascii_text(std::string_view text) {
 	return std::all_of(text.cbegin(), text.cend(), [](char ch) {
 		return static_cast<unsigned char>(ch) < 0x80;
 	});
 }
 
-bool IsSimplePrintableASCII(std::string_view text) {
+bool is_simple_printable_ascii(std::string_view text) {
 	return std::all_of(text.cbegin(), text.cend(), [](char ch) {
 		const unsigned char uch = static_cast<unsigned char>(ch);
 		return uch >= 0x20 && uch < 0x7f;
 	});
 }
 
-bool FillSimpleGlyphPositions(const QTextLine &line, std::string_view text, XYPOSITION *positions)
+bool fill_simple_glyph_positions(const QTextLine &line, std::string_view text, XYPOSITION *positions)
 {
 	if (!line.isValid() || !positions || text.empty()) {
 		return false;
@@ -125,14 +123,14 @@ bool FillSimpleGlyphPositions(const QTextLine &line, std::string_view text, XYPO
 	return filled == text.size();
 }
 
-QString UnicodeFromText(std::string_view text) {
-	if (IsASCIIText(text)) {
+QString unicode_from_text(std::string_view text) {
+	if (is_ascii_text(text)) {
 		return QString::fromLatin1(text.data(), static_cast<int>(text.length()));
 	}
 	return QString::fromUtf8(text.data(), static_cast<int>(text.length()));
 }
 
-static QFont::StyleStrategy ChooseStrategy(FontQuality eff)
+static QFont::StyleStrategy choose_strategy(FontQuality eff)
 {
 	switch (eff) {
 		case FontQuality::QualityDefault:         return QFont::PreferDefault;
@@ -143,23 +141,23 @@ static QFont::StyleStrategy ChooseStrategy(FontQuality eff)
 	}
 }
 
-class FontAndCharacterSet : public Font {
+class font_and_character_set : public Font {
 public:
-	CharacterSet characterSet = CharacterSet::Ansi;
-	std::unique_ptr<QFont> pfont;
-	explicit FontAndCharacterSet(const FontParameters &fp) : characterSet(fp.characterSet) {
-		pfont = std::make_unique<QFont>();
-		pfont->setStyleStrategy(ChooseStrategy(fp.extraFontFlag));
-		pfont->setFamily(QString::fromUtf8(fp.faceName));
-		pfont->setPointSizeF(fp.size);
-		pfont->setBold(static_cast<int>(fp.weight) > 500);
-		pfont->setItalic(fp.italic);
+	CharacterSet m_character_set = CharacterSet::Ansi;
+	std::unique_ptr<QFont> m_font;
+	explicit font_and_character_set(const FontParameters &fp) : m_character_set(fp.characterSet) {
+		m_font = std::make_unique<QFont>();
+		m_font->setStyleStrategy(choose_strategy(fp.extraFontFlag));
+		m_font->setFamily(QString::fromUtf8(fp.faceName));
+		m_font->setPointSizeF(fp.size);
+		m_font->setBold(static_cast<int>(fp.weight) > 500);
+		m_font->setItalic(fp.italic);
 	}
 };
 
 namespace {
 
-const Supports SupportsQt[] = {
+const Supports k_supports_qt[] = {
 	Supports::LineDrawsFinal,
 	Supports::FractionalStrokeWidth,
 	Supports::TranslucentStroke,
@@ -180,21 +178,21 @@ QSGTextNode::RenderType map_text_render_type()
 	return QSGTextNode::QtRendering;
 }
 
-const FontAndCharacterSet *AsFontAndCharacterSet(const Font *f) {
-	return dynamic_cast<const FontAndCharacterSet *>(f);
+const font_and_character_set *as_font_and_character_set(const Font *f) {
+	return dynamic_cast<const font_and_character_set *>(f);
 }
 
-QFont *FontPointer(const Font *f)
+QFont *font_pointer(const Font *f)
 {
-	return AsFontAndCharacterSet(f)->pfont.get();
+	return as_font_and_character_set(f)->m_font.get();
 }
 
-SurfaceImpl *AsSurfaceImpl(Surface &surface) noexcept
+SurfaceImpl *as_surface_impl(Surface &surface) noexcept
 {
 	return dynamic_cast<SurfaceImpl *>(&surface);
 }
 
-const QScreen *ScreenForLogPixels() noexcept
+const QScreen *screen_for_log_pixels() noexcept
 {
 	const QWindow *focusWindow = QGuiApplication::focusWindow();
 	if (focusWindow) {
@@ -210,7 +208,7 @@ const QScreen *ScreenForLogPixels() noexcept
 
 std::shared_ptr<Font> Font::Allocate(const FontParameters &fp)
 {
-	return std::make_shared<FontAndCharacterSet>(fp);
+	return std::make_shared<font_and_character_set>(fp);
 }
 
 SurfaceImpl::SurfaceImpl() = default;
@@ -283,7 +281,7 @@ void SurfaceImpl::Release() noexcept
 
 int SurfaceImpl::SupportsFeature(Supports feature) noexcept
 {
-	for (const Supports f : SupportsQt) {
+	for (const Supports f : k_supports_qt) {
 		if (f == feature)
 			return 1;
 	}
@@ -329,15 +327,15 @@ void SurfaceImpl::SetFont(const Font *font)
     if (capture_only) {
         return;
     }
-	const FontAndCharacterSet *pfacs = AsFontAndCharacterSet(font);
-	if (pfacs && pfacs->pfont) {
-		GetPainter()->setFont(*(pfacs->pfont));
+	const font_and_character_set *pfacs = as_font_and_character_set(font);
+	if (pfacs && pfacs->m_font) {
+		GetPainter()->setFont(*(pfacs->m_font));
 	}
 }
 
 int SurfaceImpl::LogPixelsY()
 {
-	const QScreen *screen = ScreenForLogPixels();
+	const QScreen *screen = screen_for_log_pixels();
 	return screen ? screen->logicalDotsPerInchY() : 96;
 }
 
@@ -429,7 +427,7 @@ void SurfaceImpl::FillRectangle(PRectangle rc, Surface &surfacePattern)
         return;
     }
 	// Tile pattern over rectangle
-	SurfaceImpl *surface = AsSurfaceImpl(surfacePattern);
+	SurfaceImpl *surface = as_surface_impl(surfacePattern);
 	if (!surface) {
 		return;
 	}
@@ -485,13 +483,13 @@ void SurfaceImpl::AlphaRectangle(PRectangle rc, XYPOSITION cornerSize, FillStrok
 	}
 }
 
-void SurfaceImpl::GradientRectangle(PRectangle rc, const std::vector<ColourStop> &stops, GradientOptions options) {
+void SurfaceImpl::GradientRectangle(PRectangle rc, const std::vector<ColourStop> &stops, GradientOptions m_options) {
     if (capture_only) {
         return;
     }
 	QRectF rect = QRectFFromPRect(rc);
 	QLinearGradient linearGradient;
-	switch (options) {
+	switch (m_options) {
 	case GradientOptions::leftToRight:
 		linearGradient = QLinearGradient(rc.left, rc.top, rc.right, rc.top);
 		break;
@@ -606,7 +604,7 @@ void SurfaceImpl::Copy(PRectangle rc, Point from, Surface &surfaceSource)
     if (capture_only) {
         return;
     }
-	SurfaceImpl *source = AsSurfaceImpl(surfaceSource);
+	SurfaceImpl *source = as_surface_impl(surfaceSource);
 	Q_ASSERT(source);
 	if (!source) {
 		return;
@@ -639,7 +637,7 @@ void SurfaceImpl::DrawTextNoClip(PRectangle rc,
 
 	GetPainter()->setBackground(QColorFromColourRGBA(back));
 	GetPainter()->setBackgroundMode(Qt::OpaqueMode);
-	QString su = UnicodeFromText(text);
+	QString su = unicode_from_text(text);
 	GetPainter()->drawText(QPointF(rc.left, ybase), su);
 }
 
@@ -668,7 +666,7 @@ void SurfaceImpl::DrawTextTransparent(PRectangle rc,
 	PenColour(fore);
 
 	GetPainter()->setBackgroundMode(Qt::TransparentMode);
-	QString su = UnicodeFromText(text);
+	QString su = unicode_from_text(text);
 	GetPainter()->drawText(QPointF(rc.left, ybase), su);
 }
 
@@ -699,9 +697,9 @@ void SurfaceImpl::MeasureWidths(const Font *font,
 	QString su;
 	{
 		SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.to_qstring");
-		su = UnicodeFromText(text);
+		su = unicode_from_text(text);
 	}
-	QTextLayout tlay(su, *FontPointer(font), GetPaintDevice());
+	QTextLayout tlay(su, *font_pointer(font), GetPaintDevice());
 	QTextLine tl;
 	{
 		SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.layout_text");
@@ -711,9 +709,9 @@ void SurfaceImpl::MeasureWidths(const Font *font,
 	}
 	{
 		SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions");
-		if (IsSimplePrintableASCII(text)) {
+		if (is_simple_printable_ascii(text)) {
 			SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions.simple_glyph_path");
-			if (FillSimpleGlyphPositions(tl, text, positions)) {
+			if (fill_simple_glyph_positions(tl, text, positions)) {
 				return;
 			}
 		}
@@ -761,8 +759,8 @@ void SurfaceImpl::MeasureWidths(const Font *font,
 
 XYPOSITION SurfaceImpl::WidthText(const Font *font, std::string_view text)
 {
-	QFontMetricsF metrics(*FontPointer(font), device);
-	QString su = UnicodeFromText(text);
+	QFontMetricsF metrics(*font_pointer(font), device);
+	QString su = unicode_from_text(text);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 	return metrics.horizontalAdvance(su);
 #else
@@ -806,7 +804,7 @@ void SurfaceImpl::MeasureWidthsUTF8(const Font *font,
 	if (!font)
 		return;
 	QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
-	QTextLayout tlay(su, *FontPointer(font), GetPaintDevice());
+	QTextLayout tlay(su, *font_pointer(font), GetPaintDevice());
 	tlay.beginLayout();
 	QTextLine tl = tlay.createLine();
 	tlay.endLayout();
@@ -833,7 +831,7 @@ void SurfaceImpl::MeasureWidthsUTF8(const Font *font,
 
 XYPOSITION SurfaceImpl::WidthTextUTF8(const Font *font, std::string_view text)
 {
-	QFontMetricsF metrics(*FontPointer(font), device);
+	QFontMetricsF metrics(*font_pointer(font), device);
 	QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 	return metrics.horizontalAdvance(su);
@@ -844,13 +842,13 @@ XYPOSITION SurfaceImpl::WidthTextUTF8(const Font *font, std::string_view text)
 
 XYPOSITION SurfaceImpl::Ascent(const Font *font)
 {
-	QFontMetricsF metrics(*FontPointer(font), device);
+	QFontMetricsF metrics(*font_pointer(font), device);
 	return metrics.ascent();
 }
 
 XYPOSITION SurfaceImpl::Descent(const Font *font)
 {
-	QFontMetricsF metrics(*FontPointer(font), device);
+	QFontMetricsF metrics(*font_pointer(font), device);
 	// Qt returns 1 less than true descent
 	// See: QFontEngineWin::descent which says:
 	// ### we subtract 1 to even out the historical +1 in QFontMetrics's
@@ -865,13 +863,13 @@ XYPOSITION SurfaceImpl::InternalLeading(const Font * /* font */)
 
 XYPOSITION SurfaceImpl::Height(const Font *font)
 {
-	QFontMetricsF metrics(*FontPointer(font), device);
+	QFontMetricsF metrics(*font_pointer(font), device);
 	return metrics.height();
 }
 
 XYPOSITION SurfaceImpl::AverageCharWidth(const Font *font)
 {
-	QFontMetricsF metrics(*FontPointer(font), device);
+	QFontMetricsF metrics(*font_pointer(font), device);
 	return metrics.averageCharWidth();
 }
 
@@ -1078,14 +1076,14 @@ PRectangle Window::GetMonitorRect(Point pt)
 }
 
 //----------------------------------------------------------------------
-struct QuickListEntry {
+struct quick_list_entry {
 	QString text;
 	int type = -1;
 };
 
-class QuickListBoxItem final : public QQuickItem {
+class quick_list_box_item final : public QQuickItem {
 public:
-	explicit QuickListBoxItem(QQuickItem *parent)
+	explicit quick_list_box_item(QQuickItem *parent)
 		: QQuickItem(parent)
 	{
 		setAcceptedMouseButtons(Qt::LeftButton);
@@ -1279,7 +1277,7 @@ public:
 			const bool selected = index == m_current_row;
 			const QColor row_background = selected ? selected_back_color : base_color;
 			const QColor row_foreground = selected ? selected_text_color : text_color;
-			const QuickListEntry &entry = m_entries[static_cast<size_t>(index)];
+			const quick_list_entry &entry = m_entries[static_cast<size_t>(index)];
 
 			if (auto *row_background_node = window->createRectangleNode()) {
 				row_background_node->setRect(row_rect);
@@ -1402,7 +1400,7 @@ private:
 		if (maxIconWidth() > 0) {
 			width += iconSpacing();
 		}
-		for (const QuickListEntry &entry : m_entries) {
+		for (const quick_list_entry &entry : m_entries) {
 			width = std::max(width, frameWidth() * 2 + horizontalPadding() * 2 + maxIconWidth() + (maxIconWidth() > 0 ? iconSpacing() : 0) + metrics.horizontalAdvance(entry.text));
 		}
 		return width;
@@ -1459,7 +1457,7 @@ private:
 		}
 	}
 
-	std::vector<QuickListEntry> m_entries;
+	std::vector<quick_list_entry> m_entries;
 	QMap<int, QPixmap> m_images;
 	QFont m_font;
 	IListBoxDelegate *m_delegate = nullptr;
@@ -1470,13 +1468,18 @@ private:
 	ListOptions m_options;
 };
 
-class ListBoxImpl : public ListBox {
+class list_box_impl : public ListBox {
 public:
-	ListBoxImpl() noexcept;
+	list_box_impl() noexcept;
 
 	void SetFont(const Font *font) override;
-	void Create(Window &parent, int ctrlID, Point location,
-						int lineHeight, bool unicodeMode_, Technology technology) override;
+	void Create(
+		Window &parent,
+		int ctrlID,
+		Point location,
+		int lineHeight,
+		bool unicode_mode,
+		Technology technology) override;
 	void SetAverageCharWidth(int width) override;
 	void SetVisibleRows(int rows) override;
 	int GetVisibleRows() const override;
@@ -1490,137 +1493,140 @@ public:
 	int Find(const char *prefix) override;
 	std::string GetValue(int n) override;
 	void RegisterImage(int type, const char *xpmData) override;
-	void RegisterRGBAImage(int type, int width, int height,
+	void RegisterRGBAImage(
+		int type,
+		int width,
+		int height,
 		const unsigned char *pixelsImage) override;
-	virtual void RegisterQPixmapImage(int type, const QPixmap& pm);
+	virtual void RegisterQPixmapImage(int type, const QPixmap &pm);
 	void ClearRegisteredImages() override;
-	void SetDelegate(IListBoxDelegate *lbDelegate) override;
+	void SetDelegate(IListBoxDelegate *delegate) override;
 	void SetList(const char *list, char separator, char typesep) override;
-	void SetOptions(ListOptions options_) override;
+	void SetOptions(ListOptions options) override;
 
-	[[nodiscard]] QuickListBoxItem *GetWidget() const noexcept;
+	[[nodiscard]] quick_list_box_item *GetWidget() const noexcept;
 private:
-	bool unicodeMode{false};
-	int visibleRows{5};
-	QMap<int,QPixmap> images;
-	QFont font;
-	bool fontSet{false};
-	IListBoxDelegate *delegate{nullptr};
-	ListOptions options;
+	bool m_unicode_mode{false};
+	int m_visible_rows{5};
+	QMap<int, QPixmap> m_images;
+	QFont m_font;
+	bool m_font_set{false};
+	IListBoxDelegate *m_delegate{nullptr};
+	ListOptions m_options;
 };
-ListBoxImpl::ListBoxImpl() noexcept = default;
+list_box_impl::list_box_impl() noexcept = default;
 
-void ListBoxImpl::Create(Window &parent,
+void list_box_impl::Create(Window &parent,
                          int /*ctrlID*/,
                          Point location,
                          int /*lineHeight*/,
-                         bool unicodeMode_,
+                         bool unicode_mode,
 			 Technology)
 {
-	unicodeMode = unicodeMode_;
+	m_unicode_mode = unicode_mode;
 	QQuickItem *qparent = window(parent.GetID());
 	QQuickItem *overlay_parent = qparent && qparent->window() ? qparent->window()->contentItem() : qparent;
-	QuickListBoxItem *list = new QuickListBoxItem(overlay_parent);
+	quick_list_box_item *list = new quick_list_box_item(overlay_parent);
 	list->setPosition(QPointF(location.x, location.y));
-	list->setVisibleRowCount(visibleRows);
-	if (fontSet) {
-		list->setListFont(font);
+	list->setVisibleRowCount(m_visible_rows);
+	if (m_font_set) {
+		list->setListFont(m_font);
 	}
-	if (delegate) {
-		list->setDelegate(delegate);
+	if (m_delegate) {
+		list->setDelegate(m_delegate);
 	}
-	for (auto it = images.cbegin(); it != images.cend(); ++it) {
+	for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
 		list->registerImage(it.key(), it.value());
 	}
 	wid = list;
 }
-void ListBoxImpl::SetFont(const Font *font)
+void list_box_impl::SetFont(const Font *font)
 {
-	const FontAndCharacterSet *pfacs = AsFontAndCharacterSet(font);
-	if (pfacs && pfacs->pfont) {
-		this->font = *(pfacs->pfont);
-		fontSet = true;
+	const font_and_character_set *pfacs = as_font_and_character_set(font);
+	if (pfacs && pfacs->m_font) {
+		m_font = *(pfacs->m_font);
+		m_font_set = true;
 	}
-	QuickListBoxItem *list = GetWidget();
-	if (list && fontSet) {
-		list->setListFont(this->font);
+	quick_list_box_item *list = GetWidget();
+	if (list && m_font_set) {
+		list->setListFont(m_font);
 	}
 }
-void ListBoxImpl::SetAverageCharWidth(int /*width*/) {}
+void list_box_impl::SetAverageCharWidth(int /*width*/) {}
 
-void ListBoxImpl::SetVisibleRows(int rows)
+void list_box_impl::SetVisibleRows(int rows)
 {
-	visibleRows = rows;
-	if (QuickListBoxItem *list = GetWidget()) {
+	m_visible_rows = rows;
+	if (quick_list_box_item *list = GetWidget()) {
 		list->setVisibleRowCount(rows);
 	}
 }
 
-int ListBoxImpl::GetVisibleRows() const
+int list_box_impl::GetVisibleRows() const
 {
-	return visibleRows;
+	return m_visible_rows;
 }
-PRectangle ListBoxImpl::GetDesiredRect()
+PRectangle list_box_impl::GetDesiredRect()
 {
-	QuickListBoxItem *list = GetWidget();
+	quick_list_box_item *list = GetWidget();
 	return list ? list->desiredRect() : PRectangle(0, 0, 0, 0);
 }
-int ListBoxImpl::CaretFromEdge()
+int list_box_impl::CaretFromEdge()
 {
-	QuickListBoxItem *list = GetWidget();
+	quick_list_box_item *list = GetWidget();
 	return list ? list->caretFromEdge() : 0;
 }
-void ListBoxImpl::Clear() noexcept
+void list_box_impl::Clear() noexcept
 {
-	if (QuickListBoxItem *list = GetWidget()) {
+	if (quick_list_box_item *list = GetWidget()) {
 		list->clearItems();
 	}
 }
-void ListBoxImpl::Append(char *s, int type)
+void list_box_impl::Append(char *s, int type)
 {
-	if (QuickListBoxItem *list = GetWidget()) {
-		list->appendItem(unicodeMode ? QString::fromUtf8(s) : QString::fromLocal8Bit(s), type);
+	if (quick_list_box_item *list = GetWidget()) {
+		list->appendItem(m_unicode_mode ? QString::fromUtf8(s) : QString::fromLocal8Bit(s), type);
 	}
 }
-int ListBoxImpl::Length()
+int list_box_impl::Length()
 {
-	QuickListBoxItem *list = GetWidget();
+	quick_list_box_item *list = GetWidget();
 	return list ? list->count() : 0;
 }
-void ListBoxImpl::Select(int n)
+void list_box_impl::Select(int n)
 {
-	if (QuickListBoxItem *list = GetWidget()) {
+	if (quick_list_box_item *list = GetWidget()) {
 		list->setSelection(n, true);
 	}
 }
-int ListBoxImpl::GetSelection()
+int list_box_impl::GetSelection()
 {
-	QuickListBoxItem *list = GetWidget();
+	quick_list_box_item *list = GetWidget();
 	return list ? list->currentSelection() : -1;
 }
-int ListBoxImpl::Find(const char *prefix)
+int list_box_impl::Find(const char *prefix)
 {
-	QuickListBoxItem *list = GetWidget();
-	return list ? list->findPrefix(unicodeMode ? QString::fromUtf8(prefix) : QString::fromLocal8Bit(prefix)) : -1;
+	quick_list_box_item *list = GetWidget();
+	return list ? list->findPrefix(m_unicode_mode ? QString::fromUtf8(prefix) : QString::fromLocal8Bit(prefix)) : -1;
 }
-std::string ListBoxImpl::GetValue(int n)
+std::string list_box_impl::GetValue(int n)
 {
-	QuickListBoxItem *list = GetWidget();
+	quick_list_box_item *list = GetWidget();
 	QString str = list ? list->valueAt(n) : QString();
-	QByteArray bytes = unicodeMode ? str.toUtf8() : str.toLocal8Bit();
+	QByteArray bytes = m_unicode_mode ? str.toUtf8() : str.toLocal8Bit();
 	return std::string(bytes.constData());
 }
 
-void ListBoxImpl::RegisterQPixmapImage(int type, const QPixmap& pm)
+void list_box_impl::RegisterQPixmapImage(int type, const QPixmap &pm)
 {
-	images[type] = pm;
-	QuickListBoxItem *list = GetWidget();
+	m_images[type] = pm;
+	quick_list_box_item *list = GetWidget();
 	if (list) {
 		list->registerImage(type, pm);
 	}
 }
 
-void ListBoxImpl::RegisterImage(int type, const char *xpmData)
+void list_box_impl::RegisterImage(int type, const char *xpmData)
 {
     //old: RegisterQPixmapImage(type, QPixmap(reinterpret_cast<const char * const *>(xpmData)));
     XPM xpmImage(xpmData);
@@ -1628,28 +1634,28 @@ void ListBoxImpl::RegisterImage(int type, const char *xpmData)
     RegisterRGBAImage(type, rgbaImage.GetWidth(), rgbaImage.GetHeight(), rgbaImage.Pixels());
 }
 
-void ListBoxImpl::RegisterRGBAImage(int type, int width, int height, const unsigned char *pixelsImage)
+void list_box_impl::RegisterRGBAImage(int type, int width, int height, const unsigned char *pixelsImage)
 {
 	std::vector<unsigned char> imageBytes = ImageByteSwapped(width, height, pixelsImage);
 	QImage image(&imageBytes[0], width, height, QImage::Format_ARGB32);
 	RegisterQPixmapImage(type, QPixmap::fromImage(image));
 }
 
-void ListBoxImpl::ClearRegisteredImages()
+void list_box_impl::ClearRegisteredImages()
 {
-	images.clear();
-	if (QuickListBoxItem *list = GetWidget()) {
+	m_images.clear();
+	if (quick_list_box_item *list = GetWidget()) {
 		list->clearImages();
 	}
 }
-void ListBoxImpl::SetDelegate(IListBoxDelegate *lbDelegate)
+void list_box_impl::SetDelegate(IListBoxDelegate *delegate)
 {
-	delegate = lbDelegate;
-	if (QuickListBoxItem *list = GetWidget()) {
-		list->setDelegate(lbDelegate);
+	m_delegate = delegate;
+	if (quick_list_box_item *list = GetWidget()) {
+		list->setDelegate(delegate);
 	}
 }
-void ListBoxImpl::SetList(const char *list, char separator, char typesep)
+void list_box_impl::SetList(const char *list, char separator, char typesep)
 {
 	// This method is *not* platform dependent.
 	// It is borrowed from the GTK implementation.
@@ -1677,16 +1683,16 @@ void ListBoxImpl::SetList(const char *list, char separator, char typesep)
 		Append(startword, numword?atoi(numword + 1):-1);
 	}
 }
-void ListBoxImpl::SetOptions(ListOptions options_)
+void list_box_impl::SetOptions(ListOptions options)
 {
-	options = options_;
-	if (QuickListBoxItem *list = GetWidget()) {
-		list->setOptions(options);
+	m_options = options;
+	if (quick_list_box_item *list = GetWidget()) {
+		list->setOptions(m_options);
 	}
 }
-QuickListBoxItem *ListBoxImpl::GetWidget() const noexcept
+quick_list_box_item *list_box_impl::GetWidget() const noexcept
 {
-	return static_cast<QuickListBoxItem *>(wid);
+	return static_cast<quick_list_box_item *>(wid);
 }
 
 ListBox::ListBox() noexcept = default;
@@ -1694,7 +1700,7 @@ ListBox::~ListBox() noexcept = default;
 
 std::unique_ptr<ListBox> ListBox::Allocate()
 {
-	return std::make_unique<ListBoxImpl>();
+	return std::make_unique<list_box_impl>();
 }
 //----------------------------------------------------------------------
 Menu::Menu() noexcept : mid(nullptr) {}

@@ -37,6 +37,10 @@
 
 #include <utility>
 
+// This translation unit is almost entirely upstream Scintilla interop.
+// Keeping the upstream namespaces open here avoids overwhelming the file
+// with qualifiers while repo-owned identifiers still follow the local
+// style guide.
 using namespace Scintilla;
 using namespace Scintilla::Internal;
 
@@ -47,24 +51,24 @@ QRectF rect_from_capture(double left, double top, double right, double bottom)
     return QRectF(QPointF(left, top), QPointF(right, bottom)).normalized();
 }
 
-text_direction_t direction_from_capture(Capture_text_direction direction)
+text_direction direction_from_capture(Capture_text_direction direction)
 {
     switch (direction) {
     case Capture_text_direction::left_to_right:
-        return text_direction_t::left_to_right;
+        return text_direction::left_to_right;
     case Capture_text_direction::right_to_left:
-        return text_direction_t::right_to_left;
+        return text_direction::right_to_left;
     case Capture_text_direction::mixed:
-        return text_direction_t::mixed;
+        return text_direction::mixed;
     }
 
-    return text_direction_t::left_to_right;
+    return text_direction::left_to_right;
 }
 
-class Capture_frame_builder final : public Render_collector
+class capture_frame_builder final : public Render_collector
 {
 public:
-    Capture_frame_builder(Capture_frame &frame, bool capture_static_content)
+    capture_frame_builder(captured_frame &frame, bool capture_static_content)
     :
         m_frame(frame),
         m_capture_static_content(capture_static_content)
@@ -78,7 +82,7 @@ public:
 
     void begin_visual_line(const Captured_visual_line &line) override
     {
-        capture_visual_line_t visual_line;
+        capture_visual_line visual_line;
         visual_line.document_line = line.document_line;
         visual_line.subline_index = line.subline_index;
         visual_line.visual_order = line.visual_order;
@@ -97,7 +101,7 @@ public:
             return;
         }
 
-        capture_text_run_t text_run;
+        capture_text_run text_run;
         text_run.text = run.utf8_text;
         text_run.foreground = QColorFromColourRGBA(ColourRGBA(static_cast<int>(run.foreground_rgba)));
         text_run.x = run.x;
@@ -129,7 +133,7 @@ public:
 
     void add_selection_rect(const Captured_selection_rect &rect) override
     {
-        capture_selection_primitive_t selection;
+        capture_selection_primitive selection;
         selection.left = rect.left;
         selection.top = rect.top;
         selection.right = rect.right;
@@ -141,7 +145,7 @@ public:
 
     void add_caret_rect(const Captured_caret_rect &rect) override
     {
-        capture_caret_primitive_t caret;
+        capture_caret_primitive caret;
         caret.left = rect.left;
         caret.top = rect.top;
         caret.right = rect.right;
@@ -153,7 +157,7 @@ public:
 
     void add_indicator_primitive(const Captured_indicator &indicator) override
     {
-        capture_indicator_primitive_t primitive;
+        capture_indicator_primitive primitive;
         primitive.left = indicator.left;
         primitive.top = indicator.top;
         primitive.right = indicator.right;
@@ -177,7 +181,7 @@ public:
 
     void add_current_line_highlight(const Captured_current_line_highlight &highlight) override
     {
-        capture_current_line_primitive_t primitive;
+        capture_current_line_primitive primitive;
         primitive.left = highlight.left;
         primitive.top = highlight.top;
         primitive.right = highlight.right;
@@ -189,7 +193,7 @@ public:
 
     void add_marker_symbol(const Captured_marker_symbol &marker) override
     {
-        capture_marker_primitive_t primitive;
+        capture_marker_primitive primitive;
         primitive.left = marker.left;
         primitive.top = marker.top;
         primitive.right = marker.right;
@@ -206,7 +210,7 @@ public:
 
     void add_margin_text(const Captured_margin_text &text) override
     {
-        capture_margin_text_primitive_t primitive;
+        capture_margin_text_primitive primitive;
         primitive.text = text.utf8_text;
         primitive.x = text.x;
         primitive.y = text.y;
@@ -223,7 +227,7 @@ public:
 
     void add_fold_display_text(const Captured_fold_display_text &text) override
     {
-        capture_fold_display_text_t primitive;
+        capture_fold_display_text primitive;
         primitive.text = text.utf8_text;
         primitive.left = text.left;
         primitive.top = text.top;
@@ -240,7 +244,7 @@ public:
 
     void add_eol_annotation(const Captured_eol_annotation &annotation) override
     {
-        capture_eol_annotation_t primitive;
+        capture_eol_annotation primitive;
         primitive.text = annotation.utf8_text;
         primitive.left = annotation.left;
         primitive.top = annotation.top;
@@ -258,7 +262,7 @@ public:
 
     void add_annotation(const Captured_annotation &annotation) override
     {
-        capture_annotation_t primitive;
+        capture_annotation primitive;
         primitive.text = annotation.utf8_text;
         primitive.left = annotation.left;
         primitive.top = annotation.top;
@@ -277,7 +281,7 @@ public:
 
     void add_whitespace_mark(const Captured_whitespace_mark &mark) override
     {
-        capture_whitespace_mark_t primitive;
+        capture_whitespace_mark primitive;
         primitive.left = mark.left;
         primitive.top = mark.top;
         primitive.right = mark.right;
@@ -285,28 +289,28 @@ public:
         primitive.mid_y = mark.mid_y;
         primitive.rgba = mark.rgba;
         primitive.kind = (mark.kind == Whitespace_mark_kind::tab_arrow)
-            ? whitespace_mark_kind_t::tab_arrow
-            : whitespace_mark_kind_t::space_dot;
+            ? whitespace_mark_kind::tab_arrow
+            : whitespace_mark_kind::space_dot;
         m_frame.whitespace_marks.push_back(std::move(primitive));
     }
 
     void add_decoration_underline(const Captured_decoration_underline &underline) override
     {
-        capture_decoration_underline_t primitive;
+        capture_decoration_underline primitive;
         primitive.left = underline.left;
         primitive.top = underline.top;
         primitive.right = underline.right;
         primitive.bottom = underline.bottom;
         primitive.rgba = underline.rgba;
         primitive.kind = (underline.kind == Decoration_kind::hotspot)
-            ? decoration_kind_t::hotspot
-            : decoration_kind_t::style_underline;
+            ? decoration_kind::hotspot
+            : decoration_kind::style_underline;
         m_frame.decoration_underlines.push_back(std::move(primitive));
     }
 
     void add_indent_guide(const Captured_indent_guide &guide) override
     {
-        capture_indent_guide_t primitive;
+        capture_indent_guide primitive;
         primitive.x = guide.x;
         primitive.top = guide.top;
         primitive.bottom = guide.bottom;
@@ -321,18 +325,18 @@ public:
     }
 
 private:
-    Capture_frame &m_frame;
+    captured_frame &m_frame;
     bool m_capture_static_content = true;
-    capture_visual_line_t *m_current_visual_line = nullptr;
+    capture_visual_line *m_current_visual_line = nullptr;
 };
 
 }
 
 ScintillaQuickCore::ScintillaQuickCore(::ScintillaQuickItem *parent)
-: QObject(parent), m_owner(parent), vMax(0),  hMax(0), vPage(0), hPage(0),
- haveMouseCapture(false), dragWasDropped(false),
- rectangularSelectionModifier(SCMOD_ALT),
- currentPainter(nullptr)
+: QObject(parent), m_owner(parent), m_v_max(0),  m_h_max(0), m_v_page(0), m_h_page(0),
+ m_have_mouse_capture(false), m_drag_was_dropped(false),
+ m_rectangular_selection_modifier(SCMOD_ALT),
+ m_current_painter(nullptr)
 {
 	wMain = static_cast<QQuickItem *>(m_owner); // Scintilla wMain stores the platform window handle.
 
@@ -397,16 +401,16 @@ void ScintillaQuickCore::selectCurrentWord()
 	emit cursorPositionChanged();
 }
 
-struct ScintillaQuickCore::style_attributes_t
+struct ScintillaQuickCore::style_attributes
 {
     QColor foreground;
     QColor background;
     QFont font;
 };
 
-ScintillaQuickCore::style_attributes_t ScintillaQuickCore::style_attributes_for(int style) const
+ScintillaQuickCore::style_attributes ScintillaQuickCore::style_attributes_for(int style) const
 {
-    style_attributes_t attributes;
+    style_attributes attributes;
     const int bounded_style = std::clamp(style, 0, STYLE_MAX);
     const Style &scintilla_style = vs.styles[static_cast<size_t>(bounded_style)];
     const Style &default_style = vs.styles[StyleDefault];
@@ -438,15 +442,15 @@ ScintillaQuickCore::style_attributes_t ScintillaQuickCore::style_attributes_for(
     return attributes;
 }
 
-Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &capture_frame) const
+render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame &capture_frame) const
 {
     SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.render_frame_from_capture");
 
-    Render_frame frame;
-    std::array<std::optional<style_attributes_t>, STYLE_MAX + 1> style_cache;
-    const auto attributes_for = [&](int style) -> const style_attributes_t & {
+    render_frame frame;
+    std::array<std::optional<style_attributes>, STYLE_MAX + 1> style_cache;
+    const auto attributes_for = [&](int style) -> const style_attributes & {
         const int bounded_style = std::clamp(style, 0, STYLE_MAX);
-        std::optional<style_attributes_t> &cached = style_cache[bounded_style];
+        std::optional<style_attributes> &cached = style_cache[bounded_style];
         if (!cached.has_value()) {
             cached = style_attributes_for(bounded_style);
         }
@@ -465,8 +469,8 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
         capture_frame.margin_height);
 
     frame.visual_lines.reserve(capture_frame.visual_lines.size());
-    for (const capture_visual_line_t &capture_line : capture_frame.visual_lines) {
-        visual_line_frame_t visual_line;
+    for (const capture_visual_line &capture_line : capture_frame.visual_lines) {
+        visual_line_frame visual_line;
         visual_line.key.document_line = capture_line.document_line;
         visual_line.key.subline_index = capture_line.subline_index;
         visual_line.visual_order = capture_line.visual_order;
@@ -479,10 +483,10 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
             capture_line.bottom);
 
         visual_line.text_runs.reserve(capture_line.text_runs.size());
-        for (const capture_text_run_t &capture_run : capture_line.text_runs) {
-            const style_attributes_t &attributes = attributes_for(capture_run.style_id);
+        for (const capture_text_run &capture_run : capture_line.text_runs) {
+            const style_attributes &attributes = attributes_for(capture_run.style_id);
 
-            text_run_t run;
+            text_run run;
             run.text = QString::fromUtf8(
                 capture_run.text.data(),
                 static_cast<int>(capture_run.text.size()));
@@ -520,8 +524,8 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.selection_primitives.reserve(capture_frame.selection_primitives.size());
-    for (const capture_selection_primitive_t &capture_selection : capture_frame.selection_primitives) {
-        Selection_primitive selection;
+    for (const capture_selection_primitive &capture_selection : capture_frame.selection_primitives) {
+        selection_primitive selection;
         selection.rect = rect_from_capture(
             capture_selection.left,
             capture_selection.top,
@@ -533,8 +537,8 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.indicator_primitives.reserve(capture_frame.indicator_primitives.size());
-    for (const capture_indicator_primitive_t &capture_indicator : capture_frame.indicator_primitives) {
-        Indicator_primitive indicator;
+    for (const capture_indicator_primitive &capture_indicator : capture_frame.indicator_primitives) {
+        indicator_primitive indicator;
         indicator.rect = rect_from_capture(
             capture_indicator.left,
             capture_indicator.top,
@@ -562,8 +566,8 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.current_line_primitives.reserve(capture_frame.current_line_primitives.size());
-    for (const capture_current_line_primitive_t &capture_cl : capture_frame.current_line_primitives) {
-        Current_line_primitive cl;
+    for (const capture_current_line_primitive &capture_cl : capture_frame.current_line_primitives) {
+        current_line_primitive cl;
         cl.rect = rect_from_capture(
             capture_cl.left,
             capture_cl.top,
@@ -575,8 +579,8 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.marker_primitives.reserve(capture_frame.marker_primitives.size());
-    for (const capture_marker_primitive_t &capture_marker : capture_frame.marker_primitives) {
-        Marker_primitive marker;
+    for (const capture_marker_primitive &capture_marker : capture_frame.marker_primitives) {
+        marker_primitive marker;
         marker.rect = rect_from_capture(
             capture_marker.left,
             capture_marker.top,
@@ -593,8 +597,8 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.caret_primitives.reserve(capture_frame.caret_primitives.size());
-    for (const capture_caret_primitive_t &capture_caret : capture_frame.caret_primitives) {
-        caret_primitive_t caret;
+    for (const capture_caret_primitive &capture_caret : capture_frame.caret_primitives) {
+        caret_primitive caret;
         caret.rect = rect_from_capture(
             capture_caret.left,
             capture_caret.top,
@@ -606,10 +610,10 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.margin_text_primitives.reserve(capture_frame.margin_text_primitives.size());
-    for (const capture_margin_text_primitive_t &capture_margin_text : capture_frame.margin_text_primitives) {
-        const style_attributes_t &attributes = attributes_for(capture_margin_text.style_id);
+    for (const capture_margin_text_primitive &capture_margin_text : capture_frame.margin_text_primitives) {
+        const style_attributes &attributes = attributes_for(capture_margin_text.style_id);
 
-        Margin_text_primitive margin_text;
+        margin_text_primitive margin_text;
         margin_text.text = QString::fromUtf8(
             capture_margin_text.text.data(),
             static_cast<int>(capture_margin_text.text.size()));
@@ -629,10 +633,10 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.fold_display_texts.reserve(capture_frame.fold_display_texts.size());
-    for (const capture_fold_display_text_t &capture_fold : capture_frame.fold_display_texts) {
-        const style_attributes_t &attributes = attributes_for(capture_fold.style_id);
+    for (const capture_fold_display_text &capture_fold : capture_frame.fold_display_texts) {
+        const style_attributes &attributes = attributes_for(capture_fold.style_id);
 
-        Fold_display_text_primitive fold;
+        fold_display_text_primitive fold;
         fold.text = QString::fromUtf8(
             capture_fold.text.data(),
             static_cast<int>(capture_fold.text.size()));
@@ -651,10 +655,10 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.eol_annotations.reserve(capture_frame.eol_annotations.size());
-    for (const capture_eol_annotation_t &capture_eol : capture_frame.eol_annotations) {
-        const style_attributes_t &attributes = attributes_for(capture_eol.style_id);
+    for (const capture_eol_annotation &capture_eol : capture_frame.eol_annotations) {
+        const style_attributes &attributes = attributes_for(capture_eol.style_id);
 
-        Eol_annotation_primitive eol;
+        eol_annotation_primitive eol;
         eol.text = QString::fromUtf8(
             capture_eol.text.data(),
             static_cast<int>(capture_eol.text.size()));
@@ -673,10 +677,10 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.annotations.reserve(capture_frame.annotations.size());
-    for (const capture_annotation_t &capture_annot : capture_frame.annotations) {
-        const style_attributes_t &attributes = attributes_for(capture_annot.style_id);
+    for (const capture_annotation &capture_annot : capture_frame.annotations) {
+        const style_attributes &attributes = attributes_for(capture_annot.style_id);
 
-        Annotation_primitive annot;
+        annotation_primitive annot;
         annot.text = QString::fromUtf8(
             capture_annot.text.data(),
             static_cast<int>(capture_annot.text.size()));
@@ -696,8 +700,8 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.whitespace_marks.reserve(capture_frame.whitespace_marks.size());
-    for (const capture_whitespace_mark_t &capture_ws : capture_frame.whitespace_marks) {
-        Whitespace_mark_primitive ws;
+    for (const capture_whitespace_mark &capture_ws : capture_frame.whitespace_marks) {
+        whitespace_mark_primitive ws;
         ws.rect = rect_from_capture(
             capture_ws.left, capture_ws.top,
             capture_ws.right, capture_ws.bottom);
@@ -708,8 +712,8 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.decoration_underlines.reserve(capture_frame.decoration_underlines.size());
-    for (const capture_decoration_underline_t &capture_ul : capture_frame.decoration_underlines) {
-        Decoration_underline_primitive ul;
+    for (const capture_decoration_underline &capture_ul : capture_frame.decoration_underlines) {
+        decoration_underline_primitive ul;
         ul.rect = rect_from_capture(
             capture_ul.left, capture_ul.top,
             capture_ul.right, capture_ul.bottom);
@@ -719,8 +723,8 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     }
 
     frame.indent_guides.reserve(capture_frame.indent_guides.size());
-    for (const capture_indent_guide_t &capture_ig : capture_frame.indent_guides) {
-        Indent_guide_primitive ig;
+    for (const capture_indent_guide &capture_ig : capture_frame.indent_guides) {
+        indent_guide_primitive ig;
         ig.x = capture_ig.x;
         ig.top = capture_ig.top;
         ig.bottom = capture_ig.bottom;
@@ -732,7 +736,7 @@ Render_frame ScintillaQuickCore::render_frame_from_capture(const Capture_frame &
     return frame;
 }
 
-Capture_frame ScintillaQuickCore::capture_current_frame(
+captured_frame ScintillaQuickCore::capture_current_frame(
     bool static_content_dirty,
     bool ensure_styled,
     bool scrolling,
@@ -740,7 +744,7 @@ Capture_frame ScintillaQuickCore::capture_current_frame(
 {
     SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame");
 
-    Capture_frame frame;
+    captured_frame frame;
 
     if (!m_owner) {
         return frame;
@@ -788,7 +792,7 @@ Capture_frame ScintillaQuickCore::capture_current_frame(
         surface_impl->SetCaptureOnly(true);
     }
 
-    Capture_frame_builder collector(frame, static_content_dirty);
+    capture_frame_builder collector(frame, static_content_dirty);
     PRectangle capture_rect = client_rect;
     if (capture_buffer_lines > 0 && vs.lineHeight > 0) {
         capture_rect.top -= static_cast<XYPOSITION>(capture_buffer_lines * vs.lineHeight);
@@ -822,8 +826,8 @@ Capture_frame ScintillaQuickCore::capture_current_frame(
     return frame;
 }
 
-Render_frame ScintillaQuickCore::current_render_frame(
-    const Capture_frame *capture_frame,
+render_frame ScintillaQuickCore::current_render_frame(
+    const captured_frame *capture_frame,
     bool static_content_dirty,
     bool ensure_styled,
     bool scrolling,
@@ -835,7 +839,7 @@ Render_frame ScintillaQuickCore::current_render_frame(
         return render_frame_from_capture(*capture_frame);
     }
 
-    Capture_frame captured = capture_current_frame(static_content_dirty, ensure_styled, scrolling, extra_capture_lines);
+    captured_frame captured = capture_current_frame(static_content_dirty, ensure_styled, scrolling, extra_capture_lines);
     return render_frame_from_capture(captured);
 }
 
@@ -888,7 +892,7 @@ static const QString sMimeRectangularMarker("text/x-rectangular-marker");
 
 void ScintillaQuickCore::Init()
 {
-	rectangularSelectionModifier = SCMOD_ALT;
+	m_rectangular_selection_modifier = SCMOD_ALT;
 
 	connect(QGuiApplication::clipboard(), SIGNAL(selectionChanged()),
 		this, SLOT(SelectionChanged()));
@@ -917,13 +921,13 @@ bool ScintillaQuickCore::DragThreshold(Point ptStart, Point ptNow)
 		(yMove > QGuiApplication::styleHints()->startDragDistance());
 }
 
-static QString StringFromSelectedText(const SelectionText &selectedText)
+static QString string_from_selected_text(const SelectionText &selectedText)
 {
 	Q_UNUSED(selectedText.characterSet);
 	return QString::fromUtf8(selectedText.Data(), static_cast<int>(selectedText.Length()));
 }
 
-static void AddRectangularToMime(QMimeData *mimeData, [[maybe_unused]] const QString &su)
+static void add_rectangular_to_mime(QMimeData *mimeData, [[maybe_unused]] const QString &su)
 {
 	Q_UNUSED(su);
 #if defined(Q_OS_WIN)
@@ -941,7 +945,7 @@ static void AddRectangularToMime(QMimeData *mimeData, [[maybe_unused]] const QSt
 #endif
 }
 
-static void AddLineCutCopyToMime([[maybe_unused]] QMimeData *mimeData)
+static void add_line_cut_copy_to_mime([[maybe_unused]] QMimeData *mimeData)
 {
 	Q_UNUSED(mimeData);
 #if defined(Q_OS_WIN)
@@ -950,7 +954,7 @@ static void AddLineCutCopyToMime([[maybe_unused]] QMimeData *mimeData)
 #endif
 }
 
-static bool IsRectangularInMime(const QMimeData *mimeData)
+static bool is_rectangular_in_mime(const QMimeData *mimeData)
 {
 	QStringList formats = mimeData->formats();
 	for (int i = 0; i < formats.size(); ++i) {
@@ -974,7 +978,7 @@ static bool IsRectangularInMime(const QMimeData *mimeData)
 	return false;
 }
 
-static bool IsLineCutCopyInMime(const QMimeData *mimeData)
+static bool is_line_cut_copy_in_mime(const QMimeData *mimeData)
 {
 	QStringList formats = mimeData->formats();
 	for (int i = 0; i < formats.size(); ++i) {
@@ -1018,8 +1022,8 @@ void ScintillaQuickCore::reset_tracked_scroll_width_to_viewport()
 {
     const int viewport_width = std::max(1, static_cast<int>(GetTextRectangle().Width()));
     WndProc(Message::SetScrollWidth, static_cast<uptr_t>(viewport_width), 0);
-    if (xOffset > hMax) {
-        xOffset = hMax;
+    if (xOffset > m_h_max) {
+        xOffset = m_h_max;
         SetHorizontalScrollPos();
     }
 }
@@ -1030,20 +1034,20 @@ bool ScintillaQuickCore::ModifyScrollBars(Sci::Line nMax, Sci::Line nPage)
 
 	int vNewPage = nPage;
 	int vNewMax = nMax - vNewPage + 1;
-	if (vMax != vNewMax || vPage != vNewPage) {
-		vMax = vNewMax;
-		vPage = vNewPage;
+	if (m_v_max != vNewMax || m_v_page != vNewPage) {
+		m_v_max = vNewMax;
+		m_v_page = vNewPage;
 		modified = true;
-		emit verticalRangeChanged(vMax, vPage);
+		emit verticalRangeChanged(m_v_max, m_v_page);
 	}
 
 	int hNewPage = GetTextRectangle().Width();
 	int hNewMax = (scrollWidth > hNewPage) ? scrollWidth - hNewPage : 0;
-	if (hMax != hNewMax || hPage != hNewPage) {
-		hMax = hNewMax;
-		hPage = hNewPage;
+	if (m_h_max != hNewMax || m_h_page != hNewPage) {
+		m_h_max = hNewMax;
+		m_h_page = hNewPage;
 		modified = true;
-		emit horizontalRangeChanged(hMax, hPage);
+		emit horizontalRangeChanged(m_h_max, m_h_page);
 	}
 
 	return modified;
@@ -1052,7 +1056,7 @@ bool ScintillaQuickCore::ModifyScrollBars(Sci::Line nMax, Sci::Line nPage)
 void ScintillaQuickCore::CopyToModeClipboard(const SelectionText &selectedText, QClipboard::Mode clipboardMode_)
 {
 	QClipboard *clipboard = QGuiApplication::clipboard();
-	QString su = StringFromSelectedText(selectedText);
+	QString su = string_from_selected_text(selectedText);
 
 	// Owned by this function until the final hand-off to
 	// QClipboard::setMimeData (which takes ownership of the raw
@@ -1063,11 +1067,11 @@ void ScintillaQuickCore::CopyToModeClipboard(const SelectionText &selectedText, 
 	std::unique_ptr<QMimeData> mimeData = std::make_unique<QMimeData>();
 	mimeData->setText(su);
 	if (selectedText.rectangular) {
-		AddRectangularToMime(mimeData.get(), su);
+		add_rectangular_to_mime(mimeData.get(), su);
 	}
 
 	if (selectedText.lineCopy) {
-		AddLineCutCopyToMime(mimeData.get());
+		add_line_cut_copy_to_mime(mimeData.get());
 	}
 
 	// Allow client code to add additional data (e.g rich text).
@@ -1094,8 +1098,8 @@ void ScintillaQuickCore::PasteFromMode(QClipboard::Mode clipboardMode_)
 {
 	QClipboard *clipboard = QGuiApplication::clipboard();
 	const QMimeData *mimeData = clipboard->mimeData(clipboardMode_);
-	bool isRectangular = IsRectangularInMime(mimeData);
-	bool isLine = SelectionEmpty() && IsLineCutCopyInMime(mimeData);
+	bool isRectangular = is_rectangular_in_mime(mimeData);
+	bool isLine = SelectionEmpty() && is_line_cut_copy_in_mime(mimeData);
 	QString text = clipboard->text(clipboardMode_);
 	QByteArray utext = BytesForDocument(text);
 	std::string dest(utext.constData(), utext.length());
@@ -1294,13 +1298,13 @@ void ScintillaQuickCore::SetMouseCapture(bool on)
 {
 	// This is handled automatically by Qt
 	if (mouseDownCaptures) {
-		haveMouseCapture = on;
+		m_have_mouse_capture = on;
 	}
 }
 
 bool ScintillaQuickCore::HaveMouseCapture()
 {
-	return haveMouseCapture;
+	return m_have_mouse_capture;
 }
 
 void ScintillaQuickCore::StartDrag()
@@ -1309,13 +1313,13 @@ void ScintillaQuickCore::StartDrag()
 	dropWentOutside = true;
 	if (drag.Length() && m_owner) {
 		// Build the mime data under unique_ptr ownership so an
-		// exception thrown from StringFromSelectedText/setText or
+		// exception thrown from string_from_selected_text/setText or
 		// from the rectangular-marker helper does not leak it.
 		std::unique_ptr<QMimeData> mimeData = std::make_unique<QMimeData>();
-		const QString sText = StringFromSelectedText(drag);
+		const QString sText = string_from_selected_text(drag);
 		mimeData->setText(sText);
 		if (drag.rectangular) {
-			AddRectangularToMime(mimeData.get(), sText);
+			add_rectangular_to_mime(mimeData.get(), sText);
 		}
 
 		// QDrag is parented to the owning QQuickItem so Qt's object
@@ -1347,9 +1351,9 @@ void ScintillaQuickCore::StartDrag()
 	SetDragPosition(SelectionPosition(Sci::invalidPosition));
 }
 
-class CallTipItem : public QQuickItem {
+class call_tip_item : public QQuickItem {
 public:
-	explicit CallTipItem(CallTip *pct_, QQuickItem *parent)
+	explicit call_tip_item(CallTip *pct_, QQuickItem *parent)
 		: QQuickItem(parent),
 		  pct(pct_)
 	{
@@ -1402,7 +1406,7 @@ void ScintillaQuickCore::CreateCallTipWindow(PRectangle rc)
 
 	if (!ct.wCallTip.Created()) {
 		QQuickItem *parentItem = m_owner->window() ? m_owner->window()->contentItem() : static_cast<QQuickItem *>(m_owner);
-		QQuickItem *pCallTip = new CallTipItem(&ct, parentItem);
+		QQuickItem *pCallTip = new call_tip_item(&ct, parentItem);
 		ct.wCallTip = pCallTip;
 		pCallTip->setPosition(QPointF(rc.left, rc.top));
 		pCallTip->setSize(QSizeF(rc.Width(), rc.Height()));
@@ -1449,11 +1453,11 @@ sptr_t ScintillaQuickCore::WndProc(Message iMessage, uptr_t wParam, sptr_t lPara
 			return reinterpret_cast<sptr_t>(this);
 
         case Message::SetRectangularSelectionModifier:
-            rectangularSelectionModifier = static_cast<int>(wParam);
+            m_rectangular_selection_modifier = static_cast<int>(wParam);
             break;
 
         case Message::GetRectangularSelectionModifier:
-            return rectangularSelectionModifier;
+            return m_rectangular_selection_modifier;
 
         default:
 			return ScintillaBase::WndProc(iMessage, wParam, lParam);
@@ -1496,7 +1500,7 @@ void ScintillaQuickCore::PartialPaint(const PRectangle &rect)
 
 void ScintillaQuickCore::PartialPaintQml(const PRectangle & rect, QPainter *painter)
 {
-	currentPainter = painter;
+	m_current_painter = painter;
 	rcPaint = rect;
     paintState = PaintState::painting;
 	PRectangle rcClient = GetClientRectangle();
@@ -1523,7 +1527,7 @@ void ScintillaQuickCore::PartialPaintQml(const PRectangle & rect, QPainter *pain
 	}
 
     paintState = PaintState::notPainting;
-	currentPainter = nullptr;
+	m_current_painter = nullptr;
 }
 	
 void ScintillaQuickCore::DragEnter(const Point &point)
@@ -1545,7 +1549,7 @@ void ScintillaQuickCore::DragLeave()
 void ScintillaQuickCore::Drop(const Point &point, const QMimeData *data, bool move)
 {
 	QString text = data->text();
-	bool rectangular = IsRectangularInMime(data);
+	bool rectangular = is_rectangular_in_mime(data);
 	QByteArray bytes = BytesForDocument(text);
 	int len = bytes.length();
 

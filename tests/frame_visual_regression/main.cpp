@@ -20,6 +20,8 @@
 
 #include "Scintilla.h"
 
+// This test exercises Scintilla::Internal render data directly, so keeping the
+// internal namespace open here keeps the assertions readable.
 using namespace Scintilla::Internal;
 
 // ---------------------------------------------------------------------------
@@ -403,7 +405,7 @@ bool image_has_dark_text_pixels(
 // Image comparison
 // ---------------------------------------------------------------------------
 
-struct comparison_result_t
+struct comparison_result
 {
     bool    passed           = false;
     int     differing_pixels = 0;
@@ -411,9 +413,9 @@ struct comparison_result_t
     QImage  diff_image;
 };
 
-comparison_result_t compare_images(const QImage &actual, const QImage &expected)
+comparison_result compare_images(const QImage &actual, const QImage &expected)
 {
-    comparison_result_t result;
+    comparison_result result;
 
     QImage a = actual.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     QImage e = expected.convertToFormat(QImage::Format_ARGB32_Premultiplied);
@@ -479,7 +481,7 @@ static QString artifact_path(const char *name, const char *suffix)
          + QStringLiteral("_") + QString::fromUtf8(suffix) + QStringLiteral(".png");
 }
 
-enum class fixture_outcome_t { pass, fail, generated };
+enum class fixture_outcome { pass, fail, generated };
 
 bool regenerate_baselines()
 {
@@ -508,7 +510,7 @@ void trace_line(const QString &line)
     }
 }
 
-fixture_outcome_t run_visual_fixture(const char *name, const QImage &actual)
+fixture_outcome run_visual_fixture(const char *name, const QImage &actual)
 {
     trace_line(QStringLiteral("fixture %1: actual=%2x%3")
                    .arg(QString::fromUtf8(name))
@@ -517,14 +519,14 @@ fixture_outcome_t run_visual_fixture(const char *name, const QImage &actual)
 
     if (actual.isNull()) {
         qWarning("  [%s] FAIL: captured image is null", name);
-        return fixture_outcome_t::fail;
+        return fixture_outcome::fail;
     }
 
     if (!image_has_visible_content(actual, QColor(Qt::white))) {
         QDir().mkpath(QStringLiteral(ARTIFACT_DIR));
         actual.save(artifact_path(name, "blank"));
         qWarning("  [%s] FAIL: captured image appears blank", name);
-        return fixture_outcome_t::fail;
+        return fixture_outcome::fail;
     }
 
     QString bp = baseline_path(name);
@@ -534,13 +536,13 @@ fixture_outcome_t run_visual_fixture(const char *name, const QImage &actual)
     if (!QFile::exists(bp)) {
         if (!regenerate) {
             qWarning("  [%s] FAIL: missing baseline %s", name, qPrintable(bp));
-            return fixture_outcome_t::fail;
+            return fixture_outcome::fail;
         }
     } else if (!regenerate) {
         expected.load(bp);
         if (expected.isNull()) {
             qWarning("  [%s] FAIL: could not load baseline %s", name, qPrintable(bp));
-            return fixture_outcome_t::fail;
+            return fixture_outcome::fail;
         }
     }
 
@@ -549,15 +551,15 @@ fixture_outcome_t run_visual_fixture(const char *name, const QImage &actual)
         if (!actual.save(bp)) {
             qWarning("  [%s] FAIL: could not save baseline to %s",
                      name, qPrintable(bp));
-            return fixture_outcome_t::fail;
+            return fixture_outcome::fail;
         }
         qDebug("  [%s] GENERATED baseline: %s", name, qPrintable(bp));
-        return fixture_outcome_t::generated;
+        return fixture_outcome::generated;
     }
 
-    comparison_result_t cmp = compare_images(actual, expected);
+    comparison_result cmp = compare_images(actual, expected);
     if (cmp.passed) {
-        return fixture_outcome_t::pass;
+        return fixture_outcome::pass;
     }
 
     // Mismatch -- save artifacts.
@@ -569,7 +571,7 @@ fixture_outcome_t run_visual_fixture(const char *name, const QImage &actual)
     qWarning("  [%s] FAIL: %d differing pixels (%.2f%%), artifacts saved to %s",
              name, cmp.differing_pixels, cmp.diff_ratio * 100.0,
              qPrintable(QStringLiteral(ARTIFACT_DIR)));
-    return fixture_outcome_t::fail;
+    return fixture_outcome::fail;
 }
 
 QImage capture_stable_image(Fixture_editor &editor, const QByteArray &fixture_name, int attempts = 6)
@@ -588,7 +590,7 @@ QImage capture_stable_image(Fixture_editor &editor, const QByteArray &fixture_na
     return previous;
 }
 
-fixture_outcome_t run_scroll_probe_fixture(
+fixture_outcome run_scroll_probe_fixture(
     const QString &scenario_name,
     Fixture_editor &editor,
     QQuickWindow &window,
@@ -622,13 +624,13 @@ fixture_outcome_t run_scroll_probe_fixture(
             qWarning("  [%s] FAIL: timed out waiting for repaint after wheel step %d",
                      scenario_name.toUtf8().constData(),
                      step);
-            return fixture_outcome_t::fail;
+            return fixture_outcome::fail;
         }
         if (current_first_visible_line == previous_first_visible_line) {
             qWarning("  [%s] FAIL: wheel step %d did not change first visible line",
                      scenario_name.toUtf8().constData(),
                      step);
-            return fixture_outcome_t::fail;
+            return fixture_outcome::fail;
         }
 
         const QString step_name = QStringLiteral("%1_step_%2")
@@ -647,20 +649,20 @@ fixture_outcome_t run_scroll_probe_fixture(
             qWarning("  [%s] FAIL: wheel step %d produced a frame without visible text",
                      scenario_name.toUtf8().constData(),
                      step);
-            return fixture_outcome_t::fail;
+            return fixture_outcome::fail;
         }
-        fixture_outcome_t outcome = run_visual_fixture(step_name_bytes.constData(), captured);
-        if (outcome == fixture_outcome_t::fail) {
+        fixture_outcome outcome = run_visual_fixture(step_name_bytes.constData(), captured);
+        if (outcome == fixture_outcome::fail) {
             return outcome;
         }
-        if (outcome == fixture_outcome_t::generated) {
+        if (outcome == fixture_outcome::generated) {
             generated_any = true;
-        } else if (outcome != fixture_outcome_t::pass) {
+        } else if (outcome != fixture_outcome::pass) {
             return outcome;
         }
     }
 
-    return generated_any ? fixture_outcome_t::generated : fixture_outcome_t::pass;
+    return generated_any ? fixture_outcome::generated : fixture_outcome::pass;
 }
 
 } // namespace
@@ -669,7 +671,7 @@ fixture_outcome_t run_scroll_probe_fixture(
 // Fixture functions
 // ---------------------------------------------------------------------------
 
-static fixture_outcome_t vr_plain_ascii_short()
+static fixture_outcome vr_plain_ascii_short()
 {
     Fixture_editor f;
     f.set_text("alpha beta gamma");
@@ -677,7 +679,7 @@ static fixture_outcome_t vr_plain_ascii_short()
                               f.capture_image("plain_ascii_short"));
 }
 
-static fixture_outcome_t vr_plain_ascii_long_wrap()
+static fixture_outcome vr_plain_ascii_long_wrap()
 {
     Fixture_editor f;
     f.editor.setWidth(200);
@@ -690,7 +692,7 @@ static fixture_outcome_t vr_plain_ascii_long_wrap()
                               f.capture_image("plain_ascii_long_wrap"));
 }
 
-static fixture_outcome_t vr_mixed_styles_wrap()
+static fixture_outcome vr_mixed_styles_wrap()
 {
     Fixture_editor f;
     f.editor.setWidth(200);
@@ -731,7 +733,7 @@ static fixture_outcome_t vr_mixed_styles_wrap()
                               f.capture_image("mixed_styles_wrap"));
 }
 
-static fixture_outcome_t vr_selection_single_line()
+static fixture_outcome vr_selection_single_line()
 {
     Fixture_editor f;
     f.set_text("select this word here");
@@ -740,7 +742,7 @@ static fixture_outcome_t vr_selection_single_line()
                               f.capture_image("selection_single_line"));
 }
 
-static fixture_outcome_t vr_selection_wrap_boundary()
+static fixture_outcome vr_selection_wrap_boundary()
 {
     Fixture_editor f;
     f.editor.setWidth(200);
@@ -757,7 +759,7 @@ static fixture_outcome_t vr_selection_wrap_boundary()
                               f.capture_image("selection_wrap_boundary"));
 }
 
-static fixture_outcome_t vr_caret_mid_line()
+static fixture_outcome vr_caret_mid_line()
 {
     Fixture_editor f;
     f.set_text("caret goes here in the middle of styled text");
@@ -766,7 +768,7 @@ static fixture_outcome_t vr_caret_mid_line()
                               f.capture_image("caret_mid_line"));
 }
 
-static fixture_outcome_t vr_caret_wrap_continuation()
+static fixture_outcome vr_caret_wrap_continuation()
 {
     Fixture_editor f;
     f.editor.setWidth(200);
@@ -781,7 +783,7 @@ static fixture_outcome_t vr_caret_wrap_continuation()
                               f.capture_image("caret_wrap_continuation"));
 }
 
-static fixture_outcome_t vr_current_line_basic()
+static fixture_outcome vr_current_line_basic()
 {
     Fixture_editor f;
     f.editor.send(SCI_SETCARETLINEVISIBLE, 1);
@@ -792,7 +794,7 @@ static fixture_outcome_t vr_current_line_basic()
                               f.capture_image("current_line_basic"));
 }
 
-static fixture_outcome_t vr_current_line_wrap()
+static fixture_outcome vr_current_line_wrap()
 {
     Fixture_editor f;
     f.editor.setWidth(200);
@@ -809,7 +811,7 @@ static fixture_outcome_t vr_current_line_wrap()
                               f.capture_image("current_line_wrap"));
 }
 
-static fixture_outcome_t vr_margin_numbers_basic()
+static fixture_outcome vr_margin_numbers_basic()
 {
     Fixture_editor f;
     f.editor.send(SCI_SETMARGINTYPEN, 0, SC_MARGIN_NUMBER);
@@ -819,7 +821,7 @@ static fixture_outcome_t vr_margin_numbers_basic()
                               f.capture_image("margin_numbers_basic"));
 }
 
-static fixture_outcome_t vr_margin_numbers_wrap()
+static fixture_outcome vr_margin_numbers_wrap()
 {
     Fixture_editor f;
     f.editor.setWidth(200);
@@ -836,7 +838,7 @@ static fixture_outcome_t vr_margin_numbers_wrap()
                               f.capture_image("margin_numbers_wrap"));
 }
 
-static fixture_outcome_t vr_plain_indicator_basic()
+static fixture_outcome vr_plain_indicator_basic()
 {
     Fixture_editor f;
     f.set_text("indicator on this text here");
@@ -851,7 +853,7 @@ static fixture_outcome_t vr_plain_indicator_basic()
                               f.capture_image("plain_indicator_basic"));
 }
 
-static fixture_outcome_t vr_control_repr_simple()
+static fixture_outcome vr_control_repr_simple()
 {
     Fixture_editor f;
     // Text with control characters that trigger representation rendering.
@@ -860,7 +862,7 @@ static fixture_outcome_t vr_control_repr_simple()
                               f.capture_image("control_repr_simple"));
 }
 
-static fixture_outcome_t vr_multi_selection()
+static fixture_outcome vr_multi_selection()
 {
     Fixture_editor f;
     f.set_text("aaa bbb ccc ddd eee fff");
@@ -871,7 +873,7 @@ static fixture_outcome_t vr_multi_selection()
                               f.capture_image("multi_selection"));
 }
 
-static fixture_outcome_t vr_rectangular_selection()
+static fixture_outcome vr_rectangular_selection()
 {
     Fixture_editor f;
     f.set_text("line one\nline two\nline three");
@@ -883,7 +885,7 @@ static fixture_outcome_t vr_rectangular_selection()
                               f.capture_image("rectangular_selection"));
 }
 
-static fixture_outcome_t vr_current_line_frame()
+static fixture_outcome vr_current_line_frame()
 {
     Fixture_editor f;
     f.editor.send(SCI_SETCARETLINEVISIBLE, 1);
@@ -895,7 +897,7 @@ static fixture_outcome_t vr_current_line_frame()
                               f.capture_image("current_line_frame"));
 }
 
-static fixture_outcome_t vr_squiggle_indicator()
+static fixture_outcome vr_squiggle_indicator()
 {
     Fixture_editor f;
     f.editor.setWidth(900);
@@ -910,7 +912,7 @@ static fixture_outcome_t vr_squiggle_indicator()
                               f.capture_image("squiggle_indicator"));
 }
 
-static fixture_outcome_t vr_box_indicator()
+static fixture_outcome vr_box_indicator()
 {
     Fixture_editor f;
     f.editor.setWidth(900);
@@ -925,7 +927,7 @@ static fixture_outcome_t vr_box_indicator()
                               f.capture_image("box_indicator"));
 }
 
-static fixture_outcome_t vr_marker_symbol()
+static fixture_outcome vr_marker_symbol()
 {
     Fixture_editor f;
     f.editor.send(SCI_SETMARGINTYPEN, 1, SC_MARGIN_SYMBOL);
@@ -940,7 +942,7 @@ static fixture_outcome_t vr_marker_symbol()
                               f.capture_image("marker_symbol"));
 }
 
-static fixture_outcome_t vr_multi_caret()
+static fixture_outcome vr_multi_caret()
 {
     Fixture_editor f;
     f.set_text("abc def ghi jkl");
@@ -951,7 +953,7 @@ static fixture_outcome_t vr_multi_caret()
                               f.capture_image("multi_caret"));
 }
 
-static fixture_outcome_t vr_whitespace_visible()
+static fixture_outcome vr_whitespace_visible()
 {
     Fixture_editor f;
     f.editor.send(SCI_SETVIEWWS, SCWS_VISIBLEALWAYS);
@@ -960,7 +962,7 @@ static fixture_outcome_t vr_whitespace_visible()
                               f.capture_image("whitespace_visible"));
 }
 
-static fixture_outcome_t vr_eol_annotation()
+static fixture_outcome vr_eol_annotation()
 {
     Fixture_editor f;
     f.set_text("line one\nline two\n");
@@ -972,7 +974,7 @@ static fixture_outcome_t vr_eol_annotation()
                               f.capture_image("eol_annotation"));
 }
 
-static fixture_outcome_t vr_annotation()
+static fixture_outcome vr_annotation()
 {
     Fixture_editor f;
     f.set_text("line one\nline two\nline three");
@@ -984,7 +986,7 @@ static fixture_outcome_t vr_annotation()
                               f.capture_image("annotation"));
 }
 
-static fixture_outcome_t vr_indent_guide()
+static fixture_outcome vr_indent_guide()
 {
     Fixture_editor f;
     f.editor.send(SCI_SETINDENTATIONGUIDES, SC_IV_REAL);
@@ -995,7 +997,7 @@ static fixture_outcome_t vr_indent_guide()
                               f.capture_image("indent_guide"));
 }
 
-static fixture_outcome_t vr_style_underline()
+static fixture_outcome vr_style_underline()
 {
     Fixture_editor f;
     f.editor.setWidth(900);
@@ -1009,7 +1011,7 @@ static fixture_outcome_t vr_style_underline()
                               f.capture_image("style_underline"));
 }
 
-static fixture_outcome_t vr_scroll_wheel_bounce_unwrapped()
+static fixture_outcome vr_scroll_wheel_bounce_unwrapped()
 {
     Fixture_editor f;
     f.editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
@@ -1030,7 +1032,7 @@ static fixture_outcome_t vr_scroll_wheel_bounce_unwrapped()
         false);
 }
 
-static fixture_outcome_t vr_scroll_wheel_bounce_wrapped()
+static fixture_outcome vr_scroll_wheel_bounce_wrapped()
 {
     Fixture_editor f;
     f.editor.send(SCI_SETWRAPMODE, SC_WRAP_WORD);
@@ -1055,7 +1057,7 @@ static fixture_outcome_t vr_scroll_wheel_bounce_wrapped()
 // Phase 8 VR fixtures: fold / marker / annotation fidelity
 // ---------------------------------------------------------------------------
 
-static fixture_outcome_t vr_fold_display_text()
+static fixture_outcome vr_fold_display_text()
 {
     Fixture_editor f;
     f.editor.send(SCI_SETPROPERTY,
@@ -1083,7 +1085,7 @@ static fixture_outcome_t vr_fold_display_text()
                               f.capture_image("fold_display_text"));
 }
 
-static fixture_outcome_t vr_fold_markers()
+static fixture_outcome vr_fold_markers()
 {
     Fixture_editor f;
     f.editor.send(SCI_SETMARGINTYPEN, 2, SC_MARGIN_SYMBOL);
@@ -1111,7 +1113,7 @@ static fixture_outcome_t vr_fold_markers()
                               f.capture_image("fold_markers"));
 }
 
-static fixture_outcome_t vr_annotation_boxed()
+static fixture_outcome vr_annotation_boxed()
 {
     Fixture_editor f;
     f.set_text("line one\nline two\nline three");
@@ -1134,7 +1136,7 @@ static fixture_outcome_t vr_annotation_boxed()
 // Phase 9: EOL annotation boxed
 // ---------------------------------------------------------------------------
 
-static fixture_outcome_t vr_eol_annotation_boxed()
+static fixture_outcome vr_eol_annotation_boxed()
 {
     Fixture_editor f;
     f.set_text("line one\nline two\n");
@@ -1209,7 +1211,7 @@ int main(int argc, char **argv)
     qDebug("");
     trace_line(QStringLiteral("main: fixtures starting"));
 
-    struct { const char *name; fixture_outcome_t (*fn)(); } fixtures[] = {
+    struct { const char *name; fixture_outcome (*fn)(); } fixtures[] = {
         {"plain_ascii_short",         vr_plain_ascii_short},
         {"plain_ascii_long_wrap",     vr_plain_ascii_long_wrap},
         {"mixed_styles_wrap",         vr_mixed_styles_wrap},
@@ -1254,17 +1256,17 @@ int main(int argc, char **argv)
         }
         ran_any_fixture = true;
         qDebug("--- %s", f.name);
-        fixture_outcome_t outcome = f.fn();
+        fixture_outcome outcome = f.fn();
         switch (outcome) {
-        case fixture_outcome_t::pass:
+        case fixture_outcome::pass:
             qDebug("  PASS [%s]\n", f.name);
             ++g_pass_count;
             break;
-        case fixture_outcome_t::generated:
+        case fixture_outcome::generated:
             qDebug("  GENERATED [%s] (needs review before commit)\n", f.name);
             ++g_gen_count;
             break;
-        case fixture_outcome_t::fail:
+        case fixture_outcome::fail:
             qWarning("  FIXTURE FAILED [%s]\n", f.name);
             ++g_fail_count;
             break;

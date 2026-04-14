@@ -72,12 +72,12 @@ namespace Scintilla::Internal {
 
 class ScintillaQuickCore;
 class SurfaceImpl;
-struct Render_frame;
+struct render_frame;
 
 // Test / benchmark support type. Consumed by the in-tree benchmark harness
 // and by test_support/scintillaquick_validation_access.h. Not intended as
 // part of the long-term public API; treat as internal.
-struct displayed_row_for_test_t
+struct displayed_row_for_test
 {
     int document_line = 0;
     int subline_index = 0;
@@ -87,7 +87,7 @@ struct displayed_row_for_test_t
 };
 
 #ifdef SCINTILLAQUICK_ENABLE_TEST_ACCESS
-class ScintillaQuick_validation_access;
+class scintillaquick_validation_access;
 #endif
 
 }
@@ -262,15 +262,15 @@ protected:
 
 private:
 #ifdef SCINTILLAQUICK_ENABLE_TEST_ACCESS
-	friend class Scintilla::Internal::ScintillaQuick_validation_access;
+	friend class Scintilla::Internal::scintillaquick_validation_access;
 #endif
 
-	class Render_data;
-	class Profiling_state;
+	class render_data;
+	class profiling_state;
 
 	QString getText() const;
 	void setText(const QString & txt);
-	QFont getFont() const { return aFont; }
+	QFont getFont() const { return m_font; }
 	void setFont(const QFont & newFont);
 	void setStylesFont(const QFont &f, int style);
 	int getLogicalWidth() const;
@@ -293,13 +293,13 @@ private:
     void syncCaretBlinkTimer(bool resetPhase = false);
 	void updateQuickView(Scintilla::Update updated);
 	void build_render_snapshot();
-	std::vector<Scintilla::Internal::displayed_row_for_test_t> displayed_rows_for_test() const;
-	const Scintilla::Internal::Render_frame &rendered_frame_for_test() const;
+	std::vector<Scintilla::Internal::displayed_row_for_test> displayed_rows_for_test() const;
+	const Scintilla::Internal::render_frame &rendered_frame_for_test() const;
     void reset_tracked_scroll_width();
 
-	bool enableUpdateFlag;
-	int logicalWidth;
-	int logicalHeight;
+	bool m_updates_enabled;
+	int m_logical_width;
+	int m_logical_height;
 	// The following members are NOT a read cache — `getCharHeight()`,
 	// `getCharWidth()`, etc. re-query Scintilla on every call. They
 	// are the "last value we emitted a NOTIFY signal for" so that
@@ -314,17 +314,17 @@ private:
 	int m_last_emitted_visible_columns = -1;
 	int m_last_emitted_first_visible_line = -1;
 	int m_last_emitted_first_visible_column = -1;
-	QFont aFont;
-	Qt::InputMethodHints dataInputMethodHints;
-	qint64 aLastTouchPressTime;
+	QFont m_font;
+	Qt::InputMethodHints m_input_method_hints;
+	qint64 m_last_touch_press_time;
 
-	Scintilla::Internal::ScintillaQuickCore *sqt;
+	Scintilla::Internal::ScintillaQuickCore *m_core;
 
-	QElapsedTimer time;
+	QElapsedTimer m_elapsed_timer;
 
-	Scintilla::Position preeditPos;
-	std::unique_ptr<Render_data> m_render_data;
-	std::unique_ptr<Profiling_state> m_profiling_state;
+	Scintilla::Position m_preedit_pos;
+	std::unique_ptr<render_data> m_render_data;
+	std::unique_ptr<profiling_state> m_profiling_state;
     QTimer m_caret_blink_timer;
     bool m_caret_blink_visible = true;
     // Re-entry guard for `send()`'s dispatch -> `syncQuickViewProperties()`

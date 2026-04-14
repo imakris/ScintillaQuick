@@ -16,19 +16,19 @@
 
 namespace Scintilla::Internal {
 
-class ScintillaQuick_validation_access
+class scintillaquick_validation_access
 {
 public:
-    static Render_frame capture_frame(ScintillaQuickItem &item)
+    static render_frame capture_frame(ScintillaQuickItem &item)
     {
-        if (!item.sqt) {
+        if (!item.m_core) {
             return {};
         }
 
-        return item.sqt->current_render_frame();
+        return item.m_core->current_render_frame();
     }
 
-    static Render_frame capture_cached_frame(ScintillaQuickItem &item)
+    static render_frame capture_cached_frame(ScintillaQuickItem &item)
     {
         if (!item.m_render_data) {
             return {};
@@ -40,7 +40,7 @@ public:
 
     static QImage capture_raster_reference(ScintillaQuickItem &item)
     {
-        if (!item.sqt) {
+        if (!item.m_core) {
             return {};
         }
 
@@ -57,7 +57,7 @@ public:
         image.fill(Qt::white);
 
         QPainter painter(&image);
-        item.sqt->PartialPaintQml(PRectangle(0.0, 0.0, logical_width, logical_height), &painter);
+        item.m_core->PartialPaintQml(PRectangle(0.0, 0.0, logical_width, logical_height), &painter);
         painter.end();
 
         return image;

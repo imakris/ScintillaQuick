@@ -18,10 +18,10 @@
 
 namespace Scintilla::Internal {
 
-class Hierarchical_profiler
+class hierarchical_profiler
 {
 public:
-    Hierarchical_profiler()
+    hierarchical_profiler()
     {
         m_root.name = "[root]";
     }
@@ -43,13 +43,13 @@ public:
         const auto start_time = std::chrono::steady_clock::now();
 
         std::lock_guard<std::mutex> lock(m_mutex);
-        thread_context_t &context = thread_context_locked();
+        thread_context &context = thread_context_locked();
         context.start_times.push_back(start_time);
 
         auto &children = context.current->children;
         auto it = children.find(scope_name);
         if (it == children.end()) {
-            auto child = std::make_unique<scope_stats_t>();
+            auto child = std::make_unique<scope_stats>();
             child->name = scope_name;
             child->parent = context.current;
             it = children.emplace(scope_name, std::move(child)).first;
@@ -62,7 +62,7 @@ public:
         const auto end_time = std::chrono::steady_clock::now();
 
         std::lock_guard<std::mutex> lock(m_mutex);
-        thread_context_t &context = thread_context_locked();
+        thread_context &context = thread_context_locked();
         if (!context.current || context.start_times.empty()) {
             return;
         }
@@ -89,33 +89,33 @@ public:
     }
 
 private:
-    struct scope_stats_t
+    struct scope_stats
     {
         std::string name;
         uint64_t call_count = 0;
         uint64_t total_ns = 0;
         uint64_t min_ns = std::numeric_limits<uint64_t>::max();
         uint64_t max_ns = 0;
-        std::map<std::string, std::unique_ptr<scope_stats_t>> children;
-        scope_stats_t *parent = nullptr;
+        std::map<std::string, std::unique_ptr<scope_stats>> children;
+        scope_stats *parent = nullptr;
     };
 
-    struct thread_context_t
+    struct thread_context
     {
-        scope_stats_t *current = nullptr;
+        scope_stats *current = nullptr;
         std::vector<std::chrono::steady_clock::time_point> start_times;
     };
 
-    thread_context_t &thread_context_locked()
+    thread_context &thread_context_locked()
     {
-        thread_context_t &context = m_thread_contexts[std::this_thread::get_id()];
+        thread_context &context = m_thread_contexts[std::this_thread::get_id()];
         if (!context.current) {
             context.current = &m_root;
         }
         return context;
     }
 
-    static QJsonObject node_to_json(const scope_stats_t &node, bool include_name)
+    static QJsonObject node_to_json(const scope_stats &node, bool include_name)
     {
         QJsonObject object;
         if (include_name) {
@@ -145,39 +145,39 @@ private:
         return object;
     }
 
-    scope_stats_t m_root;
+    scope_stats m_root;
     mutable std::mutex m_mutex;
-    std::map<std::thread::id, thread_context_t> m_thread_contexts;
+    std::map<std::thread::id, thread_context> m_thread_contexts;
 };
 
-inline thread_local Hierarchical_profiler *g_active_hierarchical_profiler = nullptr;
+inline thread_local hierarchical_profiler *g_active_hierarchical_profiler = nullptr;
 
-class Active_hierarchical_profiler_binding
+class active_hierarchical_profiler_binding
 {
 public:
-    explicit Active_hierarchical_profiler_binding(Hierarchical_profiler *profiler)
+    explicit active_hierarchical_profiler_binding(hierarchical_profiler *profiler)
     :
         m_previous(g_active_hierarchical_profiler)
     {
         g_active_hierarchical_profiler = profiler;
     }
 
-    ~Active_hierarchical_profiler_binding()
+    ~active_hierarchical_profiler_binding()
     {
         g_active_hierarchical_profiler = m_previous;
     }
 
-    Active_hierarchical_profiler_binding(const Active_hierarchical_profiler_binding &) = delete;
-    Active_hierarchical_profiler_binding &operator=(const Active_hierarchical_profiler_binding &) = delete;
+    active_hierarchical_profiler_binding(const active_hierarchical_profiler_binding &) = delete;
+    active_hierarchical_profiler_binding &operator=(const active_hierarchical_profiler_binding &) = delete;
 
 private:
-    Hierarchical_profiler *m_previous = nullptr;
+    hierarchical_profiler *m_previous = nullptr;
 };
 
-class Hierarchical_profile_scope
+class hierarchical_profile_scope
 {
 public:
-    Hierarchical_profile_scope(Hierarchical_profiler *profiler, const char *name)
+    hierarchical_profile_scope(hierarchical_profiler *profiler, const char *name)
     :
         m_profiler(profiler)
     {
@@ -186,21 +186,21 @@ public:
         }
     }
 
-    ~Hierarchical_profile_scope()
+    ~hierarchical_profile_scope()
     {
         if (m_profiler) {
             m_profiler->end_scope();
         }
     }
 
-    Hierarchical_profile_scope(const Hierarchical_profile_scope &) = delete;
-    Hierarchical_profile_scope &operator=(const Hierarchical_profile_scope &) = delete;
+    hierarchical_profile_scope(const hierarchical_profile_scope &) = delete;
+    hierarchical_profile_scope &operator=(const hierarchical_profile_scope &) = delete;
 
 private:
-    Hierarchical_profiler *m_profiler = nullptr;
+    hierarchical_profiler *m_profiler = nullptr;
 };
 
-inline Hierarchical_profiler *active_hierarchical_profiler()
+inline hierarchical_profiler *active_hierarchical_profiler()
 {
     return g_active_hierarchical_profiler;
 }
@@ -209,7 +209,7 @@ inline Hierarchical_profiler *active_hierarchical_profiler()
 #define SCINTILLAQUICK_CONCAT(a, b) SCINTILLAQUICK_CONCAT_IMPL(a, b)
 
 #define SCINTILLAQUICK_PROFILE_SCOPE(profiler, name) \
-    ::Scintilla::Internal::Hierarchical_profile_scope \
+    ::Scintilla::Internal::hierarchical_profile_scope \
         SCINTILLAQUICK_CONCAT(scintillaquick_profile_scope_, __LINE__)((profiler), (name))
 
 #define SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE(name) \

@@ -10,27 +10,27 @@ class QSGNode;
 
 namespace Scintilla::Internal {
 
-struct Render_frame;
+struct render_frame;
 
-struct gutter_band_t {
+struct gutter_band {
     QRectF rect;
     QColor color;
 };
 
-struct render_snapshot_t {
+struct render_snapshot {
     QSizeF item_size;
     QColor background;
-    std::vector<gutter_band_t> gutter_bands;
+    std::vector<gutter_band> gutter_bands;
 };
 
-class Scene_graph_renderer
+class scene_graph_renderer
 {
 public:
     QSGNode *update(
         QQuickWindow *window,
         QSGNode *old_node,
-        const render_snapshot_t &snapshot,
-        const Render_frame &frame);
+        const render_snapshot &snapshot,
+        const render_frame &frame);
 };
 
 }

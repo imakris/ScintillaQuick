@@ -12,14 +12,14 @@
 
 namespace Scintilla::Internal {
 
-enum class text_direction_t
+enum class text_direction
 {
     left_to_right,
     right_to_left,
     mixed,
 };
 
-struct capture_text_run_t
+struct capture_text_run
 {
     std::string text;
     double x = 0.0;
@@ -43,12 +43,12 @@ struct capture_text_run_t
     QColor foreground;
     QColor blob_outer;
     QColor blob_inner;
-    text_direction_t direction = text_direction_t::left_to_right;
+    text_direction direction = text_direction::left_to_right;
     bool is_represented_text = false;
     bool represented_as_blob = false;
 };
 
-struct capture_visual_line_t
+struct capture_visual_line
 {
     int document_line = 0;
     int subline_index = 0;
@@ -58,10 +58,10 @@ struct capture_visual_line_t
     double right = 0.0;
     double bottom = 0.0;
     double baseline_y = 0.0;
-    std::vector<capture_text_run_t> text_runs;
+    std::vector<capture_text_run> text_runs;
 };
 
-struct capture_selection_primitive_t
+struct capture_selection_primitive
 {
     double left = 0.0;
     double top = 0.0;
@@ -71,7 +71,7 @@ struct capture_selection_primitive_t
     bool is_main = false;
 };
 
-struct capture_caret_primitive_t
+struct capture_caret_primitive
 {
     double left = 0.0;
     double top = 0.0;
@@ -81,7 +81,7 @@ struct capture_caret_primitive_t
     bool is_main = false;
 };
 
-struct capture_indicator_primitive_t
+struct capture_indicator_primitive
 {
     double left = 0.0;
     double top = 0.0;
@@ -103,7 +103,7 @@ struct capture_indicator_primitive_t
     bool is_main = false;
 };
 
-struct capture_current_line_primitive_t
+struct capture_current_line_primitive
 {
     double left = 0.0;
     double top = 0.0;
@@ -113,7 +113,7 @@ struct capture_current_line_primitive_t
     bool framed = false;
 };
 
-struct capture_marker_primitive_t
+struct capture_marker_primitive
 {
     double left = 0.0;
     double top = 0.0;
@@ -128,7 +128,7 @@ struct capture_marker_primitive_t
     int fold_part = 0; // 0=undefined, 1=head, 2=body, 3=tail, 4=headWithTail
 };
 
-struct capture_margin_text_primitive_t
+struct capture_margin_text_primitive
 {
     std::string text;
     double x = 0.0;
@@ -143,7 +143,7 @@ struct capture_margin_text_primitive_t
     int style_id = 0;
 };
 
-struct capture_fold_display_text_t
+struct capture_fold_display_text
 {
     std::string text;
     double left = 0.0;
@@ -158,7 +158,7 @@ struct capture_fold_display_text_t
     bool boxed = false;
 };
 
-struct capture_eol_annotation_t
+struct capture_eol_annotation
 {
     std::string text;
     double left = 0.0;
@@ -174,7 +174,7 @@ struct capture_eol_annotation_t
     int visible_style = 0;
 };
 
-struct capture_annotation_t
+struct capture_annotation
 {
     std::string text;
     double left = 0.0;
@@ -191,13 +191,13 @@ struct capture_annotation_t
     bool boxed = false;
 };
 
-enum class whitespace_mark_kind_t
+enum class whitespace_mark_kind
 {
     space_dot,
     tab_arrow,
 };
 
-struct capture_whitespace_mark_t
+struct capture_whitespace_mark
 {
     double left = 0.0;
     double top = 0.0;
@@ -205,26 +205,26 @@ struct capture_whitespace_mark_t
     double bottom = 0.0;
     double mid_y = 0.0;
     std::uint32_t rgba = 0;
-    whitespace_mark_kind_t kind = whitespace_mark_kind_t::space_dot;
+    whitespace_mark_kind kind = whitespace_mark_kind::space_dot;
 };
 
-enum class decoration_kind_t
+enum class decoration_kind
 {
     hotspot,
     style_underline,
 };
 
-struct capture_decoration_underline_t
+struct capture_decoration_underline
 {
     double left = 0.0;
     double top = 0.0;
     double right = 0.0;
     double bottom = 0.0;
     std::uint32_t rgba = 0;
-    decoration_kind_t kind = decoration_kind_t::style_underline;
+    decoration_kind kind = decoration_kind::style_underline;
 };
 
-struct capture_indent_guide_t
+struct capture_indent_guide
 {
     double x = 0.0;
     double top = 0.0;
@@ -233,7 +233,7 @@ struct capture_indent_guide_t
     bool highlight = false;
 };
 
-struct Capture_frame
+struct captured_frame
 {
     double viewport_width = 0.0;
     double viewport_height = 0.0;
@@ -245,37 +245,37 @@ struct Capture_frame
     double margin_top = 0.0;
     double margin_width = 0.0;
     double margin_height = 0.0;
-    std::vector<capture_visual_line_t> visual_lines;
-    std::vector<capture_selection_primitive_t> selection_primitives;
-    std::vector<capture_caret_primitive_t> caret_primitives;
-    std::vector<capture_indicator_primitive_t> indicator_primitives;
-    std::vector<capture_current_line_primitive_t> current_line_primitives;
-    std::vector<capture_marker_primitive_t> marker_primitives;
-    std::vector<capture_margin_text_primitive_t> margin_text_primitives;
-    std::vector<capture_fold_display_text_t> fold_display_texts;
-    std::vector<capture_eol_annotation_t> eol_annotations;
-    std::vector<capture_annotation_t> annotations;
-    std::vector<capture_whitespace_mark_t> whitespace_marks;
-    std::vector<capture_decoration_underline_t> decoration_underlines;
-    std::vector<capture_indent_guide_t> indent_guides;
+    std::vector<capture_visual_line> visual_lines;
+    std::vector<capture_selection_primitive> selection_primitives;
+    std::vector<capture_caret_primitive> caret_primitives;
+    std::vector<capture_indicator_primitive> indicator_primitives;
+    std::vector<capture_current_line_primitive> current_line_primitives;
+    std::vector<capture_marker_primitive> marker_primitives;
+    std::vector<capture_margin_text_primitive> margin_text_primitives;
+    std::vector<capture_fold_display_text> fold_display_texts;
+    std::vector<capture_eol_annotation> eol_annotations;
+    std::vector<capture_annotation> annotations;
+    std::vector<capture_whitespace_mark> whitespace_marks;
+    std::vector<capture_decoration_underline> decoration_underlines;
+    std::vector<capture_indent_guide> indent_guides;
 };
 
-struct visual_line_key_t
+struct visual_line_key
 {
     int document_line = 0;
     int subline_index = 0;
 
-    friend bool operator==(const visual_line_key_t &a, const visual_line_key_t &b) noexcept
+    friend bool operator==(const visual_line_key &a, const visual_line_key &b) noexcept
     {
         return a.document_line == b.document_line && a.subline_index == b.subline_index;
     }
-    friend bool operator!=(const visual_line_key_t &a, const visual_line_key_t &b) noexcept
+    friend bool operator!=(const visual_line_key &a, const visual_line_key &b) noexcept
     {
         return !(a == b);
     }
 };
 
-struct text_run_t
+struct text_run
 {
     QString text;
     QPointF position;
@@ -290,36 +290,36 @@ struct text_run_t
     QColor blob_inner;
     QFont font;
     int style_id = 0;
-    text_direction_t direction = text_direction_t::left_to_right;
+    text_direction direction = text_direction::left_to_right;
     bool is_represented_text = false;
     bool represented_as_blob = false;
 };
 
-struct visual_line_frame_t
+struct visual_line_frame
 {
-    visual_line_key_t key;
+    visual_line_key key;
     int visual_order = 0;
     QPointF origin;
     qreal baseline_y = 0.0;
     QRectF clip_rect;
-    std::vector<text_run_t> text_runs;
+    std::vector<text_run> text_runs;
 };
 
-struct Selection_primitive
+struct selection_primitive
 {
     QRectF rect;
     QColor color;
     bool is_main = false;
 };
 
-struct caret_primitive_t
+struct caret_primitive
 {
     QRectF rect;
     QColor color;
     bool is_main = false;
 };
 
-struct Indicator_primitive
+struct indicator_primitive
 {
     QRectF rect;
     QRectF line_rect;
@@ -334,14 +334,14 @@ struct Indicator_primitive
     bool is_main = false;
 };
 
-struct Current_line_primitive
+struct current_line_primitive
 {
     QRectF rect;
     QColor color;
     bool framed = false;
 };
 
-struct Marker_primitive
+struct marker_primitive
 {
     QRectF rect;
     int marker_number = 0;
@@ -353,7 +353,7 @@ struct Marker_primitive
     int fold_part = 0;
 };
 
-struct Margin_text_primitive
+struct margin_text_primitive
 {
     QString text;
     QPointF position;
@@ -366,7 +366,7 @@ struct Margin_text_primitive
     int style_id = 0;
 };
 
-struct Fold_display_text_primitive
+struct fold_display_text_primitive
 {
     QString text;
     QPointF position;
@@ -380,7 +380,7 @@ struct Fold_display_text_primitive
     bool boxed = false;
 };
 
-struct Eol_annotation_primitive
+struct eol_annotation_primitive
 {
     QString text;
     QPointF position;
@@ -394,7 +394,7 @@ struct Eol_annotation_primitive
     int visible_style = 0;
 };
 
-struct Annotation_primitive
+struct annotation_primitive
 {
     QString text;
     QPointF position;
@@ -409,22 +409,22 @@ struct Annotation_primitive
     bool boxed = false;
 };
 
-struct Whitespace_mark_primitive
+struct whitespace_mark_primitive
 {
     QRectF rect;
     qreal mid_y = 0.0;
     QColor color;
-    whitespace_mark_kind_t kind = whitespace_mark_kind_t::space_dot;
+    whitespace_mark_kind kind = whitespace_mark_kind::space_dot;
 };
 
-struct Decoration_underline_primitive
+struct decoration_underline_primitive
 {
     QRectF rect;
     QColor color;
-    decoration_kind_t kind = decoration_kind_t::style_underline;
+    decoration_kind kind = decoration_kind::style_underline;
 };
 
-struct Indent_guide_primitive
+struct indent_guide_primitive
 {
     qreal x = 0.0;
     qreal top = 0.0;
@@ -433,23 +433,23 @@ struct Indent_guide_primitive
     bool highlight = false;
 };
 
-struct Render_frame
+struct render_frame
 {
     QRectF text_rect;
     QRectF margin_rect;
-    std::vector<visual_line_frame_t> visual_lines;
-    std::vector<Selection_primitive> selection_primitives;
-    std::vector<caret_primitive_t> caret_primitives;
-    std::vector<Indicator_primitive> indicator_primitives;
-    std::vector<Current_line_primitive> current_line_primitives;
-    std::vector<Marker_primitive> marker_primitives;
-    std::vector<Margin_text_primitive> margin_text_primitives;
-    std::vector<Fold_display_text_primitive> fold_display_texts;
-    std::vector<Eol_annotation_primitive> eol_annotations;
-    std::vector<Annotation_primitive> annotations;
-    std::vector<Whitespace_mark_primitive> whitespace_marks;
-    std::vector<Decoration_underline_primitive> decoration_underlines;
-    std::vector<Indent_guide_primitive> indent_guides;
+    std::vector<visual_line_frame> visual_lines;
+    std::vector<selection_primitive> selection_primitives;
+    std::vector<caret_primitive> caret_primitives;
+    std::vector<indicator_primitive> indicator_primitives;
+    std::vector<current_line_primitive> current_line_primitives;
+    std::vector<marker_primitive> marker_primitives;
+    std::vector<margin_text_primitive> margin_text_primitives;
+    std::vector<fold_display_text_primitive> fold_display_texts;
+    std::vector<eol_annotation_primitive> eol_annotations;
+    std::vector<annotation_primitive> annotations;
+    std::vector<whitespace_mark_primitive> whitespace_marks;
+    std::vector<decoration_underline_primitive> decoration_underlines;
+    std::vector<indent_guide_primitive> indent_guides;
 };
 
 }

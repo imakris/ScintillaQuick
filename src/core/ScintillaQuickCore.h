@@ -97,8 +97,8 @@ public:
 	void ensure_visible_range_styled(bool scrolling);
 	void selectCurrentWord();
 	void reset_tracked_scroll_width_to_viewport();
-	Render_frame current_render_frame(
-		const Capture_frame *capture_frame = nullptr,
+	render_frame current_render_frame(
+		const captured_frame *capture_frame = nullptr,
 		bool static_content_dirty = true,
 		bool ensure_styled = true,
 		bool scrolling = false,
@@ -148,7 +148,7 @@ private:
 
 private:
 #ifdef SCINTILLAQUICK_ENABLE_TEST_ACCESS
-	friend class Scintilla::Internal::ScintillaQuick_validation_access;
+	friend class Scintilla::Internal::scintillaquick_validation_access;
 #endif
 
 	void SetVerticalScrollPos() override;
@@ -190,12 +190,12 @@ private:
 				     unsigned int iMessage, uptr_t wParam, sptr_t lParam);
 	static sptr_t DirectStatusFunction(sptr_t ptr,
 				     unsigned int iMessage, uptr_t wParam, sptr_t lParam, int *pStatus);
-	struct style_attributes_t;
-	Capture_frame capture_current_frame(bool static_content_dirty, bool ensure_styled, bool scrolling, int extra_capture_lines = 0);
-	Render_frame render_frame_from_capture(const Capture_frame &capture_frame) const;
-	style_attributes_t style_attributes_for(int style) const;
+	struct style_attributes;
+	captured_frame capture_current_frame(bool static_content_dirty, bool ensure_styled, bool scrolling, int extra_capture_lines = 0);
+	render_frame render_frame_from_capture(const captured_frame &capture_frame) const;
+	style_attributes style_attributes_for(int style) const;
 
-	QPainter *GetPainter() { return currentPainter; }
+	QPainter *GetPainter() { return m_current_painter; }
 
 protected:
 
@@ -227,14 +227,14 @@ private:
 	// if `ChangeIdle(false)` is somehow missed.
 	std::unique_ptr<QTimer> m_idle_timer;
 
-	int vMax, hMax;   // Scroll bar maximums.
-	int vPage, hPage; // Scroll bar page sizes.
+	int m_v_max, m_h_max;   // Scroll bar maximums.
+	int m_v_page, m_h_page; // Scroll bar page sizes.
 
-	bool haveMouseCapture;
-	bool dragWasDropped;
-	int rectangularSelectionModifier;
+	bool m_have_mouse_capture;
+	bool m_drag_was_dropped;
+	int m_rectangular_selection_modifier;
 
-	QPainter *currentPainter;  // temporary variable for paint() handling
+	QPainter *m_current_painter;  // temporary variable for paint() handling
 
 	friend class ::ScintillaQuickItem;
 };

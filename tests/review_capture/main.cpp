@@ -23,6 +23,8 @@
 
 #include "Scintilla.h"
 
+// This test exercises Scintilla::Internal render data directly, so keeping the
+// internal namespace open here keeps the assertions readable.
 using namespace Scintilla::Internal;
 
 namespace {
@@ -76,16 +78,16 @@ void send_wheel_event(
     QCoreApplication::sendEvent(&editor, &event);
 }
 
-struct comparison_result_t
+struct comparison_result
 {
     int differing_pixels = 0;
     double diff_ratio = 0.0;
     QImage diff_image;
 };
 
-comparison_result_t compare_images(const QImage &actual, const QImage &expected)
+comparison_result compare_images(const QImage &actual, const QImage &expected)
 {
-    comparison_result_t result;
+    comparison_result result;
 
     QImage a = actual.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     QImage e = expected.convertToFormat(QImage::Format_ARGB32_Premultiplied);
@@ -135,7 +137,7 @@ comparison_result_t compare_images(const QImage &actual, const QImage &expected)
     return result;
 }
 
-struct review_fixture_t
+struct review_fixture
 {
     QString name;
     std::function<void(class Fixture_editor &)> setup;
@@ -276,7 +278,7 @@ struct Fixture_editor
     QImage capture_reference_image()
     {
         pump();
-        return ScintillaQuick_validation_access::capture_raster_reference(editor);
+        return scintillaquick_validation_access::capture_raster_reference(editor);
     }
 };
 
@@ -350,7 +352,7 @@ bool apply_wheel_step_fixture(
     return true;
 }
 
-review_fixture_t make_wheel_review_fixture(
+review_fixture make_wheel_review_fixture(
     const QString &name,
     bool wrapped,
     int steps)
@@ -366,9 +368,9 @@ review_fixture_t make_wheel_review_fixture(
     };
 }
 
-std::vector<review_fixture_t> review_fixtures()
+std::vector<review_fixture> review_fixtures()
 {
-    std::vector<review_fixture_t> fixtures = {
+    std::vector<review_fixture> fixtures = {
         {
             QStringLiteral("plain_ascii_short"),
             [](Fixture_editor &fixture) {
@@ -812,7 +814,7 @@ int main(int argc, char **argv)
     };
 
     int generated_count = 0;
-    for (const review_fixture_t &fixture_def : review_fixtures()) {
+    for (const review_fixture &fixture_def : review_fixtures()) {
         if (!should_run_fixture(fixture_def.name)) {
             continue;
         }
@@ -843,7 +845,7 @@ int main(int argc, char **argv)
             return 1;
         }
 
-        const comparison_result_t comparison = compare_images(quick, reference);
+        const comparison_result comparison = compare_images(quick, reference);
         const QString fixture_dir = QDir(output_dir).filePath(fixture_def.name);
 
         if (!write_image(QDir(fixture_dir).filePath(QStringLiteral("scintilla_reference.png")), reference) ||

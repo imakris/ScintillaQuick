@@ -19,6 +19,8 @@
 
 #include "Scintilla.h"
 
+// This test exercises Scintilla::Internal render data directly, so keeping the
+// internal namespace open here keeps the assertions readable.
 using namespace Scintilla::Internal;
 
 // ---------------------------------------------------------------------------
@@ -55,15 +57,15 @@ struct Fixture_editor
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
     }
 
-    Render_frame capture()
+    render_frame capture()
     {
         pump();
-        return ScintillaQuick_validation_access::capture_frame(editor);
+        return scintillaquick_validation_access::capture_frame(editor);
     }
 
-    Render_frame capture_cached()
+    render_frame capture_cached()
     {
-        return ScintillaQuick_validation_access::capture_cached_frame(editor);
+        return scintillaquick_validation_access::capture_cached_frame(editor);
     }
 };
 
@@ -87,18 +89,18 @@ bool check(bool condition, const char *fixture_id, const char *detail)
     return true;
 }
 
-QString reconstruct_line_text(const visual_line_frame_t &line)
+QString reconstruct_line_text(const visual_line_frame &line)
 {
     QString result;
-    for (const text_run_t &run : line.text_runs) {
+    for (const text_run &run : line.text_runs) {
         result += run.text;
     }
     return result;
 }
 
-const visual_line_frame_t *find_visual_line(const Render_frame &frame, int document_line)
+const visual_line_frame *find_visual_line(const render_frame &frame, int document_line)
 {
-    for (const visual_line_frame_t &line : frame.visual_lines) {
+    for (const visual_line_frame &line : frame.visual_lines) {
         if (line.key.document_line == document_line && line.key.subline_index == 0) {
             return &line;
         }
@@ -107,13 +109,13 @@ const visual_line_frame_t *find_visual_line(const Render_frame &frame, int docum
     return nullptr;
 }
 
-const text_run_t *first_non_empty_run(const visual_line_frame_t *line)
+const text_run *first_non_empty_run(const visual_line_frame *line)
 {
     if (!line) {
         return nullptr;
     }
 
-    for (const text_run_t &run : line->text_runs) {
+    for (const text_run &run : line->text_runs) {
         if (!run.text.isEmpty()) {
             return &run;
         }
@@ -122,7 +124,7 @@ const text_run_t *first_non_empty_run(const visual_line_frame_t *line)
     return nullptr;
 }
 
-void dump_frame_summary(const char *fixture_id, const Render_frame &frame)
+void dump_frame_summary(const char *fixture_id, const render_frame &frame)
 {
     qDebug("  [%s] visual_lines=%lld  selections=%lld  carets=%lld  "
            "indicators=%lld  current_lines=%lld  markers=%lld  margin_texts=%lld  "
@@ -151,7 +153,7 @@ void dump_frame_summary(const char *fixture_id, const Render_frame &frame)
 // Check that no two text runs within any visual line overlap horizontally.
 // Overlapping runs indicate stacked/garbled glyph output -- the exact
 // regression that motivated this validation tranche.
-bool check_no_overlapping_runs(const Render_frame &frame, const char *id)
+bool check_no_overlapping_runs(const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &vl : frame.visual_lines) {
@@ -173,7 +175,7 @@ bool check_no_overlapping_runs(const Render_frame &frame, const char *id)
 
 // Check that every non-empty text run has positive width.
 // Zero-width runs mean invisible text.
-bool check_runs_positive_width(const Render_frame &frame, const char *id)
+bool check_runs_positive_width(const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &vl : frame.visual_lines) {
@@ -189,7 +191,7 @@ bool check_runs_positive_width(const Render_frame &frame, const char *id)
 
 // Check that text runs start within (or very near) their visual line's
 // clip_rect horizontal bounds.
-bool check_runs_within_line_clip(const Render_frame &frame, const char *id)
+bool check_runs_within_line_clip(const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &vl : frame.visual_lines) {
@@ -204,9 +206,9 @@ bool check_runs_within_line_clip(const Render_frame &frame, const char *id)
 
 // For wrapped text: sublines of the same document line must have
 // monotonically increasing Y positions matching their subline_index order.
-bool check_sublines_ordered_by_y(const Render_frame &frame, const char *id)
+bool check_sublines_ordered_by_y(const render_frame &frame, const char *id)
 {
-    std::map<int, std::vector<const visual_line_frame_t *>> by_doc_line;
+    std::map<int, std::vector<const visual_line_frame *>> by_doc_line;
     for (const auto &vl : frame.visual_lines) {
         by_doc_line[vl.key.document_line].push_back(&vl);
     }
@@ -228,7 +230,7 @@ bool check_sublines_ordered_by_y(const Render_frame &frame, const char *id)
 
 // Each selection rectangle should vertically overlap at least one visual line.
 bool check_selection_overlaps_visual_line(
-    const Render_frame &frame, const char *id)
+    const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &sel : frame.selection_primitives) {
@@ -248,7 +250,7 @@ bool check_selection_overlaps_visual_line(
 }
 
 // Each caret rectangle should vertically overlap at least one visual line.
-bool check_caret_within_line_bounds(const Render_frame &frame, const char *id)
+bool check_caret_within_line_bounds(const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &caret : frame.caret_primitives) {
@@ -269,7 +271,7 @@ bool check_caret_within_line_bounds(const Render_frame &frame, const char *id)
 
 // Phase 2 contract: margin primitives must appear on the first wrapped
 // subline only (subline_index == 0).
-bool check_margin_first_subline_only(const Render_frame &frame, const char *id)
+bool check_margin_first_subline_only(const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &mt : frame.margin_text_primitives) {
@@ -282,7 +284,7 @@ bool check_margin_first_subline_only(const Render_frame &frame, const char *id)
 
 // Margin text top-Y should be close to the corresponding body visual line
 // top-Y (within a small tolerance for baseline adjustments).
-bool check_margin_y_aligns_with_body(const Render_frame &frame, const char *id)
+bool check_margin_y_aligns_with_body(const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &mt : frame.margin_text_primitives) {
@@ -305,7 +307,7 @@ bool check_margin_y_aligns_with_body(const Render_frame &frame, const char *id)
 }
 
 // Indicator rectangles should fall within the text area bounds.
-bool check_indicator_within_text_area(const Render_frame &frame, const char *id)
+bool check_indicator_within_text_area(const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &ind : frame.indicator_primitives) {
@@ -319,7 +321,7 @@ bool check_indicator_within_text_area(const Render_frame &frame, const char *id)
 
 // Each indicator rectangle should vertically overlap at least one visual line.
 bool check_indicator_overlaps_visual_line(
-    const Render_frame &frame, const char *id)
+    const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &ind : frame.indicator_primitives) {
@@ -342,13 +344,13 @@ bool check_indicator_overlaps_visual_line(
 
 // For LTR text, text runs within a visual line should appear in
 // monotonically increasing X order.
-bool check_runs_x_ordered(const Render_frame &frame, const char *id)
+bool check_runs_x_ordered(const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &vl : frame.visual_lines) {
         for (size_t i = 0; i + 1 < vl.text_runs.size(); ++i) {
-            if (vl.text_runs[i].direction == text_direction_t::left_to_right &&
-                vl.text_runs[i + 1].direction == text_direction_t::left_to_right) {
+            if (vl.text_runs[i].direction == text_direction::left_to_right &&
+                vl.text_runs[i + 1].direction == text_direction::left_to_right) {
                 ok &= check(
                     vl.text_runs[i + 1].position.x() >=
                         vl.text_runs[i].position.x() - 0.1,
@@ -363,7 +365,7 @@ bool check_runs_x_ordered(const Render_frame &frame, const char *id)
 // Check that no two visual lines have vertically overlapping clip_rects.
 // Overlapping clip_rects mean text from one line paints over another.
 bool check_visual_lines_no_vertical_overlap(
-    const Render_frame &frame, const char *id)
+    const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (size_t i = 0; i < frame.visual_lines.size(); ++i) {
@@ -397,22 +399,22 @@ bool nearly_equal(double a, double b, double tolerance = k_geometry_tolerance)
     return std::abs(a - b) <= tolerance;
 }
 
-int count_visual_lines_for_document_line(const Render_frame &frame, int document_line)
+int count_visual_lines_for_document_line(const render_frame &frame, int document_line)
 {
     return static_cast<int>(std::count_if(
         frame.visual_lines.begin(),
         frame.visual_lines.end(),
-        [document_line](const visual_line_frame_t &line) {
+        [document_line](const visual_line_frame &line) {
             return line.key.document_line == document_line;
         }));
 }
 
-const visual_line_frame_t *find_matching_visual_line(
-    const Render_frame &frame,
+const visual_line_frame *find_matching_visual_line(
+    const render_frame &frame,
     const QRectF &rect,
     int document_line = -1)
 {
-    const visual_line_frame_t *best = nullptr;
+    const visual_line_frame *best = nullptr;
     double best_distance = std::numeric_limits<double>::max();
 
     for (const auto &line : frame.visual_lines) {
@@ -440,7 +442,7 @@ const visual_line_frame_t *find_matching_visual_line(
 }
 
 // Selection rects should fall within the text area's horizontal bounds.
-bool check_selection_within_text_area(const Render_frame &frame, const char *id)
+bool check_selection_within_text_area(const render_frame &frame, const char *id)
 {
     bool ok = true;
     for (const auto &sel : frame.selection_primitives) {
@@ -466,7 +468,7 @@ static bool test_plain_ascii_short()
     Fixture_editor f;
     f.set_text("alpha beta gamma");
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -508,7 +510,7 @@ static bool test_plain_ascii_long_wrap()
         "definitely wrap into multiple visual sublines at a narrow width.";
     f.set_text(long_text);
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -516,7 +518,7 @@ static bool test_plain_ascii_long_wrap()
                  "must produce >= 3 visual lines from wrap");
 
     int max_subline = 0;
-    for (const visual_line_frame_t &vl : frame.visual_lines) {
+    for (const visual_line_frame &vl : frame.visual_lines) {
         if (vl.key.document_line == 0 && vl.key.subline_index > max_subline) {
             max_subline = vl.key.subline_index;
         }
@@ -543,7 +545,7 @@ static bool test_horizontal_scroll_resets_on_doc_switch()
     long_line += QByteArray(400, 'x');
     f.set_text(long_line.constData());
 
-    Render_frame long_frame = f.capture();
+    render_frame long_frame = f.capture();
     dump_frame_summary(id, long_frame);
 
     bool ok = true;
@@ -563,7 +565,7 @@ static bool test_horizontal_scroll_resets_on_doc_switch()
     f.editor.send(SCI_RELEASEDOCUMENT, 0, short_doc);
     f.set_text("short line\nanother short line");
 
-    Render_frame short_frame = f.capture();
+    render_frame short_frame = f.capture();
     const int short_viewport_width = static_cast<int>(std::ceil(short_frame.text_rect.width()));
     const int short_scroll_width = static_cast<int>(f.editor.send(SCI_GETSCROLLWIDTH));
     const int short_x_offset = static_cast<int>(f.editor.send(SCI_GETXOFFSET));
@@ -601,12 +603,12 @@ static bool test_caret_left_scrolls_to_long_previous_line()
 
     const Sci::Position current_pos = static_cast<Sci::Position>(f.editor.send(SCI_GETCURRENTPOS));
     const int current_x_offset = static_cast<int>(f.editor.send(SCI_GETXOFFSET));
-    const Render_frame cached_after = f.capture_cached();
-    const Render_frame direct_after = f.capture();
+    const render_frame cached_after = f.capture_cached();
+    const render_frame direct_after = f.capture();
     dump_frame_summary(id, cached_after);
 
-    const text_run_t *cached_long_run = first_non_empty_run(find_visual_line(cached_after, 1));
-    const text_run_t *direct_long_run = first_non_empty_run(find_visual_line(direct_after, 1));
+    const text_run *cached_long_run = first_non_empty_run(find_visual_line(cached_after, 1));
+    const text_run *direct_long_run = first_non_empty_run(find_visual_line(direct_after, 1));
 
     bool ok = true;
     ok &= check(current_pos == previous_line_end, id,
@@ -673,7 +675,7 @@ static bool test_mixed_styles_wrap()
         ++word_index;
     }
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -682,7 +684,7 @@ static bool test_mixed_styles_wrap()
 
     // Check that at least one visual line has runs with different style_ids.
     bool found_multi_style_line = false;
-    for (const visual_line_frame_t &vl : frame.visual_lines) {
+    for (const visual_line_frame &vl : frame.visual_lines) {
         if (vl.text_runs.size() >= 2) {
             int first_style = vl.text_runs[0].style_id;
             for (size_t i = 1; i < vl.text_runs.size(); ++i) {
@@ -714,7 +716,7 @@ static bool test_tab_layout_default()
     f.editor.send(SCI_SETTABWIDTH, 8);
     f.set_text("col1\tcol2\tcol3");
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -743,7 +745,7 @@ static bool test_tab_layout_nondefault()
     f.editor.send(SCI_SETTABWIDTH, 4);
     f.set_text("col1\tcol2\tcol3");
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -770,14 +772,14 @@ static bool test_selection_single_line()
     // Select "this" (positions 7..11).
     f.editor.send(SCI_SETSEL, 7, 11);
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(frame.selection_primitives.size() == 1, id,
                  "single-line selection must produce exactly one selection primitive");
     if (!frame.selection_primitives.empty()) {
-        const Selection_primitive &sel = frame.selection_primitives[0];
+        const selection_primitive &sel = frame.selection_primitives[0];
         const int selection_start = 7;
         const int selection_end = 11;
         const int selection_line = static_cast<int>(f.editor.send(SCI_LINEFROMPOSITION, selection_start));
@@ -786,7 +788,7 @@ static bool test_selection_single_line()
         const double expected_top = static_cast<double>(
             f.editor.send(SCI_POINTYFROMPOSITION, 0, f.editor.send(SCI_POSITIONFROMLINE, selection_line)));
         const double expected_bottom = expected_top + static_cast<double>(f.editor.send(SCI_TEXTHEIGHT, selection_line));
-        const visual_line_frame_t *line = find_matching_visual_line(frame, sel.rect, selection_line);
+        const visual_line_frame *line = find_matching_visual_line(frame, sel.rect, selection_line);
 
         ok &= check(sel.is_main, id, "single-line selection must be marked as main");
         ok &= check(sel.rect.width() > 0, id, "selection rect width must be > 0");
@@ -830,7 +832,7 @@ static bool test_selection_wrap_boundary()
     int text_len = static_cast<int>(strlen(text));
     f.editor.send(SCI_SETSEL, text_len / 3, 2 * text_len / 3);
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -839,7 +841,7 @@ static bool test_selection_wrap_boundary()
     if (!frame.selection_primitives.empty()) {
         std::map<long long, int> visual_line_counts;
         for (const auto &sel : frame.selection_primitives) {
-            const visual_line_frame_t *line = find_matching_visual_line(frame, sel.rect);
+            const visual_line_frame *line = find_matching_visual_line(frame, sel.rect);
             ok &= check(sel.rect.width() > 0, id,
                          "wrap-spanning selection rect width must be > 0");
             ok &= check(sel.rect.height() > 0, id,
@@ -876,14 +878,14 @@ static bool test_caret_mid_line()
     // Place caret at position 16 (no selection).
     f.editor.send(SCI_GOTOPOS, 16);
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.caret_primitives.empty(), id,
                  "caret_primitives must not be empty");
     if (!frame.caret_primitives.empty()) {
-        const caret_primitive_t &caret = frame.caret_primitives[0];
+        const caret_primitive &caret = frame.caret_primitives[0];
         ok &= check(caret.rect.height() > 0, id, "caret rect height must be > 0");
         // Caret should be within text bounds.
         ok &= check(caret.rect.left() >= frame.text_rect.left(), id,
@@ -915,14 +917,14 @@ static bool test_caret_wrap_continuation()
     int text_len = static_cast<int>(strlen(text));
     f.editor.send(SCI_GOTOPOS, text_len - 10);
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.caret_primitives.empty(), id,
                  "caret_primitives must not be empty on continuation");
     if (!frame.caret_primitives.empty()) {
-        const caret_primitive_t &caret = frame.caret_primitives[0];
+        const caret_primitive &caret = frame.caret_primitives[0];
         ok &= check(caret.rect.height() > 0, id, "caret rect height must be > 0");
     }
 
@@ -944,7 +946,7 @@ static bool test_margin_numbers_basic()
     f.editor.send(SCI_SETMARGINWIDTHN, 0, 40);
     f.set_text("line one\nline two\nline three\nline four\nline five");
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -955,7 +957,7 @@ static bool test_margin_numbers_basic()
 
     // Check that margin primitives contain expected line-number text.
     bool found_1 = false, found_2 = false;
-    for (const Margin_text_primitive &m : frame.margin_text_primitives) {
+    for (const margin_text_primitive &m : frame.margin_text_primitives) {
         QString trimmed = m.text.trimmed();
         if (trimmed == "1") found_1 = true;
         if (trimmed == "2") found_2 = true;
@@ -992,7 +994,7 @@ static bool test_margin_numbers_wrap()
         "Short second line.\n"
         "Third line here.");
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -1003,7 +1005,7 @@ static bool test_margin_numbers_wrap()
     // first wrapped subline only.  Verify that we do not get duplicate
     // line-numbers for the same document line.
     std::map<int, int> doc_line_count;
-    for (const Margin_text_primitive &m : frame.margin_text_primitives) {
+    for (const margin_text_primitive &m : frame.margin_text_primitives) {
         doc_line_count[m.document_line]++;
     }
     for (const auto &[doc_line, count] : doc_line_count) {
@@ -1039,14 +1041,14 @@ static bool test_plain_indicator_basic()
     f.editor.send(SCI_SETINDICATORCURRENT, 0);
     f.editor.send(SCI_INDICATORFILLRANGE, 13, 9);
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(frame.indicator_primitives.size() == 1, id,
                  "plain indicator test must produce exactly one indicator primitive");
     if (!frame.indicator_primitives.empty()) {
-        const Indicator_primitive &ind = frame.indicator_primitives[0];
+        const indicator_primitive &ind = frame.indicator_primitives[0];
         const int indicator_start = 13;
         const int indicator_end = 22;
         const int indicator_line = static_cast<int>(f.editor.send(SCI_LINEFROMPOSITION, indicator_start));
@@ -1055,7 +1057,7 @@ static bool test_plain_indicator_basic()
         const double expected_top = static_cast<double>(
             f.editor.send(SCI_POINTYFROMPOSITION, 0, f.editor.send(SCI_POSITIONFROMLINE, indicator_line)));
         const double expected_bottom = expected_top + static_cast<double>(f.editor.send(SCI_TEXTHEIGHT, indicator_line));
-        const visual_line_frame_t *line = find_matching_visual_line(frame, ind.rect, indicator_line);
+        const visual_line_frame *line = find_matching_visual_line(frame, ind.rect, indicator_line);
 
         ok &= check(ind.rect.width() > 0, id, "indicator rect width must be > 0");
         ok &= check(ind.rect.height() > 0, id, "indicator rect height must be > 0");
@@ -1101,7 +1103,7 @@ static bool test_multi_selection()
     f.editor.send(SCI_ADDSELECTION, 4, 7);        // "bbb"
     f.editor.send(SCI_ADDSELECTION, 8, 11);       // "ccc"
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -1154,7 +1156,7 @@ static bool test_rectangular_selection()
     f.editor.send(SCI_SETRECTANGULARSELECTIONANCHORVIRTUALSPACE, 0);
     f.editor.send(SCI_SETRECTANGULARSELECTIONCARETVIRTUALSPACE, 0);
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -1167,7 +1169,7 @@ static bool test_rectangular_selection()
         int main_count = 0;
 
         for (const auto &sel : frame.selection_primitives) {
-            const visual_line_frame_t *line = find_matching_visual_line(frame, sel.rect);
+            const visual_line_frame *line = find_matching_visual_line(frame, sel.rect);
             ok &= check(sel.rect.width() > 0, id, "rectangular selection rect width must be > 0");
             ok &= check(sel.rect.height() > 0, id, "rectangular selection rect height must be > 0");
             ok &= check(nearly_equal(sel.rect.left(), reference_left), id,
@@ -1214,7 +1216,7 @@ static bool test_current_line_frame()
     f.set_text("first line\nsecond line\nthird line");
     f.editor.send(SCI_GOTOPOS, 5);
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -1228,7 +1230,7 @@ static bool test_current_line_frame()
                  "caret line must exist in the captured frame");
     if (!frame.current_line_primitives.empty()) {
         for (const auto &cl : frame.current_line_primitives) {
-            const visual_line_frame_t *line = find_matching_visual_line(frame, cl.rect, caret_line);
+            const visual_line_frame *line = find_matching_visual_line(frame, cl.rect, caret_line);
             ok &= check(cl.rect.width() > 0, id, "current line rect width must be > 0");
             ok &= check(cl.rect.height() > 0, id, "current line rect height must be > 0");
             ok &= check(cl.color == scintilla_iprgb_color(0xFFFFE0), id,
@@ -1284,15 +1286,15 @@ static bool test_squiggle_indicator()
     f.editor.send(SCI_SETINDICATORCURRENT, 0);
     f.editor.send(SCI_INDICATORFILLRANGE, 9, 4);  // "this"
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(frame.indicator_primitives.size() == 1, id,
                  "squiggle indicator test must produce exactly one indicator primitive");
     if (!frame.indicator_primitives.empty()) {
-        const Indicator_primitive &ind = frame.indicator_primitives[0];
-        const visual_line_frame_t *line = find_matching_visual_line(frame, ind.rect, 0);
+        const indicator_primitive &ind = frame.indicator_primitives[0];
+        const visual_line_frame *line = find_matching_visual_line(frame, ind.rect, 0);
         ok &= check(ind.rect.width() > 0, id, "squiggle indicator rect width must be > 0");
         ok &= check(ind.rect.height() > 0, id, "squiggle indicator rect height must be > 0");
         ok &= check(ind.color == scintilla_iprgb_color(0x0000FF), id,
@@ -1327,15 +1329,15 @@ static bool test_box_indicator()
     f.editor.send(SCI_SETINDICATORCURRENT, 1);
     f.editor.send(SCI_INDICATORFILLRANGE, 4, 6);  // "around"
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(frame.indicator_primitives.size() == 1, id,
                  "box indicator test must produce exactly one indicator primitive");
     if (!frame.indicator_primitives.empty()) {
-        const Indicator_primitive &ind = frame.indicator_primitives[0];
-        const visual_line_frame_t *line = find_matching_visual_line(frame, ind.rect, 0);
+        const indicator_primitive &ind = frame.indicator_primitives[0];
+        const visual_line_frame *line = find_matching_visual_line(frame, ind.rect, 0);
         ok &= check(ind.rect.width() > 0, id, "box indicator rect width must be > 0");
         ok &= check(ind.color == scintilla_iprgb_color(0xFF0000), id,
                      "box indicator color must match the configured indicator color");
@@ -1376,15 +1378,15 @@ static bool test_marker_symbol()
     f.set_text("marked line\nunmarked line\nthird line");
     f.editor.send(SCI_MARKERADD, 0, 0); // add marker 0 to line 0
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(frame.marker_primitives.size() == 1, id,
                  "marker fixture must produce exactly one marker primitive");
     if (!frame.marker_primitives.empty()) {
-        const Marker_primitive &m = frame.marker_primitives[0];
-        const visual_line_frame_t *line = find_matching_visual_line(frame, m.rect, 0);
+        const marker_primitive &m = frame.marker_primitives[0];
+        const visual_line_frame *line = find_matching_visual_line(frame, m.rect, 0);
         const double expected_top = line ? line->clip_rect.top() : 0.0;
         const double expected_bottom = line ? line->clip_rect.bottom() : 0.0;
         ok &= check(m.rect.width() > 0, id, "marker rect width must be > 0");
@@ -1427,7 +1429,7 @@ static bool test_multi_caret()
     f.editor.send(SCI_ADDSELECTION, 8, 8);
     f.editor.send(SCI_ADDSELECTION, 12, 12);
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -1444,7 +1446,7 @@ static bool test_multi_caret()
             "each caret rect width must be > 0");
         ok &= check(caret.rect.height() > 0, id,
             "each caret rect height must be > 0");
-        const visual_line_frame_t *line = find_matching_visual_line(frame, caret.rect);
+        const visual_line_frame *line = find_matching_visual_line(frame, caret.rect);
         ok &= check(line != nullptr, id, "each caret rect must map to a visual line");
         if (line) {
             if (caret_line < 0) {
@@ -1488,7 +1490,7 @@ static bool test_whitespace_visible()
     f.editor.send(SCI_SETVIEWWS, SCWS_VISIBLEALWAYS);
     f.set_text("a b\tc");
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -1502,8 +1504,8 @@ static bool test_whitespace_visible()
         ok &= check(ws.rect.height() > 0, id, "whitespace mark rect height must be > 0");
         ok &= check(ws.color.isValid() && ws.color.alpha() > 0, id,
                      "whitespace mark color must be valid and visible");
-        if (ws.kind == whitespace_mark_kind_t::space_dot) has_dot = true;
-        if (ws.kind == whitespace_mark_kind_t::tab_arrow) has_tab = true;
+        if (ws.kind == whitespace_mark_kind::space_dot) has_dot = true;
+        if (ws.kind == whitespace_mark_kind::tab_arrow) has_tab = true;
     }
     ok &= check(has_dot, id, "whitespace_marks must include a space_dot");
     ok &= check(has_tab, id, "whitespace_marks must include a tab_arrow");
@@ -1530,14 +1532,14 @@ static bool test_eol_annotation()
                   reinterpret_cast<sptr_t>(annot_text));
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.eol_annotations.empty(), id,
                  "EOL annotation must produce eol_annotations");
     if (!frame.eol_annotations.empty()) {
-        const Eol_annotation_primitive &eol = frame.eol_annotations[0];
+        const eol_annotation_primitive &eol = frame.eol_annotations[0];
         ok &= check(eol.text == QString::fromUtf8(annot_text), id,
                      "EOL annotation text must match");
         ok &= check(eol.rect.width() > 0, id,
@@ -1570,14 +1572,14 @@ static bool test_annotation()
                   reinterpret_cast<sptr_t>(annot_text));
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.annotations.empty(), id,
                  "annotation must produce annotations");
     if (!frame.annotations.empty()) {
-        const Annotation_primitive &annot = frame.annotations[0];
+        const annotation_primitive &annot = frame.annotations[0];
         ok &= check(annot.text == QString::fromUtf8(annot_text), id,
                      "annotation text must match");
         ok &= check(annot.rect.width() > 0, id,
@@ -1608,7 +1610,7 @@ static bool test_indent_guide()
     // Two levels of indentation so guides appear at the 4-space boundary.
     f.set_text("if (x) {\n    if (y) {\n        z = 1;\n    }\n}");
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -1645,17 +1647,17 @@ static bool test_style_underline()
     f.editor.send(SCI_SETSTYLING, 6, 1);
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.decoration_underlines.empty(), id,
                  "style underline must produce decoration_underlines");
     if (!frame.decoration_underlines.empty()) {
-        const Decoration_underline_primitive &ul = frame.decoration_underlines[0];
+        const decoration_underline_primitive &ul = frame.decoration_underlines[0];
         ok &= check(ul.rect.width() > 0, id,
                      "underline rect width must be > 0");
-        ok &= check(ul.kind == decoration_kind_t::style_underline, id,
+        ok &= check(ul.kind == decoration_kind::style_underline, id,
                      "underline kind must be style_underline");
         ok &= check(ul.color.isValid(), id,
                      "underline color must be valid");
@@ -1694,7 +1696,7 @@ static bool test_fold_display_text()
     f.editor.send(SCI_FOLDLINE, 0, SC_FOLDACTION_CONTRACT);
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -1702,7 +1704,7 @@ static bool test_fold_display_text()
     ok &= check(!frame.fold_display_texts.empty(), id,
                  "collapsing a fold must produce fold_display_texts");
     if (!frame.fold_display_texts.empty()) {
-        const Fold_display_text_primitive &fold = frame.fold_display_texts[0];
+        const fold_display_text_primitive &fold = frame.fold_display_texts[0];
         ok &= check(!fold.text.isEmpty(), id,
                      "fold display text must have non-empty text");
         ok &= check(fold.rect.width() > 0, id,
@@ -1761,7 +1763,7 @@ static bool test_marker_fold_part()
         f.editor.send(SCI_POSITIONFROMLINE, 1));
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -1818,14 +1820,14 @@ static bool test_annotation_boxed()
         reinterpret_cast<sptr_t>(annot_text));
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.annotations.empty(), id,
                  "boxed annotation must produce annotation primitives");
     if (!frame.annotations.empty()) {
-        const Annotation_primitive &annot = frame.annotations[0];
+        const annotation_primitive &annot = frame.annotations[0];
         ok &= check(!annot.text.isEmpty(), id,
                      "annotation text must be non-empty");
         ok &= check(annot.rect.width() > 0, id,
@@ -1861,18 +1863,18 @@ static bool test_ltr_direction_field()
     Fixture_editor f;
     f.set_text("Hello World");
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.visual_lines.empty(), id,
                  "text must produce visual lines");
     if (!frame.visual_lines.empty()) {
-        const visual_line_frame_t &line = frame.visual_lines[0];
+        const visual_line_frame &line = frame.visual_lines[0];
         ok &= check(!line.text_runs.empty(), id,
                      "text must produce text runs");
-        for (const text_run_t &run : line.text_runs) {
-            ok &= check(run.direction == text_direction_t::left_to_right, id,
+        for (const text_run &run : line.text_runs) {
+            ok &= check(run.direction == text_direction::left_to_right, id,
                          "Latin text runs must have left_to_right direction");
         }
     }
@@ -1894,17 +1896,17 @@ static bool test_rtl_direction_field()
     f.set_text("A" "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d" "B");
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.visual_lines.empty(), id,
                  "text with Hebrew must produce visual lines");
     if (!frame.visual_lines.empty()) {
-        const visual_line_frame_t &line = frame.visual_lines[0];
+        const visual_line_frame &line = frame.visual_lines[0];
         ok &= check(!line.text_runs.empty(), id,
                      "text with Hebrew must produce text runs");
-        for (const text_run_t &run : line.text_runs) {
+        for (const text_run &run : line.text_runs) {
             ok &= check(run.width > 0 || run.text.isEmpty(), id,
                          "all non-empty runs must have positive width");
         }
@@ -1928,18 +1930,18 @@ static bool test_mixed_bidi_direction()
     f.set_text("Hello " "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d" " World");
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.visual_lines.empty(), id,
                  "mixed BiDi text must produce visual lines");
     if (!frame.visual_lines.empty()) {
-        const visual_line_frame_t &line = frame.visual_lines[0];
+        const visual_line_frame &line = frame.visual_lines[0];
         ok &= check(!line.text_runs.empty(), id,
                      "mixed BiDi text must produce text runs");
 
-        for (const text_run_t &run : line.text_runs) {
+        for (const text_run &run : line.text_runs) {
             ok &= check(run.width > 0 || run.text.isEmpty(), id,
                          "all non-empty runs must have positive width");
         }
@@ -1971,14 +1973,14 @@ static bool test_annotation_boxed_padding()
                   reinterpret_cast<sptr_t>(annot_text));
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.annotations.empty(), id,
                  "boxed annotation must produce annotation primitives");
 
-    for (const Annotation_primitive &annot : frame.annotations) {
+    for (const annotation_primitive &annot : frame.annotations) {
         ok &= check(annot.boxed, id,
                      "annotation must have boxed flag set");
         ok &= check(annot.rect.width() > 0, id,
@@ -2022,14 +2024,14 @@ static bool test_eol_annotation_boxed()
                   reinterpret_cast<sptr_t>(annot_text));
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
     ok &= check(!frame.eol_annotations.empty(), id,
                  "boxed EOL annotation must produce eol_annotations");
     if (!frame.eol_annotations.empty()) {
-        const Eol_annotation_primitive &eol = frame.eol_annotations[0];
+        const eol_annotation_primitive &eol = frame.eol_annotations[0];
         ok &= check(eol.text == QString::fromUtf8(annot_text), id,
                      "boxed EOL annotation text must match");
         ok &= check(eol.rect.width() > 0, id,
@@ -2074,7 +2076,7 @@ static bool test_overlapping_indicators()
     f.editor.send(SCI_INDICATORFILLRANGE, 6, 10);
     f.pump();
 
-    Render_frame frame = f.capture();
+    render_frame frame = f.capture();
     dump_frame_summary(id, frame);
 
     bool ok = true;
@@ -2083,7 +2085,7 @@ static bool test_overlapping_indicators()
 
     bool has_squiggle = false;
     bool has_box = false;
-    for (const Indicator_primitive &ind : frame.indicator_primitives) {
+    for (const indicator_primitive &ind : frame.indicator_primitives) {
         if (ind.indicator_style == INDIC_SQUIGGLE) has_squiggle = true;
         if (ind.indicator_style == INDIC_BOX) has_box = true;
     }

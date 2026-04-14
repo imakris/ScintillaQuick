@@ -58,10 +58,10 @@
 #include <limits>
 #include <string_view>
 
-constexpr int IndicatorInput = static_cast<int>(Scintilla::IndicatorNumbers::Ime);
-constexpr int IndicatorTarget = IndicatorInput + 1;
-constexpr int IndicatorConverted = IndicatorInput + 2;
-constexpr int IndicatorUnknown = IndicatorInput + 3;
+constexpr int k_indicator_input = static_cast<int>(Scintilla::IndicatorNumbers::Ime);
+constexpr int k_indicator_target = k_indicator_input + 1;
+constexpr int k_indicator_converted = k_indicator_input + 2;
+constexpr int k_indicator_unknown = k_indicator_input + 3;
 
 // Q_WS_MAC and Q_WS_X11 aren't defined in Qt6
 #ifdef Q_OS_MAC
@@ -72,15 +72,19 @@ constexpr int IndicatorUnknown = IndicatorInput + 3;
 #define Q_WS_X11 1
 #endif
 
+// This translation unit is dominated by Scintilla and Scintilla::Internal
+// interop. Keeping those upstream namespaces open avoids burying the local
+// logic under qualifiers while repo-owned identifiers still follow the local
+// style guide.
 using namespace Scintilla;
 using namespace Scintilla::Internal;
 
-class ScintillaQuickItem::Render_data
+class ScintillaQuickItem::render_data
 {
 public:
-    render_snapshot_t snapshot;
-    Render_frame frame;
-    Scene_graph_renderer renderer;
+    render_snapshot snapshot;
+    render_frame frame;
+    scene_graph_renderer renderer;
     bool snapshot_dirty = true;
     bool static_content_dirty = true;
     bool style_sync_needed = true;
@@ -91,10 +95,10 @@ public:
     int capture_base_first_visible_line = -1;
     int previous_first_visible_line = -1;
     int previous_x_offset = -1;
-    std::vector<caret_primitive_t> captured_caret_primitives;
+    std::vector<caret_primitive> captured_caret_primitives;
 };
 
-struct profiling_metric_t
+struct profiling_metric
 {
     std::atomic<uint64_t> count{0};
     std::atomic<uint64_t> total_ns{0};
@@ -108,10 +112,10 @@ struct profiling_metric_t
     }
 };
 
-class ScintillaQuickItem::Profiling_state
+class ScintillaQuickItem::profiling_state
 {
 public:
-    explicit Profiling_state(ScintillaQuickItem *owner)
+    explicit profiling_state(ScintillaQuickItem *owner)
     :
         m_owner(owner)
     {
@@ -144,7 +148,7 @@ public:
         hierarchical_profiler.reset();
     }
 
-    Hierarchical_profiler *hierarchical_profiler_if_active()
+    hierarchical_profiler *hierarchical_profiler_if_active()
     {
         return active.load(std::memory_order_acquire) ? &hierarchical_profiler : nullptr;
     }
@@ -166,14 +170,14 @@ public:
     std::atomic<uint64_t> blink_only_update_count{0};
     std::atomic<uint64_t> overlay_only_update_count{0};
     std::atomic<uint64_t> full_update_count{0};
-    profiling_metric_t update_polish;
-    profiling_metric_t build_render_snapshot;
-    profiling_metric_t update_paint_node;
-    profiling_metric_t update_quick_view;
-    profiling_metric_t wheel_event;
-    profiling_metric_t scroll_horizontal;
-    profiling_metric_t scroll_vertical;
-    Hierarchical_profiler hierarchical_profiler;
+    profiling_metric update_polish;
+    profiling_metric build_render_snapshot;
+    profiling_metric update_paint_node;
+    profiling_metric update_quick_view;
+    profiling_metric wheel_event;
+    profiling_metric scroll_horizontal;
+    profiling_metric scroll_vertical;
+    hierarchical_profiler hierarchical_profiler;
 };
 
 namespace {
@@ -181,7 +185,7 @@ namespace {
 constexpr int k_margin_count = SC_MAX_MARGIN + 1;
 constexpr int k_vertical_scroll_reuse_buffer_min_lines = 16;
 
-// `scene_graph_update_request`, `scene_graph_update_request_t` and
+// `scene_graph_update_request`, `scene_graph_update_request_info` and
 // `tracked_scroll_width_should_reset` now live in
 // src/core/scintillaquick_dispatch_table.h (included above) so that they
 // can be covered by dedicated unit tests without spinning up a Qt Quick
@@ -200,72 +204,72 @@ void translate_point(QPointF &point, qreal dy)
     point.setY(point.y() + dy);
 }
 
-void translate_render_frame(Render_frame &frame, qreal dy)
+void translate_render_frame(render_frame &frame, qreal dy)
 {
     translate_rect(frame.text_rect, dy);
     translate_rect(frame.margin_rect, dy);
 
-    for (visual_line_frame_t &visual_line : frame.visual_lines) {
+    for (visual_line_frame &visual_line : frame.visual_lines) {
         translate_point(visual_line.origin, dy);
         visual_line.baseline_y += dy;
         translate_rect(visual_line.clip_rect, dy);
-        for (text_run_t &run : visual_line.text_runs) {
+        for (text_run &run : visual_line.text_runs) {
             translate_point(run.position, dy);
         }
     }
 
-    for (Selection_primitive &selection : frame.selection_primitives) {
+    for (selection_primitive &selection : frame.selection_primitives) {
         translate_rect(selection.rect, dy);
     }
-    for (caret_primitive_t &caret : frame.caret_primitives) {
+    for (caret_primitive &caret : frame.caret_primitives) {
         translate_rect(caret.rect, dy);
     }
-    for (Indicator_primitive &indicator : frame.indicator_primitives) {
+    for (indicator_primitive &indicator : frame.indicator_primitives) {
         translate_rect(indicator.rect, dy);
     }
-    for (Current_line_primitive &current_line : frame.current_line_primitives) {
+    for (current_line_primitive &current_line : frame.current_line_primitives) {
         translate_rect(current_line.rect, dy);
     }
-    for (Marker_primitive &marker : frame.marker_primitives) {
+    for (marker_primitive &marker : frame.marker_primitives) {
         translate_rect(marker.rect, dy);
     }
-    for (Margin_text_primitive &margin : frame.margin_text_primitives) {
+    for (margin_text_primitive &margin : frame.margin_text_primitives) {
         translate_point(margin.position, dy);
         translate_rect(margin.clip_rect, dy);
         margin.baseline_y += dy;
     }
-    for (Fold_display_text_primitive &fold : frame.fold_display_texts) {
+    for (fold_display_text_primitive &fold : frame.fold_display_texts) {
         translate_point(fold.position, dy);
         translate_rect(fold.rect, dy);
         fold.baseline_y += dy;
     }
-    for (Eol_annotation_primitive &eol : frame.eol_annotations) {
+    for (eol_annotation_primitive &eol : frame.eol_annotations) {
         translate_point(eol.position, dy);
         translate_rect(eol.rect, dy);
         eol.baseline_y += dy;
     }
-    for (Annotation_primitive &annotation : frame.annotations) {
+    for (annotation_primitive &annotation : frame.annotations) {
         translate_point(annotation.position, dy);
         translate_rect(annotation.rect, dy);
         annotation.baseline_y += dy;
     }
-    for (Whitespace_mark_primitive &mark : frame.whitespace_marks) {
+    for (whitespace_mark_primitive &mark : frame.whitespace_marks) {
         translate_rect(mark.rect, dy);
         mark.mid_y += dy;
     }
-    for (Decoration_underline_primitive &underline : frame.decoration_underlines) {
+    for (decoration_underline_primitive &underline : frame.decoration_underlines) {
         translate_rect(underline.rect, dy);
     }
-    for (Indent_guide_primitive &guide : frame.indent_guides) {
+    for (indent_guide_primitive &guide : frame.indent_guides) {
         guide.top += dy;
         guide.bottom += dy;
     }
 }
 
-QString text_for_visual_line(const visual_line_frame_t &line)
+QString text_for_visual_line(const visual_line_frame &line)
 {
     QString text;
-    for (const text_run_t &run : line.text_runs) {
+    for (const text_run &run : line.text_runs) {
         text += run.text;
     }
     return text;
@@ -276,14 +280,14 @@ QColor color_from_scintilla(sptr_t value)
     return QColorFromColourRGBA(ColourRGBA::FromIpRGB(value));
 }
 
-struct style_attributes_t
+struct style_attributes
 {
     QColor foreground;
     QColor background;
     QFont font;
 };
 
-using style_cache_t = std::array<std::optional<style_attributes_t>, STYLE_MAX + 1>;
+using style_cache = std::array<std::optional<style_attributes>, STYLE_MAX + 1>;
 
 QFont font_for_style(const ScintillaQuickItem *item, int style)
 {
@@ -310,15 +314,15 @@ QFont font_for_style(const ScintillaQuickItem *item, int style)
     return font;
 }
 
-const style_attributes_t &style_attributes_for(
+const style_attributes &style_attributes_for(
     const ScintillaQuickItem *item,
-    style_cache_t &style_cache,
+    style_cache &style_cache,
     int style)
 {
     const int bounded_style = std::clamp(style, 0, STYLE_MAX);
-    std::optional<style_attributes_t> &cached_attributes = style_cache[bounded_style];
+    std::optional<style_attributes> &cached_attributes = style_cache[bounded_style];
     if (!cached_attributes.has_value()) {
-        style_attributes_t attributes;
+        style_attributes attributes;
         attributes.foreground = color_from_scintilla(item->send(SCI_STYLEGETFORE, bounded_style));
         attributes.background = color_from_scintilla(item->send(SCI_STYLEGETBACK, bounded_style));
         attributes.font = font_for_style(item, bounded_style);
@@ -338,7 +342,7 @@ int total_margin_width(const ScintillaQuickItem *item)
 
 QColor margin_background_color_for(
     const ScintillaQuickItem *item,
-    style_cache_t &style_cache,
+    style_cache &style_cache,
     int margin)
 {
     const int margin_type = static_cast<int>(item->send(SCI_GETMARGINTYPEN, margin));
@@ -360,7 +364,7 @@ QColor margin_background_color_for(
     }
 }
 
-void record_profiling_metric(profiling_metric_t &metric, uint64_t elapsed_ns)
+void record_profiling_metric(profiling_metric &metric, uint64_t elapsed_ns)
 {
     metric.count.fetch_add(1, std::memory_order_relaxed);
     metric.total_ns.fetch_add(elapsed_ns, std::memory_order_relaxed);
@@ -372,10 +376,10 @@ void record_profiling_metric(profiling_metric_t &metric, uint64_t elapsed_ns)
     }
 }
 
-class Profiling_scope
+class profiling_scope
 {
 public:
-    explicit Profiling_scope(profiling_metric_t *metric)
+    explicit profiling_scope(profiling_metric *metric)
     :
         m_metric(metric)
     {
@@ -384,7 +388,7 @@ public:
         }
     }
 
-    ~Profiling_scope()
+    ~profiling_scope()
     {
         if (m_metric) {
             record_profiling_metric(*m_metric, static_cast<uint64_t>(m_timer.nsecsElapsed()));
@@ -392,11 +396,11 @@ public:
     }
 
 private:
-    profiling_metric_t *m_metric = nullptr;
+    profiling_metric *m_metric = nullptr;
     QElapsedTimer m_timer;
 };
 
-QJsonObject profiling_metric_to_json(const profiling_metric_t &metric)
+QJsonObject profiling_metric_to_json(const profiling_metric &metric)
 {
     const uint64_t count = metric.count.load(std::memory_order_acquire);
     const uint64_t total_ns = metric.total_ns.load(std::memory_order_acquire);
@@ -442,12 +446,12 @@ ScintillaQuickItem::ScintillaQuickItem(QQuickItem *parent)
 #else
 : QAbstractScrollArea(parent)
 #endif
-, enableUpdateFlag(true), logicalWidth(0), logicalHeight(0)
+, m_updates_enabled(true), m_logical_width(0), m_logical_height(0)
 #ifdef PLAT_QT_QML
-, dataInputMethodHints(Qt::ImhNone)
-, aLastTouchPressTime(-1)
+, m_input_method_hints(Qt::ImhNone)
+, m_last_touch_press_time(-1)
 #endif
-, sqt(new ScintillaQuickCore(this)), preeditPos(-1), m_render_data(std::make_unique<Render_data>())
+, m_core(new ScintillaQuickCore(this)), m_preedit_pos(-1), m_render_data(std::make_unique<render_data>())
 {
 #ifdef PLAT_QT_QML
     setAcceptedMouseButtons(Qt::AllButtons);
@@ -460,7 +464,7 @@ ScintillaQuickItem::ScintillaQuickItem(QQuickItem *parent)
     setClip(true);
 #endif
 
-	time.start();
+	m_elapsed_timer.start();
 
 #ifndef PLAT_QT_QML
 	// Set Qt defaults.
@@ -477,12 +481,12 @@ ScintillaQuickItem::ScintillaQuickItem(QQuickItem *parent)
 
 	// All IME indicators drawn in same colour, blue, with different patterns
 	const ColourRGBA colourIME(0, 0, UCHAR_MAX);
-	sqt->vs.indicators[IndicatorUnknown] = Indicator(IndicatorStyle::Hidden, colourIME);
-	sqt->vs.indicators[IndicatorInput] = Indicator(IndicatorStyle::Dots, colourIME);
-	sqt->vs.indicators[IndicatorConverted] = Indicator(IndicatorStyle::CompositionThick, colourIME);
-	sqt->vs.indicators[IndicatorTarget] = Indicator(IndicatorStyle::StraightBox, colourIME);
+	m_core->vs.indicators[k_indicator_unknown] = Indicator(IndicatorStyle::Hidden, colourIME);
+	m_core->vs.indicators[k_indicator_input] = Indicator(IndicatorStyle::Dots, colourIME);
+	m_core->vs.indicators[k_indicator_converted] = Indicator(IndicatorStyle::CompositionThick, colourIME);
+	m_core->vs.indicators[k_indicator_target] = Indicator(IndicatorStyle::StraightBox, colourIME);
 
-	connect(sqt, SIGNAL(notifyParent(Scintilla::NotificationData)),
+	connect(m_core, SIGNAL(notifyParent(Scintilla::NotificationData)),
 		this, SLOT(notifyParent(Scintilla::NotificationData)));
 
 	// Connect scroll bars.
@@ -495,39 +499,39 @@ ScintillaQuickItem::ScintillaQuickItem(QQuickItem *parent)
 #endif
 
 	// Connect pass-through signals.
-	connect(sqt, SIGNAL(horizontalRangeChanged(int,int)),
+	connect(m_core, SIGNAL(horizontalRangeChanged(int,int)),
 	        this, SIGNAL(horizontalRangeChanged(int,int)));
-	connect(sqt, SIGNAL(verticalRangeChanged(int,int)),
+	connect(m_core, SIGNAL(verticalRangeChanged(int,int)),
 	        this, SIGNAL(verticalRangeChanged(int,int)));
-	connect(sqt, SIGNAL(horizontalScrolled(int)),
+	connect(m_core, SIGNAL(horizontalScrolled(int)),
 	        this, SIGNAL(horizontalScrolled(int)));
-	connect(sqt, SIGNAL(verticalScrolled(int)),
+	connect(m_core, SIGNAL(verticalScrolled(int)),
 	        this, SIGNAL(verticalScrolled(int)));
 
-	connect(sqt, SIGNAL(notifyChange()),
+	connect(m_core, SIGNAL(notifyChange()),
 	        this, SIGNAL(notifyChange()));
 
-    connect(sqt, SIGNAL(command(Scintilla::uptr_t,Scintilla::sptr_t)),
+    connect(m_core, SIGNAL(command(Scintilla::uptr_t,Scintilla::sptr_t)),
 		this, SLOT(event_command(Scintilla::uptr_t,Scintilla::sptr_t)));
 
-	connect(sqt, SIGNAL(aboutToCopy(QMimeData*)),
+	connect(m_core, SIGNAL(aboutToCopy(QMimeData*)),
 		this, SIGNAL(aboutToCopy(QMimeData*)));
 
 #ifdef PLAT_QT_QML
-    connect(sqt, SIGNAL(cursorPositionChanged()), this, SIGNAL(cursorPositionChanged()));   // needed to update markers on android platform
+    connect(m_core, SIGNAL(cursorPositionChanged()), this, SIGNAL(cursorPositionChanged()));   // needed to update markers on android platform
 #endif
 
     m_caret_blink_timer.setSingleShot(false);
     QObject::connect(&m_caret_blink_timer, &QTimer::timeout, this, [this]() {
         m_caret_blink_visible = !m_caret_blink_visible;
-        if (m_render_data && enableUpdateFlag) {
+        if (m_render_data && m_updates_enabled) {
             m_render_data->snapshot_dirty = true;
             polish();
             update();
         }
     });
 
-    m_profiling_state = std::make_unique<Profiling_state>(this);
+    m_profiling_state = std::make_unique<profiling_state>(this);
 
     send(SCI_SETLAYOUTCACHE, SC_CACHE_PAGE);
     send(SCI_SETSCROLLWIDTHTRACKING, 1);
@@ -539,14 +543,14 @@ ScintillaQuickItem::~ScintillaQuickItem()
 
     // Tell the core to stop all of its timers and disconnect from the
     // clipboard before the ScintillaQuickItem subobject finishes
-    // destructing. `sqt` is a child QObject (parented to `this`) and
+    // destructing. `m_core` is a child QObject (parented to `this`) and
     // Qt will destroy it as part of ~QObject(), which runs AFTER this
     // derived destructor body. Without this step, a queued timerEvent
-    // or clipboard SelectionChanged slot can reach `sqt` between the
+    // or clipboard SelectionChanged slot can reach `m_core` between the
     // derived teardown and Qt's child-deletion pass and dispatch into
     // a sliced-down QQuickItem.
-    if (sqt) {
-        sqt->prepare_for_owner_destruction();
+    if (m_core) {
+        m_core->prepare_for_owner_destruction();
     }
 }
 
@@ -563,11 +567,11 @@ sptr_t ScintillaQuickItem::send(
 	// once, in a single, well-marked place.
 	ScintillaQuickItem *self = const_cast<ScintillaQuickItem *>(this);
 
-	const sptr_t result = sqt->WndProc(static_cast<Message>(iMessage), wParam, lParam);
+	const sptr_t result = m_core->WndProc(static_cast<Message>(iMessage), wParam, lParam);
 	if (tracked_scroll_width_should_reset(iMessage)) {
 		self->reset_tracked_scroll_width();
 	}
-	const scene_graph_update_request_t update_request = scene_graph_update_request(iMessage);
+	const scene_graph_update_request_info update_request = scene_graph_update_request(iMessage);
 	// Re-entry guard (defence-in-depth): `syncQuickViewProperties()`
 	// itself issues SCI_* queries through `send()`. If any of those
 	// queries is not in the read-only allow-list, the dispatch's
@@ -596,7 +600,7 @@ sptr_t ScintillaQuickItem::sends(
     uptr_t wParam,
     const char *s) const
 {
-	return sqt->WndProc(static_cast<Message>(iMessage), wParam, reinterpret_cast<sptr_t>(s));
+	return m_core->WndProc(static_cast<Message>(iMessage), wParam, reinterpret_cast<sptr_t>(s));
 }
 
 bool ScintillaQuickItem::startProfilingSession(const QString &outputDirectory, double durationSeconds)
@@ -648,8 +652,8 @@ void ScintillaQuickItem::stopProfilingSession()
     metadata.insert("actual_duration_ms", m_profiling_state->elapsed.elapsed());
     metadata.insert("item_width", width());
     metadata.insert("item_height", height());
-    metadata.insert("logical_width", logicalWidth);
-    metadata.insert("logical_height", logicalHeight);
+    metadata.insert("logical_width", m_logical_width);
+    metadata.insert("logical_height", m_logical_height);
     metadata.insert("char_width", getCharWidth());
     metadata.insert("char_height", getCharHeight());
     metadata.insert("document_length_bytes", static_cast<qint64>(send(SCI_GETTEXTLENGTH)));
@@ -734,7 +738,7 @@ void ScintillaQuickItem::request_scene_graph_update(
     bool needs_style_sync,
     bool scrolling)
 {
-    if (!m_render_data || !enableUpdateFlag) {
+    if (!m_render_data || !m_updates_enabled) {
         return;
     }
 
@@ -759,7 +763,7 @@ void ScintillaQuickItem::request_scene_graph_update(
 
 void ScintillaQuickItem::scrollRow(int deltaLines)
 {
-    int currentLine = sqt->TopLineOfMain();
+    int currentLine = m_core->TopLineOfMain();
     scrollVertical(currentLine + deltaLines);
 }
 
@@ -777,13 +781,13 @@ void ScintillaQuickItem::scrollColumn(int deltaColumns)
 
 void ScintillaQuickItem::cmdContextMenu(int menuID)
 {
-    sqt->Command(menuID);
+    m_core->Command(menuID);
 }
 
 void ScintillaQuickItem::enableUpdate(bool enable)
 {
-    enableUpdateFlag = enable;
-    if (enableUpdateFlag) {
+    m_updates_enabled = enable;
+    if (m_updates_enabled) {
         request_scene_graph_update();
     }
 }
@@ -792,32 +796,32 @@ void ScintillaQuickItem::enableUpdate(bool enable)
 
 void ScintillaQuickItem::scrollHorizontal(int value)
 {
-    Hierarchical_profiler *hierarchical_profiler =
+    hierarchical_profiler *profiler =
         m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(hierarchical_profiler);
+    active_hierarchical_profiler_binding hierarchical_binding(profiler);
     (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(hierarchical_profiler, "item.scroll_horizontal");
+    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.scroll_horizontal");
 
     if (m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)) {
         m_profiling_state->horizontal_scroll_command_count.fetch_add(1, std::memory_order_relaxed);
     }
-	sqt->HorizontalScrollTo(value);
+	m_core->HorizontalScrollTo(value);
     syncQuickViewProperties();
     request_scene_graph_update(true, false, false);
 }
 
 void ScintillaQuickItem::scrollVertical(int value)
 {
-    Hierarchical_profiler *hierarchical_profiler =
+    hierarchical_profiler *profiler =
         m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(hierarchical_profiler);
+    active_hierarchical_profiler_binding hierarchical_binding(profiler);
     (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(hierarchical_profiler, "item.scroll_vertical");
+    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.scroll_vertical");
 
     if (m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)) {
         m_profiling_state->vertical_scroll_command_count.fetch_add(1, std::memory_order_relaxed);
     }
-	sqt->ScrollTo(value);
+	m_core->ScrollTo(value);
     request_scene_graph_update(true, false, true);
 }
 
@@ -858,7 +862,7 @@ bool ScintillaQuickItem::event(QEvent *event)
 
 void ScintillaQuickItem::paintEvent(QPaintEvent *event)
 {
-	sqt->PartialPaint(PRectFromQRect(event->rect()));
+	m_core->PartialPaint(PRectFromQRect(event->rect()));
 }
 
 #endif
@@ -877,11 +881,11 @@ int wheelEventYDelta(QWheelEvent *event) {
 
 void ScintillaQuickItem::wheelEvent(QWheelEvent *event)
 {
-    Hierarchical_profiler *hierarchical_profiler =
+    hierarchical_profiler *profiler =
         m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(hierarchical_profiler);
+    active_hierarchical_profiler_binding hierarchical_binding(profiler);
     (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(hierarchical_profiler, "item.wheel_event");
+    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.wheel_event");
 
     if (m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)) {
         m_profiling_state->wheel_event_count.fetch_add(1, std::memory_order_relaxed);
@@ -901,9 +905,9 @@ void ScintillaQuickItem::wheelEvent(QWheelEvent *event)
 			// Zoom! We play with the font sizes in the styles.
 			// Number of steps/line is ignored, we just care if sizing up or down
 			if (wheelEventYDelta(event) > 0) {
-				sqt->KeyCommand(Message::ZoomIn);
+				m_core->KeyCommand(Message::ZoomIn);
 			} else {
-				sqt->KeyCommand(Message::ZoomOut);
+				m_core->KeyCommand(Message::ZoomOut);
 			}
             if (m_render_data) {
                 m_render_data->content_modified_since_last_capture = true;
@@ -921,9 +925,9 @@ void ScintillaQuickItem::wheelEvent(QWheelEvent *event)
 				// Scroll
 				int linesToScroll = 3;
                 if (event->angleDelta().y() > 0) {
-                    scrollVertical(sqt->topLine - linesToScroll);
+                    scrollVertical(m_core->topLine - linesToScroll);
 				} else {
-					scrollVertical(sqt->topLine + linesToScroll);
+					scrollVertical(m_core->topLine + linesToScroll);
 				}
 				QQuickItem::wheelEvent(event);
 #else
@@ -936,7 +940,7 @@ void ScintillaQuickItem::wheelEvent(QWheelEvent *event)
 
 void ScintillaQuickItem::focusInEvent(QFocusEvent *event)
 {
-	sqt->SetFocusState(true);
+	m_core->SetFocusState(true);
 
 #ifdef PLAT_QT_QML
 	QQuickItem::focusInEvent(event);
@@ -949,7 +953,7 @@ void ScintillaQuickItem::focusInEvent(QFocusEvent *event)
 
 void ScintillaQuickItem::focusOutEvent(QFocusEvent *event)
 {
-	sqt->SetFocusState(false);
+	m_core->SetFocusState(false);
 
 #ifdef PLAT_QT_QML
 	QQuickItem::focusOutEvent(event);
@@ -967,7 +971,7 @@ void ScintillaQuickItem::geometryChange(const QRectF &newGeometry, const QRectF 
 	// no update is needed for a position change
 	if(newGeometry.width() != oldGeometry.width() || newGeometry.height() != oldGeometry.height() )
 	{
-		sqt->ChangeSize();
+		m_core->ChangeSize();
 		emit resized();
         QQuickItem::geometryChange(newGeometry, oldGeometry);
 
@@ -982,7 +986,7 @@ void ScintillaQuickItem::geometryChange(const QRectF &newGeometry, const QRectF 
 
 void ScintillaQuickItem::resizeEvent(QResizeEvent *)
 {
-	sqt->ChangeSize();
+	m_core->ChangeSize();
 	emit resized();
 }
 
@@ -1043,7 +1047,7 @@ void ScintillaQuickItem::keyPressEvent(QKeyEvent *event)
 #endif
 
 	bool consumed = false;
-	bool added = sqt->KeyDownWithModifiers(static_cast<Keys>(key),
+	bool added = m_core->KeyDownWithModifiers(static_cast<Keys>(key),
                            ModifierFlags(shift, ctrl, alt),
 					       &consumed) != 0;
 	if (!consumed)
@@ -1064,8 +1068,8 @@ void ScintillaQuickItem::keyPressEvent(QKeyEvent *event)
 
 		QString text = event->text();
 		if (input && !text.isEmpty() && text[0].isPrint()) {
-			QByteArray utext = sqt->BytesForDocument(text);
-			sqt->InsertCharacter(std::string_view(utext.data(), utext.size()), CharacterSource::DirectInput);
+			QByteArray utext = m_core->BytesForDocument(text);
+			m_core->InsertCharacter(std::string_view(utext.data(), utext.size()), CharacterSource::DirectInput);
             view_changed = true;
 		} else {
 			event->ignore();
@@ -1108,11 +1112,11 @@ void ScintillaQuickItem::mousePressEvent(QMouseEvent *event)
 
 	if (event->button() == Qt::MiddleButton &&
 	    QGuiApplication::clipboard()->supportsSelection()) {
-		SelectionPosition selPos = sqt->SPositionFromLocation(
-					pos, false, false, sqt->UserVirtualSpace());
-		sqt->sel.Clear();
-		sqt->SetSelection(selPos, selPos);
-		sqt->PasteFromMode(QClipboard::Selection);
+		SelectionPosition selPos = m_core->SPositionFromLocation(
+					pos, false, false, m_core->UserVirtualSpace());
+		m_core->sel.Clear();
+		m_core->SetSelection(selPos, selPos);
+		m_core->PasteFromMode(QClipboard::Selection);
 		return;
 	}
 
@@ -1122,12 +1126,12 @@ void ScintillaQuickItem::mousePressEvent(QMouseEvent *event)
 #ifdef Q_WS_X11
 		// On X allow choice of rectangular modifier since most window
 		// managers grab alt + click for moving windows.
-		bool alt   = QGuiApplication::keyboardModifiers() & modifierTranslated(sqt->rectangularSelectionModifier);
+		bool alt   = QGuiApplication::keyboardModifiers() & modifierTranslated(m_core->m_rectangular_selection_modifier);
 #else
 		bool alt   = QGuiApplication::keyboardModifiers() & Qt::AltModifier;
 #endif
 
-        sqt->ButtonDownWithModifiers(pos, time.elapsed(), ModifierFlags(shift, ctrl, alt));
+        m_core->ButtonDownWithModifiers(pos, m_elapsed_timer.elapsed(), ModifierFlags(shift, ctrl, alt));
 
 #ifdef PLAT_QT_QML
         cursorChangedUpdateMarker();
@@ -1136,17 +1140,17 @@ void ScintillaQuickItem::mousePressEvent(QMouseEvent *event)
 	}
 
 	if (event->button() == Qt::RightButton) {
-		sqt->RightButtonDownWithModifiers(pos, time.elapsed(), ModifiersOfKeyboard());
+		m_core->RightButtonDownWithModifiers(pos, m_elapsed_timer.elapsed(), ModifiersOfKeyboard());
 
 #ifdef PLAT_QT_QML
 		Point pos = PointFromQPoint(event->globalPos());
 		Point pt = PointFromQPoint(event->pos());
-		if (!sqt->PointInSelection(pt)) {
-			sqt->SetEmptySelection(sqt->PositionFromLocation(pt));
+		if (!m_core->PointInSelection(pt)) {
+			m_core->SetEmptySelection(m_core->PositionFromLocation(pt));
 		}
 // TODO: call context menu callback if set otherwise use default context menu...
-		if (sqt->ShouldDisplayPopup(pt)) {
-			sqt->ContextMenu(pos); 
+		if (m_core->ShouldDisplayPopup(pt)) {
+			m_core->ContextMenu(pos);
 		}
         request_scene_graph_update(false, false, false);
 #endif
@@ -1186,7 +1190,7 @@ void ScintillaQuickItem::mouseReleaseEvent(QMouseEvent *event)
 {
 	const QPoint point = event->pos();
 	if (event->button() == Qt::LeftButton)
-		sqt->ButtonUpWithModifiers(PointFromQPoint(point), time.elapsed(), ModifiersOfKeyboard());
+		m_core->ButtonUpWithModifiers(PointFromQPoint(point), m_elapsed_timer.elapsed(), ModifiersOfKeyboard());
 
 	const sptr_t pos = send(SCI_POSITIONFROMPOINT, point.x(), point.y());
 	const sptr_t line = send(SCI_LINEFROMPOSITION, pos);
@@ -1222,7 +1226,7 @@ void ScintillaQuickItem::mouseMoveEvent(QMouseEvent *event)
 #ifdef Q_WS_X11
 	// On X allow choice of rectangular modifier since most window
 	// managers grab alt + click for moving windows.
-	bool alt   = QGuiApplication::keyboardModifiers() & modifierTranslated(sqt->rectangularSelectionModifier);
+	bool alt   = QGuiApplication::keyboardModifiers() & modifierTranslated(m_core->m_rectangular_selection_modifier);
 #else
 	bool alt   = QGuiApplication::keyboardModifiers() & Qt::AltModifier;
 #endif
@@ -1231,7 +1235,7 @@ void ScintillaQuickItem::mouseMoveEvent(QMouseEvent *event)
     const int previous_first_visible_line = static_cast<int>(send(SCI_GETFIRSTVISIBLELINE));
     const int previous_x_offset = static_cast<int>(send(SCI_GETXOFFSET));
 
-	sqt->ButtonMoveWithModifiers(pos, time.elapsed(), modifiers);
+	m_core->ButtonMoveWithModifiers(pos, m_elapsed_timer.elapsed(), modifiers);
 
 #ifdef PLAT_QT_QML
     cursorChangedUpdateMarker();
@@ -1256,11 +1260,11 @@ void ScintillaQuickItem::contextMenuEvent(QContextMenuEvent *event)
 {
 	Point pos = PointFromQPoint(event->globalPos());
 	Point pt = PointFromQPoint(event->pos());
-	if (!sqt->PointInSelection(pt)) {
-		sqt->SetEmptySelection(sqt->PositionFromLocation(pt));
+	if (!m_core->PointInSelection(pt)) {
+		m_core->SetEmptySelection(m_core->PositionFromLocation(pt));
 	}
-	if (sqt->ShouldDisplayPopup(pt)) {
-		sqt->ContextMenu(pos);
+	if (m_core->ShouldDisplayPopup(pt)) {
+		m_core->ContextMenu(pos);
 	}
 }
 
@@ -1274,7 +1278,7 @@ void ScintillaQuickItem::dragEnterEvent(QDragEnterEvent *event)
 		event->acceptProposedAction();
 
 		Point point = PointFromQPoint(event->pos());
-		sqt->DragEnter(point);
+		m_core->DragEnter(point);
 	} else {
 		event->ignore();
 	}
@@ -1282,7 +1286,7 @@ void ScintillaQuickItem::dragEnterEvent(QDragEnterEvent *event)
 
 void ScintillaQuickItem::dragLeaveEvent(QDragLeaveEvent * /* event */)
 {
-	sqt->DragLeave();
+	m_core->DragLeave();
 }
 
 void ScintillaQuickItem::dragMoveEvent(QDragMoveEvent *event)
@@ -1293,7 +1297,7 @@ void ScintillaQuickItem::dragMoveEvent(QDragMoveEvent *event)
 		event->acceptProposedAction();
 
 		Point point = PointFromQPoint(event->pos());
-		sqt->DragMove(point);
+		m_core->DragMove(point);
 	} else {
 		event->ignore();
 	}
@@ -1303,14 +1307,14 @@ void ScintillaQuickItem::dropEvent(QDropEvent *event)
 {
 	if (event->mimeData()->hasUrls()) {
 		event->acceptProposedAction();
-		sqt->DropUrls(event->mimeData());
+		m_core->DropUrls(event->mimeData());
 	} else if (event->mimeData()->hasText()) {
 		event->acceptProposedAction();
 
 		Point point = PointFromQPoint(event->pos());
 		bool move = (event->source() == this &&
                  event->proposedAction() == Qt::MoveAction);
-		sqt->Drop(point, event->mimeData(), move);
+		m_core->Drop(point, event->mimeData(), move);
 	} else {
 		event->ignore();
 	}
@@ -1321,22 +1325,22 @@ bool ScintillaQuickItem::IsHangul(const QChar qchar)
 	unsigned int unicode = qchar.unicode();
 	// Korean character ranges used for preedit chars.
 	// http://www.programminginkorean.com/programming/hangul-in-unicode/
-	const bool HangulJamo = (0x1100 <= unicode && unicode <= 0x11FF);
-	const bool HangulCompatibleJamo = (0x3130 <= unicode && unicode <= 0x318F);
-	const bool HangulJamoExtendedA = (0xA960 <= unicode && unicode <= 0xA97F);
-	const bool HangulJamoExtendedB = (0xD7B0 <= unicode && unicode <= 0xD7FF);
-	const bool HangulSyllable = (0xAC00 <= unicode && unicode <= 0xD7A3);
-	return HangulJamo || HangulCompatibleJamo  || HangulSyllable ||
-				HangulJamoExtendedA || HangulJamoExtendedB;
+	const bool hangul_jamo = (0x1100 <= unicode && unicode <= 0x11FF);
+	const bool hangul_compatible_jamo = (0x3130 <= unicode && unicode <= 0x318F);
+	const bool hangul_jamo_extended_a = (0xA960 <= unicode && unicode <= 0xA97F);
+	const bool hangul_jamo_extended_b = (0xD7B0 <= unicode && unicode <= 0xD7FF);
+	const bool hangul_syllable = (0xAC00 <= unicode && unicode <= 0xD7A3);
+	return hangul_jamo || hangul_compatible_jamo  || hangul_syllable ||
+				hangul_jamo_extended_a || hangul_jamo_extended_b;
 }
 
 void ScintillaQuickItem::MoveImeCarets(Scintilla::Position offset)
 {
 	// Move carets relatively by bytes
-	for (size_t r=0; r < sqt->sel.Count(); r++) {
-		const Sci::Position positionInsert = sqt->sel.Range(r).Start().Position();
-		sqt->sel.Range(r).caret.SetPosition(positionInsert + offset);
-		sqt->sel.Range(r).anchor.SetPosition(positionInsert + offset);
+	for (size_t r=0; r < m_core->sel.Count(); r++) {
+		const Sci::Position positionInsert = m_core->sel.Range(r).Start().Position();
+		m_core->sel.Range(r).caret.SetPosition(positionInsert + offset);
+		m_core->sel.Range(r).anchor.SetPosition(positionInsert + offset);
  	}
 }
 
@@ -1349,10 +1353,10 @@ void ScintillaQuickItem::DrawImeIndicator(int indicator, int len)
 	if (indicator < INDICATOR_CONTAINER || indicator > INDICATOR_MAX) {
 		return;
 	}
-	sqt->pdoc->DecorationSetCurrentIndicator(indicator);
-	for (size_t r=0; r< sqt-> sel.Count(); r++) {
-		const Sci::Position positionInsert = sqt->sel.Range(r).Start().Position();
-		sqt->pdoc->DecorationFillRange(positionInsert - len, 1, len);
+	m_core->pdoc->DecorationSetCurrentIndicator(indicator);
+	for (size_t r=0; r< m_core-> sel.Count(); r++) {
+		const Sci::Position positionInsert = m_core->sel.Range(r).Start().Position();
+		m_core->pdoc->DecorationFillRange(positionInsert - len, 1, len);
 	}
 }
 
@@ -1367,40 +1371,40 @@ static int GetImeCaretPos(QInputMethodEvent *event)
 
 static std::vector<int> MapImeIndicators(QInputMethodEvent *event)
 {
-	std::vector<int> imeIndicator(event->preeditString().size(), IndicatorUnknown);
+	std::vector<int> imeIndicator(event->preeditString().size(), k_indicator_unknown);
 	foreach (QInputMethodEvent::Attribute attr, event->attributes()) {
 		if (attr.type == QInputMethodEvent::TextFormat) {
 			QTextFormat format = attr.value.value<QTextFormat>();
 			QTextCharFormat charFormat = format.toCharFormat();
 
-			int indicator = IndicatorUnknown;
+			int indicator = k_indicator_unknown;
 			switch (charFormat.underlineStyle()) {
 				case QTextCharFormat::NoUnderline: // win32, linux
-					indicator = IndicatorTarget;
+					indicator = k_indicator_target;
 					break;
 				case QTextCharFormat::SingleUnderline: // osx
 				case QTextCharFormat::DashUnderline: // win32, linux
-					indicator = IndicatorInput;
+					indicator = k_indicator_input;
 					break;
 				case QTextCharFormat::DotLine:
 				case QTextCharFormat::DashDotLine:
 				case QTextCharFormat::WaveUnderline:
 				case QTextCharFormat::SpellCheckUnderline:
-					indicator = IndicatorConverted;
+					indicator = k_indicator_converted;
 					break;
 
 				default:
-					indicator = IndicatorUnknown;
+					indicator = k_indicator_unknown;
 			}
 
 			if (format.hasProperty(QTextFormat::BackgroundBrush)) // win32, linux
-				indicator = IndicatorTarget;
+				indicator = k_indicator_target;
 
 #ifdef Q_OS_OSX
 			if (charFormat.underlineStyle() == QTextCharFormat::SingleUnderline) {
 				QColor uc = charFormat.underlineColor();
 				if (uc.lightness() < 2) { // osx
-					indicator = IndicatorTarget;
+					indicator = k_indicator_target;
 				}
 			}
 #endif
@@ -1418,7 +1422,7 @@ void ScintillaQuickItem::inputMethodEvent(QInputMethodEvent *event)
 	// Copy & paste by johnsonj with a lot of helps of Neil
 	// Great thanks for my forerunners, jiniya and BLUEnLIVE
 
-	if (sqt->pdoc->IsReadOnly() || sqt->SelectionContainsProtected()) {
+	if (m_core->pdoc->IsReadOnly() || m_core->SelectionContainsProtected()) {
 		// Here, a canceling and/or completing composition function is needed.
 		return;
 	}
@@ -1435,15 +1439,15 @@ void ScintillaQuickItem::inputMethodEvent(QInputMethodEvent *event)
     for (int i = 0; i < event->attributes().size(); ++i) {
         const QInputMethodEvent::Attribute &a = event->attributes().at(i);
         if (a.type == QInputMethodEvent::Selection) {
-            const Sci::Position curPos = sqt->CurrentPosition();
-            const int paraStart = sqt->pdoc->ParaUp(curPos);
+            const Sci::Position curPos = m_core->CurrentPosition();
+            const int paraStart = m_core->pdoc->ParaUp(curPos);
 
             SelectionPosition newStart(paraStart + a.start);
             SelectionPosition newEnd(paraStart + a.start + a.length);
             if (newStart > newEnd) {
-                sqt->SetSelection(newEnd, newStart);
+                m_core->SetSelection(newEnd, newStart);
             } else {
-                sqt->SetSelection(newStart, newEnd);
+                m_core->SetSelection(newStart, newEnd);
             }
 
             // update markers by triggering QtAndroidInputContext::updateSelectionHandles()
@@ -1454,15 +1458,15 @@ void ScintillaQuickItem::inputMethodEvent(QInputMethodEvent *event)
     }
 
 	bool initialCompose = false;
-	if (sqt->pdoc->TentativeActive()) {
-		sqt->pdoc->TentativeUndo();
+	if (m_core->pdoc->TentativeActive()) {
+		m_core->pdoc->TentativeUndo();
 	} else {
 		// No tentative undo means start of this composition so
 		// Fill in any virtual spaces.
 		initialCompose = true;
 	}
 
-	sqt->view.imeCaretBlockOverride = false;
+	m_core->view.imeCaretBlockOverride = false;
 
 	if (!event->commitString().isEmpty()) {
 		const QString &commitStr = event->commitString();
@@ -1471,9 +1475,9 @@ void ScintillaQuickItem::inputMethodEvent(QInputMethodEvent *event)
 		for (int i = 0; i < commitStrLen;) {
 			const int ucWidth = commitStr.at(i).isHighSurrogate() ? 2 : 1;
 			const QString oneCharUTF16 = commitStr.mid(i, ucWidth);
-			const QByteArray oneChar = sqt->BytesForDocument(oneCharUTF16);
+			const QByteArray oneChar = m_core->BytesForDocument(oneCharUTF16);
 
-			sqt->InsertCharacter(std::string_view(oneChar.data(), oneChar.length()), CharacterSource::DirectInput);
+			m_core->InsertCharacter(std::string_view(oneChar.data(), oneChar.length()), CharacterSource::DirectInput);
 			i += ucWidth;
 		}
 
@@ -1481,23 +1485,23 @@ void ScintillaQuickItem::inputMethodEvent(QInputMethodEvent *event)
 		const QString preeditStr = event->preeditString();
 		const int preeditStrLen = preeditStr.length();
 		if (preeditStrLen == 0) {
-			sqt->ShowCaretAtCurrentPosition();
+			m_core->ShowCaretAtCurrentPosition();
 			return;
 		}
 
 		if (initialCompose)
-			sqt->ClearBeforeTentativeStart();
-		sqt->pdoc->TentativeStart(); // TentativeActive() from now on.
+			m_core->ClearBeforeTentativeStart();
+		m_core->pdoc->TentativeStart(); // TentativeActive() from now on.
 
 		std::vector<int> imeIndicator = MapImeIndicators(event);
 
 		for (int i = 0; i < preeditStrLen;) {
 			const int ucWidth = preeditStr.at(i).isHighSurrogate() ? 2 : 1;
 			const QString oneCharUTF16 = preeditStr.mid(i, ucWidth);
-			const QByteArray oneChar = sqt->BytesForDocument(oneCharUTF16);
+			const QByteArray oneChar = m_core->BytesForDocument(oneCharUTF16);
 			const int oneCharLen = oneChar.length();
 
-			sqt->InsertCharacter(std::string_view(oneChar.data(), oneCharLen), CharacterSource::TentativeInput);
+			m_core->InsertCharacter(std::string_view(oneChar.data(), oneCharLen), CharacterSource::TentativeInput);
 
 			DrawImeIndicator(imeIndicator[i], oneCharLen);
 			i += ucWidth;
@@ -1506,34 +1510,34 @@ void ScintillaQuickItem::inputMethodEvent(QInputMethodEvent *event)
 		// Move IME carets.
 		int imeCaretPos = GetImeCaretPos(event);
 		int imeEndToImeCaretU16 = imeCaretPos - preeditStrLen;
-		const Sci::Position imeCaretPosDoc = sqt->pdoc->GetRelativePositionUTF16(sqt->CurrentPosition(), imeEndToImeCaretU16);
+		const Sci::Position imeCaretPosDoc = m_core->pdoc->GetRelativePositionUTF16(m_core->CurrentPosition(), imeEndToImeCaretU16);
 
-		MoveImeCarets(- sqt->CurrentPosition() + imeCaretPosDoc);
+		MoveImeCarets(- m_core->CurrentPosition() + imeCaretPosDoc);
 
 		if (IsHangul(preeditStr.at(0))) {
 #ifndef Q_OS_WIN
 			if (imeCaretPos > 0) {
-				int oneCharBefore = sqt->pdoc->GetRelativePosition(sqt->CurrentPosition(), -1);
-				MoveImeCarets(- sqt->CurrentPosition() + oneCharBefore);
+				int oneCharBefore = m_core->pdoc->GetRelativePosition(m_core->CurrentPosition(), -1);
+				MoveImeCarets(- m_core->CurrentPosition() + oneCharBefore);
 			}
 #endif
-			sqt->view.imeCaretBlockOverride = true;
+			m_core->view.imeCaretBlockOverride = true;
 		}
 
 		// Set candidate box position for Qt::ImMicroFocus.
-		preeditPos = sqt->CurrentPosition();
-		sqt->EnsureCaretVisible();
+		m_preedit_pos = m_core->CurrentPosition();
+		m_core->EnsureCaretVisible();
 #ifndef PLAT_QT_QML		
 		updateMicroFocus();
 #endif
 	}
-	sqt->ShowCaretAtCurrentPosition();
+	m_core->ShowCaretAtCurrentPosition();
 }
 
 QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const
 {
     // see: QQuickTextEdit::inputMethodQuery(...)
-    const PRectangle textRect = sqt ? sqt->GetTextRectangle() : PRectangle();
+    const PRectangle textRect = m_core ? m_core->GetTextRectangle() : PRectangle();
     const QPointF textOffset(textRect.left, textRect.top);
 
     if (property == Qt::ImCursorPosition && !argument.isNull()) {
@@ -1541,9 +1545,9 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery property, QVa
         const QPointF pt = argument.toPointF();
         if (!pt.isNull()) {
             Point scintillaPoint = PointFromQPointF(pt);
-            Sci::Position ptPos = sqt->PositionFromLocation(scintillaPoint);
+            Sci::Position ptPos = m_core->PositionFromLocation(scintillaPoint);
             int pos = send(SCI_GETCURRENTPOS);
-            int paraStart = sqt->pdoc->ParaUp(pos);
+            int paraStart = m_core->pdoc->ParaUp(pos);
             return QVariant((int)ptPos - paraStart);
         }
         return inputMethodQuery(property);
@@ -1578,13 +1582,13 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
             return QVariant(); // No limit.
         case Qt::ImAnchorRectangle:
             {
-                SelectionPosition selStart = sqt->SelectionStart();
-                SelectionPosition selEnd = sqt->SelectionEnd();
+                SelectionPosition selStart = m_core->SelectionStart();
+                SelectionPosition selEnd = m_core->SelectionEnd();
                 //Sci::Position ptStart = selStart.Position();
                 //Sci::Position ptEnd = selEnd.Position();
 
-                Point ptStart = sqt->LocationFromPosition(selStart);
-                Point ptEnd = sqt->LocationFromPosition(selEnd);
+                Point ptStart = m_core->LocationFromPosition(selStart);
+                Point ptEnd = m_core->LocationFromPosition(selEnd);
 
                 int width = send(SCI_GETCARETWIDTH);
                 int height = send(SCI_TEXTHEIGHT, line);
@@ -1593,26 +1597,26 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
         // selection == Position <--> AnchorPosition
         case Qt::ImAnchorPosition:
             {
-                //Sci::Position curPos = sqt->CurrentPosition();
-                SelectionPosition selStart = sqt->SelectionStart();
-                SelectionPosition selEnd = sqt->SelectionEnd();
+                //Sci::Position curPos = m_core->CurrentPosition();
+                SelectionPosition selStart = m_core->SelectionStart();
+                SelectionPosition selEnd = m_core->SelectionEnd();
                 ////Point ptEnd = selEnd.Position();
                 //return QVariant(/*ptEnd*/10);
 
-                int paraStart = sqt->pdoc->ParaUp(pos);
+                int paraStart = m_core->pdoc->ParaUp(pos);
                 return (int)selEnd.Position() - paraStart;
             }
         case Qt::ImAbsolutePosition:
             {
-                //Sci::Position curPos = sqt->CurrentPosition();
+                //Sci::Position curPos = m_core->CurrentPosition();
                 //return QVariant((int)curPos);
                 return QVariant((int)pos);
             }
         case Qt::ImTextAfterCursor:
         {
             // from Qt::ImSurroundingText:
-            int paraStart = sqt->pdoc->ParaUp(pos);
-            int paraEnd = sqt->pdoc->ParaDown(pos);
+            int paraStart = m_core->pdoc->ParaUp(pos);
+            int paraEnd = m_core->pdoc->ParaDown(pos);
             QVarLengthArray<char,1024> buffer(paraEnd - paraStart + 1);
 
             Sci_CharacterRange charRange;
@@ -1625,13 +1629,13 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
 
             send(SCI_GETTEXTRANGE, 0, (sptr_t)&textRange);
 
-            return sqt->StringFromDocument(buffer.constData());
+            return m_core->StringFromDocument(buffer.constData());
         }
         case Qt::ImTextBeforeCursor:
         {
             // from Qt::ImSurroundingText:
-            int paraStart = sqt->pdoc->ParaUp(pos);
-            int paraEnd = sqt->pdoc->ParaDown(pos);
+            int paraStart = m_core->pdoc->ParaUp(pos);
+            int paraEnd = m_core->pdoc->ParaDown(pos);
             QVarLengthArray<char,1024> buffer(paraEnd - paraStart + 1);
 
             Sci_CharacterRange charRange;
@@ -1644,13 +1648,13 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
 
             send(SCI_GETTEXTRANGE, 0, (sptr_t)&textRange);
 
-            return sqt->StringFromDocument(buffer.constData());
+            return m_core->StringFromDocument(buffer.constData());
         }
 #endif
 		case Qt::ImCursorRectangle:
 		{
-			const Scintilla::Position startPos = (preeditPos >= 0) ? preeditPos : pos;
-			const Point pt = sqt->LocationFromPosition(startPos);
+			const Scintilla::Position startPos = (m_preedit_pos >= 0) ? m_preedit_pos : pos;
+			const Point pt = m_core->LocationFromPosition(startPos);
 			const int width = static_cast<int>(send(SCI_GETCARETWIDTH));
 			const int height = static_cast<int>(send(SCI_TEXTHEIGHT, line));
 			return QRectF(pt.x, pt.y, width, height).toRect();
@@ -1664,16 +1668,16 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
 
 		case Qt::ImCursorPosition:
 		{
-			const Scintilla::Position paraStart = sqt->pdoc->ParaUp(pos);
+			const Scintilla::Position paraStart = m_core->pdoc->ParaUp(pos);
 			return QVariant(static_cast<int>(pos - paraStart));
 		}
 
 		case Qt::ImSurroundingText:
 		{
-			const Scintilla::Position paraStart = sqt->pdoc->ParaUp(pos);
-			const Scintilla::Position paraEnd = sqt->pdoc->ParaDown(pos);
-			const std::string buffer = sqt->RangeText(paraStart, paraEnd);
-			return sqt->StringFromDocument(buffer.c_str());
+			const Scintilla::Position paraStart = m_core->pdoc->ParaUp(pos);
+			const Scintilla::Position paraEnd = m_core->pdoc->ParaDown(pos);
+			const std::string buffer = m_core->RangeText(paraStart, paraEnd);
+			return m_core->StringFromDocument(buffer.c_str());
 		}
 
 		case Qt::ImCurrentSelection:
@@ -1681,7 +1685,7 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
 			QVarLengthArray<char,1024> buffer(send(SCI_GETSELTEXT));
 			sends(SCI_GETSELTEXT, 0, buffer.data());
 
-			return sqt->StringFromDocument(buffer.constData());
+			return m_core->StringFromDocument(buffer.constData());
 		}
 
 		default:
@@ -1693,7 +1697,7 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
 
 void ScintillaQuickItem::touchEvent(QTouchEvent *event)
 {
-    if(sqt->pdoc->IsReadOnly())
+    if(m_core->pdoc->IsReadOnly())
     {
         //event->ignore();        // --> transformiert touchEvents in mouseEvents !!!
         return;
@@ -1703,20 +1707,20 @@ void ScintillaQuickItem::touchEvent(QTouchEvent *event)
 
     if( event->touchPointStates() == Qt::TouchPointPressed && event->touchPoints().count()>0 )
     {
-        aLastTouchPressTime = time.elapsed();
+        m_last_touch_press_time = m_elapsed_timer.elapsed();
         cursorChangedUpdateMarker();
     }
     else if( event->touchPointStates() == Qt::TouchPointReleased && event->touchPoints().count()>0 )
     {
-        // is ths a short touch (time between press and release < 100ms) ?
-        if(aLastTouchPressTime>=0 && (time.elapsed()-aLastTouchPressTime)<100)
+        // is ths a short touch (m_elapsed_timer between press and release < 100ms) ?
+        if(m_last_touch_press_time>=0 && (m_elapsed_timer.elapsed()-m_last_touch_press_time)<100)
         {
             QTouchEvent::TouchPoint point = event->touchPoints().first();
             QPoint mousePressedPoint = point.pos().toPoint();
             Point scintillaPoint = PointFromQPoint(mousePressedPoint);
 
-            Sci::Position pos = sqt->PositionFromLocation(scintillaPoint);
-            sqt->MovePositionTo(pos);
+            Sci::Position pos = m_core->PositionFromLocation(scintillaPoint);
+            m_core->MovePositionTo(pos);
 
 #ifdef Q_OS_ANDROID
             // Android: trigger software keyboard for inputs:
@@ -1724,7 +1728,7 @@ void ScintillaQuickItem::touchEvent(QTouchEvent *event)
             // https://stackoverflow.com/questions/5724811/how-to-show-the-keyboard-on-qt
 
             // Check if not in readonly modus --> pdoc->IsReadOnly()
-            if( hasActiveFocus() && !sqt->pdoc->IsReadOnly() )
+            if( hasActiveFocus() && !m_core->pdoc->IsReadOnly() )
             {
                 // TODO working: QGuiApplication::inputMethod()->commit();
 
@@ -1752,13 +1756,13 @@ void ScintillaQuickItem::touchEvent(QTouchEvent *event)
 
 void ScintillaQuickItem::updatePolish()
 {
-    Hierarchical_profiler *hierarchical_profiler =
+    hierarchical_profiler *profiler =
         m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(hierarchical_profiler);
+    active_hierarchical_profiler_binding hierarchical_binding(profiler);
     (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(hierarchical_profiler, "item.update_polish");
+    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.update_polish");
 
-    Profiling_scope profiling_scope(
+    profiling_scope scope(
         m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)
             ? &m_profiling_state->update_polish
             : nullptr);
@@ -1772,13 +1776,13 @@ void ScintillaQuickItem::updatePolish()
 
 QSGNode *ScintillaQuickItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *updatePaintNodeData)
 {
-    Hierarchical_profiler *hierarchical_profiler =
+    hierarchical_profiler *profiler =
         m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(hierarchical_profiler);
+    active_hierarchical_profiler_binding hierarchical_binding(profiler);
     (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(hierarchical_profiler, "item.update_paint_node");
+    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.update_paint_node");
 
-    Profiling_scope profiling_scope(
+    profiling_scope scope(
         m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)
             ? &m_profiling_state->update_paint_node
             : nullptr);
@@ -1794,13 +1798,13 @@ QSGNode *ScintillaQuickItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeDa
 
 void ScintillaQuickItem::build_render_snapshot()
 {
-    Hierarchical_profiler *hierarchical_profiler =
+    hierarchical_profiler *profiler =
         m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(hierarchical_profiler);
+    active_hierarchical_profiler_binding hierarchical_binding(profiler);
     (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(hierarchical_profiler, "item.build_render_snapshot");
+    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.build_render_snapshot");
 
-    Profiling_scope profiling_scope(
+    profiling_scope scope(
         m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)
             ? &m_profiling_state->build_render_snapshot
             : nullptr);
@@ -1811,7 +1815,7 @@ void ScintillaQuickItem::build_render_snapshot()
     if (!m_render_data->static_content_dirty && !m_render_data->overlay_content_dirty
         && !m_render_data->captured_caret_primitives.empty()) {
         const int caret_width = static_cast<int>(send(SCI_GETCARETWIDTH));
-        if (hasActiveFocus() && sqt && sqt->caret.active && m_caret_blink_visible && caret_width > 0) {
+        if (hasActiveFocus() && m_core && m_core->caret.active && m_caret_blink_visible && caret_width > 0) {
             m_render_data->frame.caret_primitives = m_render_data->captured_caret_primitives;
         } else {
             m_render_data->frame.caret_primitives.clear();
@@ -1823,10 +1827,10 @@ void ScintillaQuickItem::build_render_snapshot()
         return;
     }
 
-    render_snapshot_t snapshot;
-    style_cache_t style_cache;
+    render_snapshot snapshot;
+    style_cache cache;
     snapshot.item_size = QSizeF(width(), height());
-    snapshot.background = style_attributes_for(this, style_cache, STYLE_DEFAULT).background;
+    snapshot.background = style_attributes_for(this, cache, STYLE_DEFAULT).background;
     snapshot.gutter_bands.reserve(k_margin_count);
     qreal margin_left = 0.0;
     for (int margin = 0; margin < k_margin_count; ++margin) {
@@ -1837,14 +1841,14 @@ void ScintillaQuickItem::build_render_snapshot()
 
         snapshot.gutter_bands.push_back({
             QRectF(margin_left, 0.0, static_cast<qreal>(margin_width), height()),
-            margin_background_color_for(this, style_cache, margin),
+            margin_background_color_for(this, cache, margin),
         });
         margin_left += margin_width;
     }
 
-    const int current_first_visible_line = sqt ? static_cast<int>(send(SCI_GETFIRSTVISIBLELINE)) : -1;
-    const int current_x_offset = sqt ? static_cast<int>(send(SCI_GETXOFFSET)) : -1;
-    const int previous_scroll_width = sqt ? static_cast<int>(send(SCI_GETSCROLLWIDTH)) : 0;
+    const int current_first_visible_line = m_core ? static_cast<int>(send(SCI_GETFIRSTVISIBLELINE)) : -1;
+    const int current_x_offset = m_core ? static_cast<int>(send(SCI_GETXOFFSET)) : -1;
+    const int previous_scroll_width = m_core ? static_cast<int>(send(SCI_GETSCROLLWIDTH)) : 0;
     const int scroll_delta_lines =
         (m_render_data->previous_first_visible_line >= 0 && current_first_visible_line >= 0)
             ? (current_first_visible_line - m_render_data->previous_first_visible_line)
@@ -1860,8 +1864,8 @@ void ScintillaQuickItem::build_render_snapshot()
     const bool overlay_only_capture =
         !static_content_dirty &&
         m_render_data->overlay_content_dirty;
-    Render_frame frame;
-    const int line_height = (sqt && sqt->vs.lineHeight > 0) ? sqt->vs.lineHeight : 1;
+    render_frame frame;
+    const int line_height = (m_core && m_core->vs.lineHeight > 0) ? m_core->vs.lineHeight : 1;
     const int capture_buffer_lines = std::max(
         k_vertical_scroll_reuse_buffer_min_lines,
         std::max(1, static_cast<int>(height() / line_height) / 3 + 2));
@@ -1890,15 +1894,15 @@ void ScintillaQuickItem::build_render_snapshot()
     if (can_reuse_vertical_scroll) {
         frame = m_render_data->frame;
         translate_render_frame(frame, -static_cast<qreal>(scroll_delta_lines * line_height));
-    } else if (overlay_only_capture && sqt) {
-        frame = sqt->current_render_frame(
+    } else if (overlay_only_capture && m_core) {
+        frame = m_core->current_render_frame(
             nullptr,
             false,
             false,
             false,
             0);
-    } else if (sqt) {
-        frame = sqt->current_render_frame(
+    } else if (m_core) {
+        frame = m_core->current_render_frame(
             nullptr,
             static_content_dirty,
             m_render_data->style_sync_needed && static_content_dirty,
@@ -1926,7 +1930,7 @@ void ScintillaQuickItem::build_render_snapshot()
     m_render_data->captured_caret_primitives = frame.caret_primitives;
 
     const int caret_width = static_cast<int>(send(SCI_GETCARETWIDTH));
-    if (!(hasActiveFocus() && sqt && sqt->caret.active && m_caret_blink_visible && caret_width > 0)) {
+    if (!(hasActiveFocus() && m_core && m_core->caret.active && m_caret_blink_visible && caret_width > 0)) {
         frame.caret_primitives.clear();
     }
 
@@ -1964,7 +1968,7 @@ void ScintillaQuickItem::build_render_snapshot()
     m_render_data->previous_first_visible_line = current_first_visible_line;
     m_render_data->previous_x_offset = current_x_offset;
 
-    if (sqt) {
+    if (m_core) {
         const int current_scroll_width = static_cast<int>(send(SCI_GETSCROLLWIDTH));
         if (current_scroll_width != previous_scroll_width) {
             syncQuickViewProperties();
@@ -1972,16 +1976,16 @@ void ScintillaQuickItem::build_render_snapshot()
     }
 }
 
-std::vector<displayed_row_for_test_t> ScintillaQuickItem::displayed_rows_for_test() const
+std::vector<displayed_row_for_test> ScintillaQuickItem::displayed_rows_for_test() const
 {
     if (!m_render_data) {
         return {};
     }
 
-    std::vector<displayed_row_for_test_t> rows;
+    std::vector<displayed_row_for_test> rows;
     rows.reserve(m_render_data->frame.visual_lines.size());
-    for (const visual_line_frame_t &line : m_render_data->frame.visual_lines) {
-        displayed_row_for_test_t row;
+    for (const visual_line_frame &line : m_render_data->frame.visual_lines) {
+        displayed_row_for_test row;
         row.document_line = line.key.document_line;
         row.subline_index = line.key.subline_index;
         row.top = line.clip_rect.top();
@@ -1992,9 +1996,9 @@ std::vector<displayed_row_for_test_t> ScintillaQuickItem::displayed_rows_for_tes
     return rows;
 }
 
-const Render_frame &ScintillaQuickItem::rendered_frame_for_test() const
+const render_frame &ScintillaQuickItem::rendered_frame_for_test() const
 {
-    static const Render_frame empty_frame;
+    static const render_frame empty_frame;
     return m_render_data ? m_render_data->frame : empty_frame;
 }
 
@@ -2189,11 +2193,11 @@ void ScintillaQuickItem::setFont(const QFont & newFont)
     // do NOT touch QGuiApplication::setFont(), because the editor
     // font should not bleed into unrelated Quick items in the same
     // application.
-    if (newFont == aFont) {
+    if (newFont == m_font) {
         return;
     }
 
-	aFont = newFont;
+	m_font = newFont;
 
 	// Set the font for a style.
 	setStylesFont(newFont, 0);
@@ -2207,12 +2211,12 @@ void ScintillaQuickItem::setFont(const QFont & newFont)
 
 int ScintillaQuickItem::getLogicalWidth() const
 {
-	return logicalWidth;
+	return m_logical_width;
 }
 
 int ScintillaQuickItem::getLogicalHeight() const
 {
-	return logicalHeight;
+	return m_logical_height;
 }
 
 int ScintillaQuickItem::getCharHeight() const
@@ -2276,22 +2280,22 @@ int ScintillaQuickItem::getVisibleColumns() const
 		return 0;
 	}
 
-	const PRectangle textRect = sqt->GetTextRectangle();
+	const PRectangle textRect = m_core->GetTextRectangle();
 	const int visibleWidth = std::max(0, static_cast<int>(textRect.Width()));
 	return visibleWidth / charWidth;
 }
 
 Qt::InputMethodHints ScintillaQuickItem::inputMethodHints() const
 {
-	return dataInputMethodHints | Qt::ImhNoAutoUppercase | Qt::ImhNoPredictiveText | Qt::ImhMultiLine;
+	return m_input_method_hints | Qt::ImhNoAutoUppercase | Qt::ImhNoPredictiveText | Qt::ImhMultiLine;
 }
 
 void ScintillaQuickItem::setInputMethodHints(Qt::InputMethodHints hints)
 {
-	if (hints == dataInputMethodHints)
+	if (hints == m_input_method_hints)
 		return;
 
-	dataInputMethodHints = hints;
+	m_input_method_hints = hints;
 	updateInputMethod(Qt::ImHints);
 	emit inputMethodHintsChanged();
 }
@@ -2315,13 +2319,13 @@ void ScintillaQuickItem::setReadonly(bool value)
 
 void ScintillaQuickItem::updateQuickView(Update updated)
 {
-    Hierarchical_profiler *hierarchical_profiler =
+    hierarchical_profiler *profiler =
         m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(hierarchical_profiler);
+    active_hierarchical_profiler_binding hierarchical_binding(profiler);
     (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(hierarchical_profiler, "item.update_quick_view");
+    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.update_quick_view");
 
-    Profiling_scope profiling_scope(
+    profiling_scope scope(
         m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)
             ? &m_profiling_state->update_quick_view
             : nullptr);
@@ -2344,7 +2348,7 @@ void ScintillaQuickItem::updateQuickView(Update updated)
 
 void ScintillaQuickItem::syncQuickViewProperties()
 {
-    if (!sqt) {
+    if (!m_core) {
         return;
     }
 
@@ -2391,27 +2395,27 @@ void ScintillaQuickItem::syncQuickViewProperties()
     emit_if_changed(m_last_emitted_first_visible_line, firstVisibleLine, &ScintillaQuickItem::firstVisibleLineChanged);
     emit_if_changed(m_last_emitted_first_visible_column, firstVisibleColumn, &ScintillaQuickItem::firstVisibleColumnChanged);
 
-    if (logicalWidth != textWidth) {
-        logicalWidth = textWidth;
+    if (m_logical_width != textWidth) {
+        m_logical_width = textWidth;
         emit logicalWidthChanged();
     }
-    if (logicalHeight != textHeight) {
-        logicalHeight = textHeight;
+    if (m_logical_height != textHeight) {
+        m_logical_height = textHeight;
         emit logicalHeightChanged();
     }
 }
 
 void ScintillaQuickItem::reset_tracked_scroll_width()
 {
-    if (!sqt) {
+    if (!m_core) {
         return;
     }
 
-    if (!sqt->WndProc(Message::GetScrollWidthTracking, 0, 0)) {
+    if (!m_core->WndProc(Message::GetScrollWidthTracking, 0, 0)) {
         return;
     }
 
-    sqt->reset_tracked_scroll_width_to_viewport();
+    m_core->reset_tracked_scroll_width_to_viewport();
 }
 
 // taken from QScintilla
@@ -2437,7 +2441,7 @@ void ScintillaQuickItem::setStylesFont(const QFont &f, int style)
 
 void ScintillaQuickItem::cursorChangedUpdateMarker()
 {
-    if(!sqt->pdoc->IsReadOnly())
+    if(!m_core->pdoc->IsReadOnly())
     {
         syncCaretBlinkTimer(true);
         emit qGuiApp->inputMethod()->cursorRectangleChanged();   // IMPORTANT: this moves the handle !!! see: QQuickTextControl::updateCursorRectangle()
@@ -2448,8 +2452,8 @@ void ScintillaQuickItem::cursorChangedUpdateMarker()
 
 void ScintillaQuickItem::syncCaretBlinkTimer(bool resetPhase)
 {
-    const bool caret_should_blink = sqt && hasActiveFocus() && sqt->caret.active;
-    const int caret_period = sqt ? static_cast<int>(send(SCI_GETCARETPERIOD)) : 0;
+    const bool caret_should_blink = m_core && hasActiveFocus() && m_core->caret.active;
+    const int caret_period = m_core ? static_cast<int>(send(SCI_GETCARETPERIOD)) : 0;
 
     if (!caret_should_blink || caret_period <= 0) {
         m_caret_blink_timer.stop();

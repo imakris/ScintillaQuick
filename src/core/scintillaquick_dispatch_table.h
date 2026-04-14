@@ -20,7 +20,7 @@
 
 namespace Scintilla::Internal {
 
-struct scene_graph_update_request_t
+struct scene_graph_update_request_info
 {
     bool needed = false;
     bool static_content_dirty = false;
@@ -318,7 +318,7 @@ inline bool scene_graph_message_is_known_read_only(unsigned int iMessage)
     }
 }
 
-inline scene_graph_update_request_t scene_graph_update_request(unsigned int iMessage)
+inline scene_graph_update_request_info scene_graph_update_request(unsigned int iMessage)
 {
     switch (iMessage) {
         case SCI_SETXOFFSET:
