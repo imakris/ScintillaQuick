@@ -1578,7 +1578,7 @@ public:
             margin.baseline_y - line_ascent);
         m_text_node->addTextLayout(pos, layout.get());
         m_layouts.push_back(std::move(layout));
-        m_layout_positions.push_back(pos);
+        m_layout_positions.push_back(margin.position);
         m_cached_margin_text       = margin.text;
         m_cached_margin_font       = margin.font;
         m_cached_margin_foreground = margin.foreground;

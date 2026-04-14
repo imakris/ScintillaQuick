@@ -270,16 +270,21 @@ struct Fixture_editor
             return QImage();
         }
 
-        // grabWindow() forces a synchronous render with the software
-        // scene graph and returns the result directly.
-        QImage result;
-        for (int attempt = 0; attempt < 3; ++attempt) {
-            result = window.grabWindow();
-            if (!result.isNull()) {
+        // Static fixtures should capture a settled frame rather than a
+        // transient first frame.
+        QImage previous = capture_ready_window(fixture_name);
+        for (int attempt = 1; attempt < 6; ++attempt) {
+            pump();
+            QThread::msleep(10);
+            pump();
+            QImage current = capture_ready_window(fixture_name);
+            if (current == previous) {
+                previous = current;
                 break;
             }
-            pump();
+            previous = current;
         }
+        QImage result = previous;
 
         trace_line(QStringLiteral("capture[%1]: rendered %2x%3")
                        .arg(QString::fromUtf8(fixture_name))
@@ -648,7 +653,7 @@ Fixture_outcome run_scroll_probe_fixture(
                        .arg(wrapped));
 
         const QByteArray step_name_bytes = step_name.toUtf8();
-        const QImage captured = capture_stable_image(editor, step_name_bytes);
+        const QImage captured = editor.capture_ready_window(step_name_bytes.constData());
         if (!image_has_dark_text_pixels(captured)) {
             QDir().mkpath(QStringLiteral(ARTIFACT_DIR));
             captured.save(artifact_path(step_name_bytes.constData(), "missing_text"));
