@@ -338,23 +338,23 @@ ScintillaQuickCore::ScintillaQuickCore(::ScintillaQuickItem *parent)
  m_rectangular_selection_modifier(SCMOD_ALT),
  m_current_painter(nullptr)
 {
-	wMain = static_cast<QQuickItem *>(m_owner); // Scintilla wMain stores the platform window handle.
+    wMain = static_cast<QQuickItem *>(m_owner); // Scintilla wMain stores the platform window handle.
 
-	imeInteraction = IMEInteraction::Inline;
+    imeInteraction = IMEInteraction::Inline;
 
-	// On macOS drawing text into a pixmap moves it around 1 pixel to
-	// the right compared to drawing it directly onto a window.
-	// Buffered drawing turned off by default to avoid this.
-	view.bufferedDraw = false;
+    // On macOS drawing text into a pixmap moves it around 1 pixel to
+    // the right compared to drawing it directly onto a window.
+    // Buffered drawing turned off by default to avoid this.
+    view.bufferedDraw = false;
 
-	Init();
+    Init();
 
-	std::fill(timers, std::end(timers), 0);
+    std::fill(timers, std::end(timers), 0);
 }
 
 void ScintillaQuickCore::UpdateInfos(int winId)
 {
-	SetCtrlID(winId);
+    SetCtrlID(winId);
 }
 
 void ScintillaQuickCore::ensure_visible_range_styled(bool scrolling)
@@ -364,41 +364,41 @@ void ScintillaQuickCore::ensure_visible_range_styled(bool scrolling)
 
 void ScintillaQuickCore::selectCurrentWord()
 {
-	auto pos       = CurrentPosition();
-	const auto max = pdoc->Length();
-	if (max <= 0) {
-		return;
-	}
+    auto pos       = CurrentPosition();
+    const auto max = pdoc->Length();
+    if (max <= 0) {
+        return;
+    }
 
-	if (pos < 0) {
-		pos = 0;
-	} else if (pos >= max) {
-		pos = max - 1;
-	}
+    if (pos < 0) {
+        pos = 0;
+    } else if (pos >= max) {
+        pos = max - 1;
+    }
 
-	if (pos > 0 &&
-		!std::isalnum(static_cast<unsigned char>(pdoc->CharAt(pos))) &&
-		std::isalnum(static_cast<unsigned char>(pdoc->CharAt(pos - 1)))) {
-		pos--;
-	}
+    if (pos > 0 &&
+        !std::isalnum(static_cast<unsigned char>(pdoc->CharAt(pos))) &&
+        std::isalnum(static_cast<unsigned char>(pdoc->CharAt(pos - 1)))) {
+        pos--;
+    }
 
-	auto startPos = pos;
-	while (startPos > 0 && std::isalnum(static_cast<unsigned char>(pdoc->CharAt(startPos - 1)))) {
-		startPos--;
-	}
+    auto startPos = pos;
+    while (startPos > 0 && std::isalnum(static_cast<unsigned char>(pdoc->CharAt(startPos - 1)))) {
+        startPos--;
+    }
 
-	auto endPos = pos + 1;
-	while (endPos < max && std::isalnum(static_cast<unsigned char>(pdoc->CharAt(endPos)))) {
-		endPos++;
-	}
+    auto endPos = pos + 1;
+    while (endPos < max && std::isalnum(static_cast<unsigned char>(pdoc->CharAt(endPos)))) {
+        endPos++;
+    }
 
-	if (startPos == endPos) {
-		return;
-	}
+    if (startPos == endPos) {
+        return;
+    }
 
-	SetSelection(startPos, endPos);
+    SetSelection(startPos, endPos);
 
-	emit cursorPositionChanged();
+    emit cursorPositionChanged();
 }
 
 struct ScintillaQuickCore::style_attributes
@@ -845,36 +845,36 @@ render_frame ScintillaQuickCore::current_render_frame(
 
 ScintillaQuickCore::~ScintillaQuickCore()
 {
-	// Belt-and-braces: prepare_for_owner_destruction() is the correct
-	// path and runs from ~ScintillaQuickItem() before the derived
-	// subobject dies. If, for some reason, that path was skipped (for
-	// instance, a direct user-managed ScintillaQuickCore deletion),
-	// still try to clean up here.
-	CancelTimers();
-	ChangeIdle(false);
+    // Belt-and-braces: prepare_for_owner_destruction() is the correct
+    // path and runs from ~ScintillaQuickItem() before the derived
+    // subobject dies. If, for some reason, that path was skipped (for
+    // instance, a direct user-managed ScintillaQuickCore deletion),
+    // still try to clean up here.
+    CancelTimers();
+    ChangeIdle(false);
 }
 
 void ScintillaQuickCore::prepare_for_owner_destruction()
 {
-	// Break the clipboard connection first so a pending SelectionChanged
-	// delivery cannot land between here and the final teardown.
-	if (QClipboard *clipboard = QGuiApplication::clipboard()) {
-		disconnect(clipboard, nullptr, this, nullptr);
-	}
+    // Break the clipboard connection first so a pending SelectionChanged
+    // delivery cannot land between here and the final teardown.
+    if (QClipboard *clipboard = QGuiApplication::clipboard()) {
+        disconnect(clipboard, nullptr, this, nullptr);
+    }
 
-	CancelTimers();
-	ChangeIdle(false);
+    CancelTimers();
+    ChangeIdle(false);
 
-	// After this point, timerEvent / onIdle / any queued slot that
-	// checks `m_owner` will short-circuit rather than dereference a
-	// sliced-down QQuickItem.
-	m_owner = nullptr;
+    // After this point, timerEvent / onIdle / any queued slot that
+    // checks `m_owner` will short-circuit rather than dereference a
+    // sliced-down QQuickItem.
+    m_owner = nullptr;
 }
 
 void ScintillaQuickCore::execCommand(QAction *action)
 {
-	const int commandNum = action->data().toInt();
-	Command(commandNum);
+    const int commandNum = action->data().toInt();
+    Command(commandNum);
 }
 
 #if defined(Q_OS_WIN)
@@ -892,130 +892,130 @@ static const QString sMimeRectangularMarker("text/x-rectangular-marker");
 
 void ScintillaQuickCore::Init()
 {
-	m_rectangular_selection_modifier = SCMOD_ALT;
+    m_rectangular_selection_modifier = SCMOD_ALT;
 
-	connect(QGuiApplication::clipboard(), SIGNAL(selectionChanged()),
-		this, SLOT(SelectionChanged()));
+    connect(QGuiApplication::clipboard(), SIGNAL(selectionChanged()),
+        this, SLOT(SelectionChanged()));
 }
 
 void ScintillaQuickCore::Finalise()
 {
-	CancelTimers();
-	ScintillaBase::Finalise();
+    CancelTimers();
+    ScintillaBase::Finalise();
 }
 
 void ScintillaQuickCore::SelectionChanged()
 {
-	bool nowPrimary = QGuiApplication::clipboard()->ownsSelection();
-	if (nowPrimary != primarySelection) {
-		primarySelection = nowPrimary;
-		Redraw();
-	}
+    bool nowPrimary = QGuiApplication::clipboard()->ownsSelection();
+    if (nowPrimary != primarySelection) {
+        primarySelection = nowPrimary;
+        Redraw();
+    }
 }
 
 bool ScintillaQuickCore::DragThreshold(Point ptStart, Point ptNow)
 {
-	int xMove = std::abs(ptStart.x - ptNow.x);
-	int yMove = std::abs(ptStart.y - ptNow.y);
-	return (xMove > QGuiApplication::styleHints()->startDragDistance()) ||
-		(yMove > QGuiApplication::styleHints()->startDragDistance());
+    int xMove = std::abs(ptStart.x - ptNow.x);
+    int yMove = std::abs(ptStart.y - ptNow.y);
+    return (xMove > QGuiApplication::styleHints()->startDragDistance()) ||
+        (yMove > QGuiApplication::styleHints()->startDragDistance());
 }
 
 static QString string_from_selected_text(const SelectionText &selectedText)
 {
-	Q_UNUSED(selectedText.characterSet);
-	return QString::fromUtf8(selectedText.Data(), static_cast<int>(selectedText.Length()));
+    Q_UNUSED(selectedText.characterSet);
+    return QString::fromUtf8(selectedText.Data(), static_cast<int>(selectedText.Length()));
 }
 
 static void add_rectangular_to_mime(QMimeData *mimeData, [[maybe_unused]] const QString &su)
 {
-	Q_UNUSED(su);
+    Q_UNUSED(su);
 #if defined(Q_OS_WIN)
-	// Add an empty marker
-	mimeData->setData(sMSDEVColumnSelect, QByteArray());
+    // Add an empty marker
+    mimeData->setData(sMSDEVColumnSelect, QByteArray());
 #elif defined(Q_OS_MAC)
-	// macOS gets marker + data to work with other implementations.
-	// Don't understand how this works but it does - the
-	// clipboard format is supposed to be UTF-16, not UTF-8.
-	mimeData->setData(sScintillaRecMimeType, su.toUtf8());
+    // macOS gets marker + data to work with other implementations.
+    // Don't understand how this works but it does - the
+    // clipboard format is supposed to be UTF-16, not UTF-8.
+    mimeData->setData(sScintillaRecMimeType, su.toUtf8());
 #else
-	// Linux
-	// Add an empty marker
-	mimeData->setData(sMimeRectangularMarker, QByteArray());
+    // Linux
+    // Add an empty marker
+    mimeData->setData(sMimeRectangularMarker, QByteArray());
 #endif
 }
 
 static void add_line_cut_copy_to_mime([[maybe_unused]] QMimeData *mimeData)
 {
-	Q_UNUSED(mimeData);
+    Q_UNUSED(mimeData);
 #if defined(Q_OS_WIN)
-	// Add an empty marker
-	mimeData->setData(sVSEditorLineCutCopy, QByteArray());
+    // Add an empty marker
+    mimeData->setData(sVSEditorLineCutCopy, QByteArray());
 #endif
 }
 
 static bool is_rectangular_in_mime(const QMimeData *mimeData)
 {
-	QStringList formats = mimeData->formats();
-	for (int i = 0; i < formats.size(); ++i) {
+    QStringList formats = mimeData->formats();
+    for (int i = 0; i < formats.size(); ++i) {
 #if defined(Q_OS_WIN)
-		// Windows rectangular markers
-		// If rectangular copies made by this application, see base name.
-		if (formats[i] == sMSDEVColumnSelect)
-			return true;
-		// Otherwise see wrapped name.
-		if (formats[i] == sWrappedMSDEVColumnSelect)
-			return true;
+        // Windows rectangular markers
+        // If rectangular copies made by this application, see base name.
+        if (formats[i] == sMSDEVColumnSelect)
+            return true;
+        // Otherwise see wrapped name.
+        if (formats[i] == sWrappedMSDEVColumnSelect)
+            return true;
 #elif defined(Q_OS_MAC)
-		if (formats[i] == sScintillaRecMimeType)
-			return true;
+        if (formats[i] == sScintillaRecMimeType)
+            return true;
 #else
-		// Linux
-		if (formats[i] == sMimeRectangularMarker)
-			return true;
+        // Linux
+        if (formats[i] == sMimeRectangularMarker)
+            return true;
 #endif
-	}
-	return false;
+    }
+    return false;
 }
 
 static bool is_line_cut_copy_in_mime(const QMimeData *mimeData)
 {
-	QStringList formats = mimeData->formats();
-	for (int i = 0; i < formats.size(); ++i) {
+    QStringList formats = mimeData->formats();
+    for (int i = 0; i < formats.size(); ++i) {
 #if defined(Q_OS_WIN)
-		// Visual Studio Line Cut/Copy markers
-		// If line cut/copy made by this application, see base name.
-		if (formats[i] == sVSEditorLineCutCopy)
-			return true;
-		// Otherwise see wrapped name.
-		if (formats[i] == sWrappedVSEditorLineCutCopy)
-			return true;
+        // Visual Studio Line Cut/Copy markers
+        // If line cut/copy made by this application, see base name.
+        if (formats[i] == sVSEditorLineCutCopy)
+            return true;
+        // Otherwise see wrapped name.
+        if (formats[i] == sWrappedVSEditorLineCutCopy)
+            return true;
 #endif
-	}
-	return false;
+    }
+    return false;
 }
 
 bool ScintillaQuickCore::ValidCodePage(int codePage) const
 {
-	return codePage == SC_CP_UTF8;
+    return codePage == SC_CP_UTF8;
 }
 
 std::string ScintillaQuickCore::UTF8FromEncoded(std::string_view encoded) const {
-	return std::string(encoded);
+    return std::string(encoded);
 }
 
 std::string ScintillaQuickCore::EncodedFromUTF8(std::string_view utf8) const {
-	return std::string(utf8);
+    return std::string(utf8);
 }
 
 void ScintillaQuickCore::SetVerticalScrollPos()
 {
-	emit verticalScrolled(topLine);
+    emit verticalScrolled(topLine);
 }
 
 void ScintillaQuickCore::SetHorizontalScrollPos()
 {
-	emit horizontalScrolled(xOffset);
+    emit horizontalScrolled(xOffset);
 }
 
 void ScintillaQuickCore::reset_tracked_scroll_width_to_viewport()
@@ -1030,427 +1030,427 @@ void ScintillaQuickCore::reset_tracked_scroll_width_to_viewport()
 
 bool ScintillaQuickCore::ModifyScrollBars(Sci::Line nMax, Sci::Line nPage)
 {
-	bool modified = false;
+    bool modified = false;
 
-	int vNewPage = nPage;
-	int vNewMax  = nMax - vNewPage + 1;
-	if (m_v_max != vNewMax || m_v_page != vNewPage) {
-		m_v_max  = vNewMax;
-		m_v_page = vNewPage;
-		modified = true;
-		emit verticalRangeChanged(m_v_max, m_v_page);
-	}
+    int vNewPage = nPage;
+    int vNewMax  = nMax - vNewPage + 1;
+    if (m_v_max != vNewMax || m_v_page != vNewPage) {
+        m_v_max  = vNewMax;
+        m_v_page = vNewPage;
+        modified = true;
+        emit verticalRangeChanged(m_v_max, m_v_page);
+    }
 
-	int hNewPage = GetTextRectangle().Width();
-	int hNewMax  = (scrollWidth > hNewPage) ? scrollWidth - hNewPage : 0;
-	if (m_h_max != hNewMax || m_h_page != hNewPage) {
-		m_h_max  = hNewMax;
-		m_h_page = hNewPage;
-		modified = true;
-		emit horizontalRangeChanged(m_h_max, m_h_page);
-	}
+    int hNewPage = GetTextRectangle().Width();
+    int hNewMax  = (scrollWidth > hNewPage) ? scrollWidth - hNewPage : 0;
+    if (m_h_max != hNewMax || m_h_page != hNewPage) {
+        m_h_max  = hNewMax;
+        m_h_page = hNewPage;
+        modified = true;
+        emit horizontalRangeChanged(m_h_max, m_h_page);
+    }
 
-	return modified;
+    return modified;
 }
 
 void ScintillaQuickCore::CopyToModeClipboard(const SelectionText &selectedText, QClipboard::Mode clipboardMode_)
 {
-	QClipboard *clipboard = QGuiApplication::clipboard();
-	QString su            = string_from_selected_text(selectedText);
+    QClipboard *clipboard = QGuiApplication::clipboard();
+    QString su            = string_from_selected_text(selectedText);
 
-	// Owned by this function until the final hand-off to
-	// QClipboard::setMimeData (which takes ownership of the raw
-	// pointer). If any of the helper calls below throws — unlikely
-	// with pure Qt data types, but reachable through the
-	// `aboutToCopy` signal, which QML/C++ client code may connect to —
-	// the unique_ptr will free the mime data instead of leaking it.
-	std::unique_ptr<QMimeData> mimeData = std::make_unique<QMimeData>();
-	mimeData->setText(su);
-	if (selectedText.rectangular) {
-		add_rectangular_to_mime(mimeData.get(), su);
-	}
+    // Owned by this function until the final hand-off to
+    // QClipboard::setMimeData (which takes ownership of the raw
+    // pointer). If any of the helper calls below throws — unlikely
+    // with pure Qt data types, but reachable through the
+    // `aboutToCopy` signal, which QML/C++ client code may connect to —
+    // the unique_ptr will free the mime data instead of leaking it.
+    std::unique_ptr<QMimeData> mimeData = std::make_unique<QMimeData>();
+    mimeData->setText(su);
+    if (selectedText.rectangular) {
+        add_rectangular_to_mime(mimeData.get(), su);
+    }
 
-	if (selectedText.lineCopy) {
-		add_line_cut_copy_to_mime(mimeData.get());
-	}
+    if (selectedText.lineCopy) {
+        add_line_cut_copy_to_mime(mimeData.get());
+    }
 
-	// Allow client code to add additional data (e.g rich text).
-	emit aboutToCopy(mimeData.get());
+    // Allow client code to add additional data (e.g rich text).
+    emit aboutToCopy(mimeData.get());
 
-	clipboard->setMimeData(mimeData.release(), clipboardMode_);
+    clipboard->setMimeData(mimeData.release(), clipboardMode_);
 }
 
 void ScintillaQuickCore::Copy()
 {
-	if (!sel.Empty()) {
-		SelectionText st;
-		CopySelectionRange(&st);
-		CopyToClipboard(st);
-	}
+    if (!sel.Empty()) {
+        SelectionText st;
+        CopySelectionRange(&st);
+        CopyToClipboard(st);
+    }
 }
 
 void ScintillaQuickCore::CopyToClipboard(const SelectionText &selectedText)
 {
-	CopyToModeClipboard(selectedText, QClipboard::Clipboard);
+    CopyToModeClipboard(selectedText, QClipboard::Clipboard);
 }
 
 void ScintillaQuickCore::PasteFromMode(QClipboard::Mode clipboardMode_)
 {
-	QClipboard *clipboard     = QGuiApplication::clipboard();
-	const QMimeData *mimeData = clipboard->mimeData(clipboardMode_);
-	bool isRectangular        = is_rectangular_in_mime(mimeData);
-	bool isLine               = SelectionEmpty() && is_line_cut_copy_in_mime(mimeData);
-	QString text              = clipboard->text(clipboardMode_);
-	QByteArray utext          = BytesForDocument(text);
-	std::string dest(utext.constData(), utext.length());
-	SelectionText selText;
-	selText.Copy(dest, pdoc->dbcsCodePage, CharacterSetOfDocument(), isRectangular, false);
+    QClipboard *clipboard     = QGuiApplication::clipboard();
+    const QMimeData *mimeData = clipboard->mimeData(clipboardMode_);
+    bool isRectangular        = is_rectangular_in_mime(mimeData);
+    bool isLine               = SelectionEmpty() && is_line_cut_copy_in_mime(mimeData);
+    QString text              = clipboard->text(clipboardMode_);
+    QByteArray utext          = BytesForDocument(text);
+    std::string dest(utext.constData(), utext.length());
+    SelectionText selText;
+    selText.Copy(dest, pdoc->dbcsCodePage, CharacterSetOfDocument(), isRectangular, false);
 
-	UndoGroup ug(pdoc);
-	ClearSelection(multiPasteMode == MultiPaste::Each);
-	InsertPasteShape(selText.Data(), selText.Length(),
-		isRectangular ? PasteShape::rectangular : (isLine ? PasteShape::line : PasteShape::stream));
-	EnsureCaretVisible();
+    UndoGroup ug(pdoc);
+    ClearSelection(multiPasteMode == MultiPaste::Each);
+    InsertPasteShape(selText.Data(), selText.Length(),
+        isRectangular ? PasteShape::rectangular : (isLine ? PasteShape::line : PasteShape::stream));
+    EnsureCaretVisible();
 }
 
 void ScintillaQuickCore::Paste()
 {
-	PasteFromMode(QClipboard::Clipboard);
+    PasteFromMode(QClipboard::Clipboard);
 }
 
 void ScintillaQuickCore::ClaimSelection()
 {
-	if (QGuiApplication::clipboard()->supportsSelection()) {
-		// X Windows has a 'primary selection' as well as the clipboard.
-		// Whenever the user selects some text, we become the primary selection
-		if (!sel.Empty()) {
-			primarySelection = true;
-			SelectionText st;
-			CopySelectionRange(&st);
-			CopyToModeClipboard(st, QClipboard::Selection);
-		} else {
-			primarySelection = false;
-		}
-	}
+    if (QGuiApplication::clipboard()->supportsSelection()) {
+        // X Windows has a 'primary selection' as well as the clipboard.
+        // Whenever the user selects some text, we become the primary selection
+        if (!sel.Empty()) {
+            primarySelection = true;
+            SelectionText st;
+            CopySelectionRange(&st);
+            CopyToModeClipboard(st, QClipboard::Selection);
+        } else {
+            primarySelection = false;
+        }
+    }
 }
 
 void ScintillaQuickCore::NotifyChange()
 {
-	emit notifyChange();
-	emit command(
-			Platform::LongFromTwoShorts(GetCtrlID(), SCEN_CHANGE),
-			reinterpret_cast<sptr_t>(wMain.GetID()));
+    emit notifyChange();
+    emit command(
+            Platform::LongFromTwoShorts(GetCtrlID(), SCEN_CHANGE),
+            reinterpret_cast<sptr_t>(wMain.GetID()));
 }
 
 void ScintillaQuickCore::NotifyFocus(bool focus)
 {
-	if (commandEvents) {
-		emit command(
-				Platform::LongFromTwoShorts
-						(GetCtrlID(), focus ? SCEN_SETFOCUS : SCEN_KILLFOCUS),
-				reinterpret_cast<sptr_t>(wMain.GetID()));
-	}
+    if (commandEvents) {
+        emit command(
+                Platform::LongFromTwoShorts
+                        (GetCtrlID(), focus ? SCEN_SETFOCUS : SCEN_KILLFOCUS),
+                reinterpret_cast<sptr_t>(wMain.GetID()));
+    }
 
-	Editor::NotifyFocus(focus);
+    Editor::NotifyFocus(focus);
 }
 
 void ScintillaQuickCore::NotifyParent(NotificationData scn)
 {
-	scn.nmhdr.hwndFrom = wMain.GetID();
-	scn.nmhdr.idFrom   = GetCtrlID();
-	emit notifyParent(scn);
+    scn.nmhdr.hwndFrom = wMain.GetID();
+    scn.nmhdr.idFrom   = GetCtrlID();
+    emit notifyParent(scn);
 }
 
 void ScintillaQuickCore::NotifyURIDropped(const char *uri)
 {
-	NotificationData scn = {};
-	scn.nmhdr.code       = Notification::URIDropped;
-	scn.text             = uri;
+    NotificationData scn = {};
+    scn.nmhdr.code       = Notification::URIDropped;
+    scn.text             = uri;
 
-	NotifyParent(scn);
+    NotifyParent(scn);
 }
 
 bool ScintillaQuickCore::FineTickerRunning(TickReason reason)
 {
-	return timers[static_cast<size_t>(reason)] != 0;
+    return timers[static_cast<size_t>(reason)] != 0;
 }
 
 void ScintillaQuickCore::FineTickerStart(TickReason reason, int millis, int /* tolerance */)
 {
-	FineTickerCancel(reason);
-	timers[static_cast<size_t>(reason)] = startTimer(millis);
+    FineTickerCancel(reason);
+    timers[static_cast<size_t>(reason)] = startTimer(millis);
 }
 
 // CancelTimers cleans up all fine-ticker timers and is non-virtual to avoid warnings when
 // called during destruction.
 void ScintillaQuickCore::CancelTimers()
 {
-	for (size_t tr = static_cast<size_t>(TickReason::caret); tr <= static_cast<size_t>(TickReason::dwell); tr++) {
-		if (timers[tr]) {
-			killTimer(timers[tr]);
-			timers[tr] = 0;
-		}
-	}
+    for (size_t tr = static_cast<size_t>(TickReason::caret); tr <= static_cast<size_t>(TickReason::dwell); tr++) {
+        if (timers[tr]) {
+            killTimer(timers[tr]);
+            timers[tr] = 0;
+        }
+    }
 }
 
 void ScintillaQuickCore::FineTickerCancel(TickReason reason)
 {
-	const size_t reasonIndex = static_cast<size_t>(reason);
-	if (timers[reasonIndex]) {
-		killTimer(timers[reasonIndex]);
-		timers[reasonIndex] = 0;
-	}
+    const size_t reasonIndex = static_cast<size_t>(reason);
+    if (timers[reasonIndex]) {
+        killTimer(timers[reasonIndex]);
+        timers[reasonIndex] = 0;
+    }
 }
 
 void ScintillaQuickCore::onIdle()
 {
-	// Guard against onIdle() being invoked after
-	// prepare_for_owner_destruction() has nulled m_owner but before
-	// the idle timer has actually stopped (queued signals).
-	if (!m_owner) {
-		return;
-	}
-	const bool continueIdling = Idle();
-	if (!continueIdling) {
-		SetIdle(false);
-	}
+    // Guard against onIdle() being invoked after
+    // prepare_for_owner_destruction() has nulled m_owner but before
+    // the idle timer has actually stopped (queued signals).
+    if (!m_owner) {
+        return;
+    }
+    const bool continueIdling = Idle();
+    if (!continueIdling) {
+        SetIdle(false);
+    }
 }
 
 bool ScintillaQuickCore::ChangeIdle(bool on)
 {
-	if (on) {
-		// Start idler, if it's not running.
-		if (!idler.state) {
-			idler.state = true;
-			// QTimer is parented to `this` and tracked via unique_ptr
-			// so it is cleaned up on destruction even if
-			// ChangeIdle(false) is never called. The timer fires on
-			// the GUI thread; onIdle()'s return value may decide to
-			// stop the timer from inside its own timeout slot via
-			// SetIdle(false) -> ChangeIdle(false), which is why the
-			// stop path below uses deleteLater() rather than
-			// destroying the object directly.
-			QTimer *timer = new QTimer(this);
-			m_idle_timer.reset(timer);
-			connect(timer, &QTimer::timeout,
-				this, &ScintillaQuickCore::onIdle);
-			timer->start(0);
-			idler.idlerID = timer;
-		}
-	} else {
-		// Stop idler, if it's running.
-		if (idler.state) {
-			idler.state = false;
-			if (m_idle_timer) {
-				QTimer *timer = m_idle_timer.release();
-				timer->stop();
-				// deleteLater() defers actual destruction to the
-				// next event-loop iteration so we do not destroy
-				// the QTimer from inside its own timeout signal
-				// handler (which is undefined behaviour for a
-				// direct-connection slot).
-				timer->deleteLater();
-			}
-			idler.idlerID = {};
-		}
-	}
-	return true;
+    if (on) {
+        // Start idler, if it's not running.
+        if (!idler.state) {
+            idler.state = true;
+            // QTimer is parented to `this` and tracked via unique_ptr
+            // so it is cleaned up on destruction even if
+            // ChangeIdle(false) is never called. The timer fires on
+            // the GUI thread; onIdle()'s return value may decide to
+            // stop the timer from inside its own timeout slot via
+            // SetIdle(false) -> ChangeIdle(false), which is why the
+            // stop path below uses deleteLater() rather than
+            // destroying the object directly.
+            QTimer *timer = new QTimer(this);
+            m_idle_timer.reset(timer);
+            connect(timer, &QTimer::timeout,
+                this, &ScintillaQuickCore::onIdle);
+            timer->start(0);
+            idler.idlerID = timer;
+        }
+    } else {
+        // Stop idler, if it's running.
+        if (idler.state) {
+            idler.state = false;
+            if (m_idle_timer) {
+                QTimer *timer = m_idle_timer.release();
+                timer->stop();
+                // deleteLater() defers actual destruction to the
+                // next event-loop iteration so we do not destroy
+                // the QTimer from inside its own timeout signal
+                // handler (which is undefined behaviour for a
+                // direct-connection slot).
+                timer->deleteLater();
+            }
+            idler.idlerID = {};
+        }
+    }
+    return true;
 }
 
 bool ScintillaQuickCore::SetIdle(bool on)
 {
-	return ChangeIdle(on);
+    return ChangeIdle(on);
 }
 
 CharacterSet ScintillaQuickCore::CharacterSetOfDocument() const
 {
-	return vs.styles[STYLE_DEFAULT].characterSet;
+    return vs.styles[STYLE_DEFAULT].characterSet;
 }
 
 QString ScintillaQuickCore::StringFromDocument(const char *s) const
 {
-	return QString::fromUtf8(s);
+    return QString::fromUtf8(s);
 }
 
 QByteArray ScintillaQuickCore::BytesForDocument(const QString &text) const
 {
-	return text.toUtf8();
+    return text.toUtf8();
 }
 
 std::unique_ptr<CaseFolder> ScintillaQuickCore::CaseFolderForEncoding()
 {
-	return std::make_unique<CaseFolderUnicode>();
+    return std::make_unique<CaseFolderUnicode>();
 }
 
 std::string ScintillaQuickCore::CaseMapString(const std::string &s, CaseMapping caseMapping)
 {
-	if (s.empty() || (caseMapping == CaseMapping::same))
-		return s;
+    if (s.empty() || (caseMapping == CaseMapping::same))
+        return s;
 
-	std::string retMapped(s.length() * maxExpansionCaseConversion, 0);
-	const size_t lenMapped = CaseConvertString(&retMapped[0], retMapped.length(), s.c_str(), s.length(),
-		(caseMapping == CaseMapping::upper) ? CaseConversion::upper : CaseConversion::lower);
-	retMapped.resize(lenMapped);
-	return retMapped;
+    std::string retMapped(s.length() * maxExpansionCaseConversion, 0);
+    const size_t lenMapped = CaseConvertString(&retMapped[0], retMapped.length(), s.c_str(), s.length(),
+        (caseMapping == CaseMapping::upper) ? CaseConversion::upper : CaseConversion::lower);
+    retMapped.resize(lenMapped);
+    return retMapped;
 }
 
 void ScintillaQuickCore::SetMouseCapture(bool on)
 {
-	// This is handled automatically by Qt
-	if (mouseDownCaptures) {
-		m_have_mouse_capture = on;
-	}
+    // This is handled automatically by Qt
+    if (mouseDownCaptures) {
+        m_have_mouse_capture = on;
+    }
 }
 
 bool ScintillaQuickCore::HaveMouseCapture()
 {
-	return m_have_mouse_capture;
+    return m_have_mouse_capture;
 }
 
 void ScintillaQuickCore::StartDrag()
 {
-	inDragDrop      = DragDrop::dragging;
-	dropWentOutside = true;
-	if (drag.Length() && m_owner) {
-		// Build the mime data under unique_ptr ownership so an
-		// exception thrown from string_from_selected_text/setText or
-		// from the rectangular-marker helper does not leak it.
-		std::unique_ptr<QMimeData> mimeData = std::make_unique<QMimeData>();
-		const QString sText                 = string_from_selected_text(drag);
-		mimeData->setText(sText);
-		if (drag.rectangular) {
-			add_rectangular_to_mime(mimeData.get(), sText);
-		}
+    inDragDrop      = DragDrop::dragging;
+    dropWentOutside = true;
+    if (drag.Length() && m_owner) {
+        // Build the mime data under unique_ptr ownership so an
+        // exception thrown from string_from_selected_text/setText or
+        // from the rectangular-marker helper does not leak it.
+        std::unique_ptr<QMimeData> mimeData = std::make_unique<QMimeData>();
+        const QString sText                 = string_from_selected_text(drag);
+        mimeData->setText(sText);
+        if (drag.rectangular) {
+            add_rectangular_to_mime(mimeData.get(), sText);
+        }
 
-		// QDrag is parented to the owning QQuickItem so Qt's object
-		// tree handles the worst-case cleanup if anything below
-		// throws. A stack-allocated QDrag is the shape the Qt docs
-		// recommend, but the previous code had explicit
-		// "not freed — crashes on Linux" behaviour indicating an
-		// async platform-side reference issue; using deleteLater()
-		// schedules deletion after the current event-loop tick so
-		// any platform drag helpers have safely finished before the
-		// object goes away. `setMimeData` takes ownership of the
-		// released raw pointer; `exec()` is synchronous and returns
-		// once the drop has been processed.
-		QPointer<QDrag> dragon = new QDrag(m_owner);
-		dragon->setMimeData(mimeData.release());
+        // QDrag is parented to the owning QQuickItem so Qt's object
+        // tree handles the worst-case cleanup if anything below
+        // throws. A stack-allocated QDrag is the shape the Qt docs
+        // recommend, but the previous code had explicit
+        // "not freed — crashes on Linux" behaviour indicating an
+        // async platform-side reference issue; using deleteLater()
+        // schedules deletion after the current event-loop tick so
+        // any platform drag helpers have safely finished before the
+        // object goes away. `setMimeData` takes ownership of the
+        // released raw pointer; `exec()` is synchronous and returns
+        // once the drop has been processed.
+        QPointer<QDrag> dragon = new QDrag(m_owner);
+        dragon->setMimeData(mimeData.release());
 
-		const Qt::DropAction dropAction = dragon->exec(
-			static_cast<Qt::DropActions>(Qt::CopyAction|Qt::MoveAction));
-		if (dragon) {
-			dragon->deleteLater();
-		}
+        const Qt::DropAction dropAction = dragon->exec(
+            static_cast<Qt::DropActions>(Qt::CopyAction|Qt::MoveAction));
+        if (dragon) {
+            dragon->deleteLater();
+        }
 
-		if ((dropAction == Qt::MoveAction) && dropWentOutside) {
-			// Remove dragged out text
-			ClearSelection();
-		}
-	}
-	inDragDrop = DragDrop::none;
-	SetDragPosition(SelectionPosition(Sci::invalidPosition));
+        if ((dropAction == Qt::MoveAction) && dropWentOutside) {
+            // Remove dragged out text
+            ClearSelection();
+        }
+    }
+    inDragDrop = DragDrop::none;
+    SetDragPosition(SelectionPosition(Sci::invalidPosition));
 }
 
 class call_tip_item : public QQuickItem {
 public:
-	explicit call_tip_item(CallTip *pct_, QQuickItem *parent)
-		: QQuickItem(parent),
-		  pct(pct_)
-	{
-		setAcceptedMouseButtons(Qt::NoButton);
-		setAcceptHoverEvents(false);
-		setFlag(QQuickItem::ItemHasContents, true);
-		setVisible(false);
-		setZ(1000.0);
-	}
+    explicit call_tip_item(CallTip *pct_, QQuickItem *parent)
+        : QQuickItem(parent),
+          pct(pct_)
+    {
+        setAcceptedMouseButtons(Qt::NoButton);
+        setAcceptHoverEvents(false);
+        setFlag(QQuickItem::ItemHasContents, true);
+        setVisible(false);
+        setZ(1000.0);
+    }
 
-	QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override
-	{
-		QQuickWindow *quickWindow = window();
-		if (!quickWindow || !pct || !pct->inCallTipMode || width() <= 0.0 || height() <= 0.0) {
-			delete oldNode;
-			return nullptr;
-		}
+    QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override
+    {
+        QQuickWindow *quickWindow = window();
+        if (!quickWindow || !pct || !pct->inCallTipMode || width() <= 0.0 || height() <= 0.0) {
+            delete oldNode;
+            return nullptr;
+        }
 
-		const QSize imageSize(std::max(1, static_cast<int>(std::ceil(width()))),
-			std::max(1, static_cast<int>(std::ceil(height()))));
-		QImage image(imageSize, QImage::Format_ARGB32_Premultiplied);
-		image.fill(Qt::transparent);
+        const QSize imageSize(std::max(1, static_cast<int>(std::ceil(width()))),
+            std::max(1, static_cast<int>(std::ceil(height()))));
+        QImage image(imageSize, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
 
-		QPainter painter(&image);
-		std::unique_ptr<Surface> surfaceWindow = Surface::Allocate(Technology::Default);
-		surfaceWindow->Init(false, &painter);
-		surfaceWindow->SetMode(SurfaceMode(pct->codePage, false));
-		pct->PaintCT(surfaceWindow.get());
+        QPainter painter(&image);
+        std::unique_ptr<Surface> surfaceWindow = Surface::Allocate(Technology::Default);
+        surfaceWindow->Init(false, &painter);
+        surfaceWindow->SetMode(SurfaceMode(pct->codePage, false));
+        pct->PaintCT(surfaceWindow.get());
 
-		auto *imageNode = dynamic_cast<QSGImageNode *>(oldNode);
-		if (!imageNode) {
-			delete oldNode;
-			imageNode = quickWindow->createImageNode();
-		}
-		QSGTexture *texture = quickWindow->createTextureFromImage(image);
-		imageNode->setTexture(texture);
-		imageNode->setOwnsTexture(true);
-		imageNode->setRect(QRectF(QPointF(0.0, 0.0), QSizeF(imageSize)));
-		imageNode->setSourceRect(QRectF(QPointF(0.0, 0.0), QSizeF(imageSize)));
-		imageNode->setFiltering(QSGTexture::Linear);
-		return imageNode;
-	}
+        auto *imageNode = dynamic_cast<QSGImageNode *>(oldNode);
+        if (!imageNode) {
+            delete oldNode;
+            imageNode = quickWindow->createImageNode();
+        }
+        QSGTexture *texture = quickWindow->createTextureFromImage(image);
+        imageNode->setTexture(texture);
+        imageNode->setOwnsTexture(true);
+        imageNode->setRect(QRectF(QPointF(0.0, 0.0), QSizeF(imageSize)));
+        imageNode->setSourceRect(QRectF(QPointF(0.0, 0.0), QSizeF(imageSize)));
+        imageNode->setFiltering(QSGTexture::Linear);
+        return imageNode;
+    }
 
 private:
-	CallTip *pct;
+    CallTip *pct;
 };
 
 void ScintillaQuickCore::CreateCallTipWindow(PRectangle rc)
 {
 
-	if (!ct.wCallTip.Created()) {
-		QQuickItem *parentItem = m_owner->window() ? m_owner->window()->contentItem() : static_cast<QQuickItem *>(m_owner);
-		QQuickItem *pCallTip   = new call_tip_item(&ct, parentItem);
-		ct.wCallTip            = pCallTip;
-		pCallTip->setPosition(QPointF(rc.left, rc.top));
-		pCallTip->setSize(QSizeF(rc.Width(), rc.Height()));
-		pCallTip->update();
-	}
+    if (!ct.wCallTip.Created()) {
+        QQuickItem *parentItem = m_owner->window() ? m_owner->window()->contentItem() : static_cast<QQuickItem *>(m_owner);
+        QQuickItem *pCallTip   = new call_tip_item(&ct, parentItem);
+        ct.wCallTip            = pCallTip;
+        pCallTip->setPosition(QPointF(rc.left, rc.top));
+        pCallTip->setSize(QSizeF(rc.Width(), rc.Height()));
+        pCallTip->update();
+    }
 }
 
 void ScintillaQuickCore::AddToPopUp(const char *label,
                              int cmd,
                              bool enabled)
 {
-	QList<QPair<QString, QPair<int, bool>>> *menu = static_cast<QList<QPair<QString, QPair<int, bool>>> *>(popup.GetID());
+    QList<QPair<QString, QPair<int, bool>>> *menu = static_cast<QList<QPair<QString, QPair<int, bool>>> *>(popup.GetID());
 
-	QPair<QString, QPair<int, bool>> item(label, QPair<int, bool>(cmd, enabled));
-	menu->append(item);
+    QPair<QString, QPair<int, bool>> item(label, QPair<int, bool>(cmd, enabled));
+    menu->append(item);
 }
 
 sptr_t ScintillaQuickCore::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam)
 {
-	try {
-		switch (iMessage) {
+    try {
+        switch (iMessage) {
 
-		case Message::SetBidirectional:
-			bidirectional = static_cast<Scintilla::Bidirectional>(wParam);
-			InvalidateStyleData();
-			break;
+        case Message::SetBidirectional:
+            bidirectional = static_cast<Scintilla::Bidirectional>(wParam);
+            InvalidateStyleData();
+            break;
 
-		case Message::SetIMEInteraction:
-			// Only inline IME supported on Qt
-			break;
+        case Message::SetIMEInteraction:
+            // Only inline IME supported on Qt
+            break;
 
-		case Message::GrabFocus:
-			m_owner->setFocus(true);
-			m_owner->forceActiveFocus(Qt::OtherFocusReason);
-			break;
+        case Message::GrabFocus:
+            m_owner->setFocus(true);
+            m_owner->forceActiveFocus(Qt::OtherFocusReason);
+            break;
 
-		case Message::GetDirectFunction:
-			return reinterpret_cast<sptr_t>(DirectFunction);
+        case Message::GetDirectFunction:
+            return reinterpret_cast<sptr_t>(DirectFunction);
 
-		case Message::GetDirectStatusFunction:
-			return reinterpret_cast<sptr_t>(DirectStatusFunction);
+        case Message::GetDirectStatusFunction:
+            return reinterpret_cast<sptr_t>(DirectStatusFunction);
 
-		case Message::GetDirectPointer:
-			return reinterpret_cast<sptr_t>(this);
+        case Message::GetDirectPointer:
+            return reinterpret_cast<sptr_t>(this);
 
         case Message::SetRectangularSelectionModifier:
             m_rectangular_selection_modifier = static_cast<int>(wParam);
@@ -1460,127 +1460,127 @@ sptr_t ScintillaQuickCore::WndProc(Message iMessage, uptr_t wParam, sptr_t lPara
             return m_rectangular_selection_modifier;
 
         default:
-			return ScintillaBase::WndProc(iMessage, wParam, lParam);
-		}
-	} catch (std::bad_alloc &) {
-		errorStatus = Status::BadAlloc;
-	} catch (...) {
-		errorStatus = Status::Failure;
-	}
-	return 0;
+            return ScintillaBase::WndProc(iMessage, wParam, lParam);
+        }
+    } catch (std::bad_alloc &) {
+        errorStatus = Status::BadAlloc;
+    } catch (...) {
+        errorStatus = Status::Failure;
+    }
+    return 0;
 }
 
 sptr_t ScintillaQuickCore::DefWndProc(Message, uptr_t, sptr_t)
 {
-	return 0;
+    return 0;
 }
 
 sptr_t ScintillaQuickCore::DirectFunction(
     sptr_t ptr, unsigned int iMessage, uptr_t wParam, sptr_t lParam)
 {
-	ScintillaQuickCore *sci = reinterpret_cast<ScintillaQuickCore *>(ptr);
-	return sci->WndProc(static_cast<Message>(iMessage), wParam, lParam);
+    ScintillaQuickCore *sci = reinterpret_cast<ScintillaQuickCore *>(ptr);
+    return sci->WndProc(static_cast<Message>(iMessage), wParam, lParam);
 }
 
 sptr_t ScintillaQuickCore::DirectStatusFunction(
     sptr_t ptr, unsigned int iMessage, uptr_t wParam, sptr_t lParam, int *pStatus)
 {
-	ScintillaQuickCore *sci  = reinterpret_cast<ScintillaQuickCore *>(ptr);
-	const sptr_t returnValue = sci->WndProc(static_cast<Message>(iMessage), wParam, lParam);
-	*pStatus                 = static_cast<int>(sci->errorStatus);
-	return returnValue;
+    ScintillaQuickCore *sci  = reinterpret_cast<ScintillaQuickCore *>(ptr);
+    const sptr_t returnValue = sci->WndProc(static_cast<Message>(iMessage), wParam, lParam);
+    *pStatus                 = static_cast<int>(sci->errorStatus);
+    return returnValue;
 }
 
 // Additions to merge in Scientific Toolworks widget structure
 
 void ScintillaQuickCore::PartialPaint(const PRectangle &rect)
 {
-	PartialPaintQml(rect, nullptr);
+    PartialPaintQml(rect, nullptr);
 }
 
 void ScintillaQuickCore::PartialPaintQml(const PRectangle & rect, QPainter *painter)
 {
-	m_current_painter = painter;
-	rcPaint           = rect;
+    m_current_painter = painter;
+    rcPaint           = rect;
     paintState = PaintState::painting;
-	PRectangle rcClient = GetClientRectangle();
+    PRectangle rcClient = GetClientRectangle();
 // TODO: analyze repaint problem when LineEnd should be marked...
     paintingAllText = rcPaint.Contains(rcClient);
 
     AutoSurface surfacePaint(this, painter);
-	Paint(surfacePaint, rcPaint);
-	surfacePaint->Release();
+    Paint(surfacePaint, rcPaint);
+    surfacePaint->Release();
 
     if (paintState == PaintState::abandoned) {
-		// FIXME: Failure to paint the requested rectangle in each
-		// paint event causes flicker on some platforms (Mac?)
-		// Paint rect immediately.
+        // FIXME: Failure to paint the requested rectangle in each
+        // paint event causes flicker on some platforms (Mac?)
+        // Paint rect immediately.
         paintState = PaintState::painting;
-		paintingAllText = true;
+        paintingAllText = true;
 
         AutoSurface surface(this, painter);
-		Paint(surface, rcPaint);
-		surface->Release();
+        Paint(surface, rcPaint);
+        surface->Release();
 
-		// Queue a full repaint.
-		m_owner->update();
-	}
+        // Queue a full repaint.
+        m_owner->update();
+    }
 
     paintState = PaintState::notPainting;
-	m_current_painter = nullptr;
+    m_current_painter = nullptr;
 }
-	
+
 void ScintillaQuickCore::DragEnter(const Point &point)
 {
-	SetDragPosition(SPositionFromLocation(point,
-					      false, false, UserVirtualSpace()));
+    SetDragPosition(SPositionFromLocation(point,
+                          false, false, UserVirtualSpace()));
 }
 
 void ScintillaQuickCore::DragMove(const Point &point)
 {
-	DragEnter(point);
+    DragEnter(point);
 }
 
 void ScintillaQuickCore::DragLeave()
 {
-	SetDragPosition(SelectionPosition(Sci::invalidPosition));
+    SetDragPosition(SelectionPosition(Sci::invalidPosition));
 }
 
 void ScintillaQuickCore::Drop(const Point &point, const QMimeData *data, bool move)
 {
-	QString text     = data->text();
-	bool rectangular = is_rectangular_in_mime(data);
-	QByteArray bytes = BytesForDocument(text);
-	int len          = bytes.length();
+    QString text     = data->text();
+    bool rectangular = is_rectangular_in_mime(data);
+    QByteArray bytes = BytesForDocument(text);
+    int len          = bytes.length();
 
-	SelectionPosition movePos = SPositionFromLocation(point,
-				false, false, UserVirtualSpace());
+    SelectionPosition movePos = SPositionFromLocation(point,
+                false, false, UserVirtualSpace());
 
-	DropAt(movePos, bytes, len, move, rectangular);
+    DropAt(movePos, bytes, len, move, rectangular);
 }
 
 void ScintillaQuickCore::DropUrls(const QMimeData *data)
 {
-	foreach(const QUrl &url, data->urls()) {
-		NotifyURIDropped(url.toString().toUtf8().constData());
-	}
+    foreach(const QUrl &url, data->urls()) {
+        NotifyURIDropped(url.toString().toUtf8().constData());
+    }
 }
 
 void ScintillaQuickCore::timerEvent(QTimerEvent *event)
 {
-	// If the owning item is already destructing, do not dispatch any
-	// ticks. prepare_for_owner_destruction() cancels all timers and
-	// nulls m_owner before the derived ScintillaQuickItem subobject
-	// dies, but a timer event that was already queued before the
-	// killTimer() call can still be delivered here.
-	if (!m_owner) {
-		return;
-	}
-	for (size_t tr=static_cast<size_t>(TickReason::caret); tr<=static_cast<size_t>(TickReason::dwell); tr++) {
-		if (timers[tr] == event->timerId()) {
+    // If the owning item is already destructing, do not dispatch any
+    // ticks. prepare_for_owner_destruction() cancels all timers and
+    // nulls m_owner before the derived ScintillaQuickItem subobject
+    // dies, but a timer event that was already queued before the
+    // killTimer() call can still be delivered here.
+    if (!m_owner) {
+        return;
+    }
+    for (size_t tr=static_cast<size_t>(TickReason::caret); tr<=static_cast<size_t>(TickReason::dwell); tr++) {
+        if (timers[tr] == event->timerId()) {
             const Sci::Line previous_top_line = topLine;
             const int previous_x_offset       = xOffset;
-			TickFor(static_cast<TickReason>(tr));
+            TickFor(static_cast<TickReason>(tr));
             if (m_owner) {
                 const bool vertical_scroll_changed   = topLine != previous_top_line;
                 const bool horizontal_scroll_changed = xOffset != previous_x_offset;
@@ -1590,6 +1590,6 @@ void ScintillaQuickCore::timerEvent(QTimerEvent *event)
                     m_owner->request_scene_graph_update();
                 }
             }
-		}
-	}
+        }
+    }
 }

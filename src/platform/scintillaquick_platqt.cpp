@@ -64,182 +64,182 @@ namespace Scintilla::Internal {
 //----------------------------------------------------------------------
 
 bool is_ascii_text(std::string_view text) {
-	return std::all_of(text.cbegin(), text.cend(), [](char ch) {
-		return static_cast<unsigned char>(ch) < 0x80;
-	});
+    return std::all_of(text.cbegin(), text.cend(), [](char ch) {
+        return static_cast<unsigned char>(ch) < 0x80;
+    });
 }
 
 bool is_simple_printable_ascii(std::string_view text) {
-	return std::all_of(text.cbegin(), text.cend(), [](char ch) {
-		const unsigned char uch = static_cast<unsigned char>(ch);
-		return uch >= 0x20 && uch < 0x7f;
-	});
+    return std::all_of(text.cbegin(), text.cend(), [](char ch) {
+        const unsigned char uch = static_cast<unsigned char>(ch);
+        return uch >= 0x20 && uch < 0x7f;
+    });
 }
 
 bool fill_simple_glyph_positions(const QTextLine &line, std::string_view text, XYPOSITION *positions)
 {
-	if (!line.isValid() || !positions || text.empty()) {
-		return false;
-	}
+    if (!line.isValid() || !positions || text.empty()) {
+        return false;
+    }
 
-	const auto glyph_runs = line.glyphRuns(
-		0,
-		line.textLength(),
-		QTextLayout::RetrieveGlyphIndexes |
-		QTextLayout::RetrieveGlyphPositions |
-		QTextLayout::RetrieveStringIndexes);
+    const auto glyph_runs = line.glyphRuns(
+        0,
+        line.textLength(),
+        QTextLayout::RetrieveGlyphIndexes |
+        QTextLayout::RetrieveGlyphPositions |
+        QTextLayout::RetrieveStringIndexes);
 
-	size_t filled = 0;
-	for (const QGlyphRun &glyph_run : glyph_runs) {
-		if (glyph_run.isRightToLeft()) {
-			return false;
-		}
+    size_t filled = 0;
+    for (const QGlyphRun &glyph_run : glyph_runs) {
+        if (glyph_run.isRightToLeft()) {
+            return false;
+        }
 
-		const QList<quint32> glyph_indexes    = glyph_run.glyphIndexes();
-		const QList<QPointF> glyph_positions  = glyph_run.positions();
-		const QList<qsizetype> string_indexes = glyph_run.stringIndexes();
-		if (glyph_indexes.size() != glyph_positions.size() ||
-			glyph_indexes.size() != string_indexes.size()) {
-			return false;
-		}
+        const QList<quint32> glyph_indexes    = glyph_run.glyphIndexes();
+        const QList<QPointF> glyph_positions  = glyph_run.positions();
+        const QList<qsizetype> string_indexes = glyph_run.stringIndexes();
+        if (glyph_indexes.size() != glyph_positions.size() ||
+            glyph_indexes.size() != string_indexes.size()) {
+            return false;
+        }
 
-		const QList<QPointF> advances = glyph_run.rawFont().advancesForGlyphIndexes(glyph_indexes);
-		if (advances.size() != glyph_indexes.size()) {
-			return false;
-		}
+        const QList<QPointF> advances = glyph_run.rawFont().advancesForGlyphIndexes(glyph_indexes);
+        if (advances.size() != glyph_indexes.size()) {
+            return false;
+        }
 
-		for (qsizetype i = 0; i < glyph_indexes.size(); ++i) {
-			if (filled >= text.size()) {
-				return false;
-			}
-			if (string_indexes[i] != static_cast<qsizetype>(filled)) {
-				return false;
-			}
-			positions[filled] = glyph_positions[i].x() + advances[i].x();
-			++filled;
-		}
-	}
+        for (qsizetype i = 0; i < glyph_indexes.size(); ++i) {
+            if (filled >= text.size()) {
+                return false;
+            }
+            if (string_indexes[i] != static_cast<qsizetype>(filled)) {
+                return false;
+            }
+            positions[filled] = glyph_positions[i].x() + advances[i].x();
+            ++filled;
+        }
+    }
 
-	return filled == text.size();
+    return filled == text.size();
 }
 
 QString unicode_from_text(std::string_view text) {
-	if (is_ascii_text(text)) {
-		return QString::fromLatin1(text.data(), static_cast<int>(text.length()));
-	}
-	return QString::fromUtf8(text.data(), static_cast<int>(text.length()));
+    if (is_ascii_text(text)) {
+        return QString::fromLatin1(text.data(), static_cast<int>(text.length()));
+    }
+    return QString::fromUtf8(text.data(), static_cast<int>(text.length()));
 }
 
 static QFont::StyleStrategy choose_strategy(FontQuality eff)
 {
-	switch (eff) {
-		case FontQuality::QualityDefault:         return QFont::PreferDefault;
-		case FontQuality::QualityNonAntialiased: return QFont::NoAntialias;
-		case FontQuality::QualityAntialiased:     return QFont::PreferAntialias;
-		case FontQuality::QualityLcdOptimized:   return QFont::PreferAntialias;
-		default:                             return QFont::PreferDefault;
-	}
+    switch (eff) {
+        case FontQuality::QualityDefault:         return QFont::PreferDefault;
+        case FontQuality::QualityNonAntialiased: return QFont::NoAntialias;
+        case FontQuality::QualityAntialiased:     return QFont::PreferAntialias;
+        case FontQuality::QualityLcdOptimized:   return QFont::PreferAntialias;
+        default:                             return QFont::PreferDefault;
+    }
 }
 
 class font_and_character_set : public Font {
 public:
-	CharacterSet m_character_set = CharacterSet::Ansi;
-	std::unique_ptr<QFont> m_font;
-	explicit font_and_character_set(const FontParameters &fp) : m_character_set(fp.characterSet) {
-		m_font = std::make_unique<QFont>();
-		m_font->setStyleStrategy(choose_strategy(fp.extraFontFlag));
-		m_font->setFamily(QString::fromUtf8(fp.faceName));
-		m_font->setPointSizeF(fp.size);
-		m_font->setBold(static_cast<int>(fp.weight) > 500);
-		m_font->setItalic(fp.italic);
-	}
+    CharacterSet m_character_set = CharacterSet::Ansi;
+    std::unique_ptr<QFont> m_font;
+    explicit font_and_character_set(const FontParameters &fp) : m_character_set(fp.characterSet) {
+        m_font = std::make_unique<QFont>();
+        m_font->setStyleStrategy(choose_strategy(fp.extraFontFlag));
+        m_font->setFamily(QString::fromUtf8(fp.faceName));
+        m_font->setPointSizeF(fp.size);
+        m_font->setBold(static_cast<int>(fp.weight) > 500);
+        m_font->setItalic(fp.italic);
+    }
 };
 
 namespace {
 
 const Supports k_supports_qt[] = {
-	Supports::LineDrawsFinal,
-	Supports::FractionalStrokeWidth,
-	Supports::TranslucentStroke,
-	Supports::PixelModification,
+    Supports::LineDrawsFinal,
+    Supports::FractionalStrokeWidth,
+    Supports::TranslucentStroke,
+    Supports::PixelModification,
 };
 
 QSGTextNode::RenderType map_text_render_type()
 {
-	switch (QQuickWindow::textRenderType()) {
-	case QQuickWindow::QtTextRendering:
-		return QSGTextNode::QtRendering;
-	case QQuickWindow::NativeTextRendering:
-		return QSGTextNode::NativeRendering;
-	case QQuickWindow::CurveTextRendering:
-		return QSGTextNode::CurveRendering;
-	}
+    switch (QQuickWindow::textRenderType()) {
+    case QQuickWindow::QtTextRendering:
+        return QSGTextNode::QtRendering;
+    case QQuickWindow::NativeTextRendering:
+        return QSGTextNode::NativeRendering;
+    case QQuickWindow::CurveTextRendering:
+        return QSGTextNode::CurveRendering;
+    }
 
-	return QSGTextNode::QtRendering;
+    return QSGTextNode::QtRendering;
 }
 
 const font_and_character_set *as_font_and_character_set(const Font *f) {
-	return dynamic_cast<const font_and_character_set *>(f);
+    return dynamic_cast<const font_and_character_set *>(f);
 }
 
 QFont *font_pointer(const Font *f)
 {
-	return as_font_and_character_set(f)->m_font.get();
+    return as_font_and_character_set(f)->m_font.get();
 }
 
 SurfaceImpl *as_surface_impl(Surface &surface) noexcept
 {
-	return dynamic_cast<SurfaceImpl *>(&surface);
+    return dynamic_cast<SurfaceImpl *>(&surface);
 }
 
 const QScreen *screen_for_log_pixels() noexcept
 {
-	const QWindow *focusWindow = QGuiApplication::focusWindow();
-	if (focusWindow) {
-		const QScreen *screen = focusWindow->screen();
-		if (screen) {
-			return screen;
-		}
-	}
-	return QGuiApplication::primaryScreen();
+    const QWindow *focusWindow = QGuiApplication::focusWindow();
+    if (focusWindow) {
+        const QScreen *screen = focusWindow->screen();
+        if (screen) {
+            return screen;
+        }
+    }
+    return QGuiApplication::primaryScreen();
 }
 
 }
 
 std::shared_ptr<Font> Font::Allocate(const FontParameters &fp)
 {
-	return std::make_shared<font_and_character_set>(fp);
+    return std::make_shared<font_and_character_set>(fp);
 }
 
 SurfaceImpl::SurfaceImpl() = default;
 
 SurfaceImpl::SurfaceImpl(int width, int height, SurfaceMode mode_)
 {
-	if (width < 1) width   = 1;
-	if (height < 1) height = 1;
-	deviceOwned            = true;
-	device                 = new QPixmap(width, height);
-	mode                   = mode_;
+    if (width < 1) width   = 1;
+    if (height < 1) height = 1;
+    deviceOwned            = true;
+    device                 = new QPixmap(width, height);
+    mode                   = mode_;
 }
 
 SurfaceImpl::~SurfaceImpl()
 {
-	Clear();
+    Clear();
 }
 
 void SurfaceImpl::Clear()
 {
-	if (painterOwned && painter) {
-		delete painter;
-	}
+    if (painterOwned && painter) {
+        delete painter;
+    }
 
-	if (deviceOwned && device) {
-		delete device;
-	}
-	device       = nullptr;
-	painter      = nullptr;
-	deviceOwned  = false;
-	painterOwned = false;
+    if (deviceOwned && device) {
+        delete device;
+    }
+    device       = nullptr;
+    painter      = nullptr;
+    deviceOwned  = false;
+    painterOwned = false;
     capture_only = false;
 }
 
@@ -253,44 +253,44 @@ void SurfaceImpl::Init(bool signatureFlag, PainterID pid)
 
 void SurfaceImpl::Init(WindowID wid)
 {
-	Release();
+    Release();
     Q_UNUSED(wid);
     Q_ASSERT(false);
 }
 
 void SurfaceImpl::Init(SurfaceID sid, WindowID /*wid*/)
 {
-	Release();
-	device = static_cast<QPaintDevice *>(sid);
+    Release();
+    device = static_cast<QPaintDevice *>(sid);
 }
 
 std::unique_ptr<Surface> SurfaceImpl::AllocatePixMap(int width, int height)
 {
-	return std::make_unique<SurfaceImpl>(width, height, mode);
+    return std::make_unique<SurfaceImpl>(width, height, mode);
 }
 
 void SurfaceImpl::SetMode(SurfaceMode mode_)
 {
-	mode = mode_;
+    mode = mode_;
 }
 
 void SurfaceImpl::Release() noexcept
 {
-	Clear();
+    Clear();
 }
 
 int SurfaceImpl::SupportsFeature(Supports feature) noexcept
 {
-	for (const Supports f : k_supports_qt) {
-		if (f == feature)
-			return 1;
-	}
-	return 0;
+    for (const Supports f : k_supports_qt) {
+        if (f == feature)
+            return 1;
+    }
+    return 0;
 }
 
 bool SurfaceImpl::Initialised()
 {
-	return painter != nullptr;
+    return painter != nullptr;
 }
 
 void SurfaceImpl::PenColour(ColourRGBA fore)
@@ -298,20 +298,20 @@ void SurfaceImpl::PenColour(ColourRGBA fore)
     if (capture_only) {
         return;
     }
-	QPen penOutline(QColorFromColourRGBA(fore));
-	penOutline.setCapStyle(Qt::FlatCap);
-	GetPainter()->setPen(penOutline);
+    QPen penOutline(QColorFromColourRGBA(fore));
+    penOutline.setCapStyle(Qt::FlatCap);
+    GetPainter()->setPen(penOutline);
 }
 
 void SurfaceImpl::PenColourWidth(ColourRGBA fore, XYPOSITION strokeWidth) {
     if (capture_only) {
         return;
     }
-	QPen penOutline(QColorFromColourRGBA(fore));
-	penOutline.setCapStyle(Qt::FlatCap);
-	penOutline.setJoinStyle(Qt::MiterJoin);
-	penOutline.setWidthF(strokeWidth);
-	GetPainter()->setPen(penOutline);
+    QPen penOutline(QColorFromColourRGBA(fore));
+    penOutline.setCapStyle(Qt::FlatCap);
+    penOutline.setJoinStyle(Qt::MiterJoin);
+    penOutline.setWidthF(strokeWidth);
+    GetPainter()->setPen(penOutline);
 }
 
 void SurfaceImpl::BrushColour(ColourRGBA back)
@@ -319,7 +319,7 @@ void SurfaceImpl::BrushColour(ColourRGBA back)
     if (capture_only) {
         return;
     }
-	GetPainter()->setBrush(QBrush(QColorFromColourRGBA(back)));
+    GetPainter()->setBrush(QBrush(QColorFromColourRGBA(back)));
 }
 
 void SurfaceImpl::SetFont(const Font *font)
@@ -327,27 +327,27 @@ void SurfaceImpl::SetFont(const Font *font)
     if (capture_only) {
         return;
     }
-	const font_and_character_set *pfacs = as_font_and_character_set(font);
-	if (pfacs && pfacs->m_font) {
-		GetPainter()->setFont(*(pfacs->m_font));
-	}
+    const font_and_character_set *pfacs = as_font_and_character_set(font);
+    if (pfacs && pfacs->m_font) {
+        GetPainter()->setFont(*(pfacs->m_font));
+    }
 }
 
 int SurfaceImpl::LogPixelsY()
 {
-	const QScreen *screen = screen_for_log_pixels();
-	return screen ? screen->logicalDotsPerInchY() : 96;
+    const QScreen *screen = screen_for_log_pixels();
+    return screen ? screen->logicalDotsPerInchY() : 96;
 }
 
 int SurfaceImpl::PixelDivisions()
 {
-	// Qt uses device pixels.
-	return 1;
+    // Qt uses device pixels.
+    return 1;
 }
 
 int SurfaceImpl::DeviceHeightFont(int points)
 {
-	return points;
+    return points;
 }
 
 void SurfaceImpl::LineDraw(Point start, Point end, Stroke stroke)
@@ -355,9 +355,9 @@ void SurfaceImpl::LineDraw(Point start, Point end, Stroke stroke)
     if (capture_only) {
         return;
     }
-	PenColourWidth(stroke.colour, stroke.width);
-	QLineF line(start.x, start.y, end.x, end.y);
-	GetPainter()->drawLine(line);
+    PenColourWidth(stroke.colour, stroke.width);
+    QLineF line(start.x, start.y, end.x, end.y);
+    GetPainter()->drawLine(line);
 }
 
 void SurfaceImpl::PolyLine(const Point *pts, size_t npts, Stroke stroke)
@@ -365,11 +365,11 @@ void SurfaceImpl::PolyLine(const Point *pts, size_t npts, Stroke stroke)
     if (capture_only) {
         return;
     }
-	// TODO: set line joins and caps
-	PenColourWidth(stroke.colour, stroke.width);
-	std::vector<QPointF> qpts;
-	std::transform(pts, pts + npts, std::back_inserter(qpts), QPointFFromPoint);
-	GetPainter()->drawPolyline(&qpts[0], static_cast<int>(npts));
+    // TODO: set line joins and caps
+    PenColourWidth(stroke.colour, stroke.width);
+    std::vector<QPointF> qpts;
+    std::transform(pts, pts + npts, std::back_inserter(qpts), QPointFFromPoint);
+    GetPainter()->drawPolyline(&qpts[0], static_cast<int>(npts));
 }
 
 void SurfaceImpl::Polygon(const Point *pts, size_t npts, FillStroke fillStroke)
@@ -377,13 +377,13 @@ void SurfaceImpl::Polygon(const Point *pts, size_t npts, FillStroke fillStroke)
     if (capture_only) {
         return;
     }
-	PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
-	BrushColour(fillStroke.fill.colour);
+    PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
+    BrushColour(fillStroke.fill.colour);
 
-	std::vector<QPointF> qpts;
-	std::transform(pts, pts + npts, std::back_inserter(qpts), QPointFFromPoint);
+    std::vector<QPointF> qpts;
+    std::transform(pts, pts + npts, std::back_inserter(qpts), QPointFFromPoint);
 
-	GetPainter()->drawPolygon(&qpts[0], static_cast<int>(npts));
+    GetPainter()->drawPolygon(&qpts[0], static_cast<int>(npts));
 }
 
 void SurfaceImpl::RectangleDraw(PRectangle rc, FillStroke fillStroke)
@@ -391,21 +391,21 @@ void SurfaceImpl::RectangleDraw(PRectangle rc, FillStroke fillStroke)
     if (capture_only) {
         return;
     }
-	PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
-	BrushColour(fillStroke.fill.colour);
-	const QRectF rect = QRectFFromPRect(rc.Inset(fillStroke.stroke.width / 2));
-	GetPainter()->drawRect(rect);
+    PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
+    BrushColour(fillStroke.fill.colour);
+    const QRectF rect = QRectFFromPRect(rc.Inset(fillStroke.stroke.width / 2));
+    GetPainter()->drawRect(rect);
 }
 
 void SurfaceImpl::RectangleFrame(PRectangle rc, Stroke stroke) {
     if (capture_only) {
         return;
     }
-	PenColourWidth(stroke.colour, stroke.width);
-	// Default QBrush is Qt::NoBrush so does not fill
-	GetPainter()->setBrush(QBrush());
-	const QRectF rect = QRectFFromPRect(rc.Inset(stroke.width / 2));
-	GetPainter()->drawRect(rect);
+    PenColourWidth(stroke.colour, stroke.width);
+    // Default QBrush is Qt::NoBrush so does not fill
+    GetPainter()->setBrush(QBrush());
+    const QRectF rect = QRectFFromPRect(rc.Inset(stroke.width / 2));
+    GetPainter()->drawRect(rect);
 }
 
 void SurfaceImpl::FillRectangle(PRectangle rc, Fill fill)
@@ -413,12 +413,12 @@ void SurfaceImpl::FillRectangle(PRectangle rc, Fill fill)
     if (capture_only) {
         return;
     }
-	GetPainter()->fillRect(QRectFFromPRect(rc), QColorFromColourRGBA(fill.colour));
+    GetPainter()->fillRect(QRectFFromPRect(rc), QColorFromColourRGBA(fill.colour));
 }
 
 void SurfaceImpl::FillRectangleAligned(PRectangle rc, Fill fill)
 {
-	FillRectangle(PixelAlign(rc, 1), fill);
+    FillRectangle(PixelAlign(rc, 1), fill);
 }
 
 void SurfaceImpl::FillRectangle(PRectangle rc, Surface &surfacePattern)
@@ -426,16 +426,16 @@ void SurfaceImpl::FillRectangle(PRectangle rc, Surface &surfacePattern)
     if (capture_only) {
         return;
     }
-	// Tile pattern over rectangle
-	SurfaceImpl *surface = as_surface_impl(surfacePattern);
-	if (!surface) {
-		return;
-	}
-	const QPixmap *pixmap = static_cast<QPixmap *>(surface->GetPaintDevice());
-	if (!pixmap) {
-		return;
-	}
-	GetPainter()->drawTiledPixmap(QRectFromPRect(rc), *pixmap);
+    // Tile pattern over rectangle
+    SurfaceImpl *surface = as_surface_impl(surfacePattern);
+    if (!surface) {
+        return;
+    }
+    const QPixmap *pixmap = static_cast<QPixmap *>(surface->GetPaintDevice());
+    if (!pixmap) {
+        return;
+    }
+    GetPainter()->drawTiledPixmap(QRectFromPRect(rc), *pixmap);
 }
 
 void SurfaceImpl::RoundedRectangle(PRectangle rc, FillStroke fillStroke)
@@ -443,9 +443,9 @@ void SurfaceImpl::RoundedRectangle(PRectangle rc, FillStroke fillStroke)
     if (capture_only) {
         return;
     }
-	PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
-	BrushColour(fillStroke.fill.colour);
-	GetPainter()->drawRoundedRect(QRectFFromPRect(rc), 3.0f, 3.0f);
+    PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
+    BrushColour(fillStroke.fill.colour);
+    GetPainter()->drawRoundedRect(QRectFFromPRect(rc), 3.0f, 3.0f);
 }
 
 void SurfaceImpl::AlphaRectangle(PRectangle rc, XYPOSITION cornerSize, FillStroke fillStroke)
@@ -453,67 +453,67 @@ void SurfaceImpl::AlphaRectangle(PRectangle rc, XYPOSITION cornerSize, FillStrok
     if (capture_only) {
         return;
     }
-	QColor qFill = QColorFromColourRGBA(fillStroke.fill.colour);
-	QBrush brushFill(qFill);
-	GetPainter()->setBrush(brushFill);
-	if (fillStroke.fill.colour == fillStroke.stroke.colour) {
-		painter->setPen(Qt::NoPen);
-		QRectF rect = QRectFFromPRect(rc);
-		if (cornerSize > 0.0f) {
-			// A radius of 1 shows no curve so add 1
-			qreal radius = cornerSize+1;
-			GetPainter()->drawRoundedRect(rect, radius, radius);
-		} else {
-			GetPainter()->fillRect(rect, brushFill);
-		}
-	} else {
-		QColor qOutline = QColorFromColourRGBA(fillStroke.stroke.colour);
-		QPen penOutline(qOutline);
-		penOutline.setWidthF(fillStroke.stroke.width);
-		GetPainter()->setPen(penOutline);
+    QColor qFill = QColorFromColourRGBA(fillStroke.fill.colour);
+    QBrush brushFill(qFill);
+    GetPainter()->setBrush(brushFill);
+    if (fillStroke.fill.colour == fillStroke.stroke.colour) {
+        painter->setPen(Qt::NoPen);
+        QRectF rect = QRectFFromPRect(rc);
+        if (cornerSize > 0.0f) {
+            // A radius of 1 shows no curve so add 1
+            qreal radius = cornerSize+1;
+            GetPainter()->drawRoundedRect(rect, radius, radius);
+        } else {
+            GetPainter()->fillRect(rect, brushFill);
+        }
+    } else {
+        QColor qOutline = QColorFromColourRGBA(fillStroke.stroke.colour);
+        QPen penOutline(qOutline);
+        penOutline.setWidthF(fillStroke.stroke.width);
+        GetPainter()->setPen(penOutline);
 
-		QRectF rect = QRectFFromPRect(rc.Inset(fillStroke.stroke.width / 2));
-		if (cornerSize > 0.0f) {
-			// A radius of 1 shows no curve so add 1
-			qreal radius = cornerSize+1;
-			GetPainter()->drawRoundedRect(rect, radius, radius);
-		} else {
-			GetPainter()->drawRect(rect);
-		}
-	}
+        QRectF rect = QRectFFromPRect(rc.Inset(fillStroke.stroke.width / 2));
+        if (cornerSize > 0.0f) {
+            // A radius of 1 shows no curve so add 1
+            qreal radius = cornerSize+1;
+            GetPainter()->drawRoundedRect(rect, radius, radius);
+        } else {
+            GetPainter()->drawRect(rect);
+        }
+    }
 }
 
 void SurfaceImpl::GradientRectangle(PRectangle rc, const std::vector<ColourStop> &stops, GradientOptions m_options) {
     if (capture_only) {
         return;
     }
-	QRectF rect = QRectFFromPRect(rc);
-	QLinearGradient linearGradient;
-	switch (m_options) {
-	case GradientOptions::leftToRight:
-		linearGradient = QLinearGradient(rc.left, rc.top, rc.right, rc.top);
-		break;
-	case GradientOptions::topToBottom:
-	default:
-		linearGradient = QLinearGradient(rc.left, rc.top, rc.left, rc.bottom);
-		break;
-	}
-	linearGradient.setSpread(QGradient::RepeatSpread);
-	for (const ColourStop &stop : stops) {
-		linearGradient.setColorAt(stop.position, QColorFromColourRGBA(stop.colour));
-	}
-	QBrush brush = QBrush(linearGradient);
-	GetPainter()->fillRect(rect, brush);
+    QRectF rect = QRectFFromPRect(rc);
+    QLinearGradient linearGradient;
+    switch (m_options) {
+    case GradientOptions::leftToRight:
+        linearGradient = QLinearGradient(rc.left, rc.top, rc.right, rc.top);
+        break;
+    case GradientOptions::topToBottom:
+    default:
+        linearGradient = QLinearGradient(rc.left, rc.top, rc.left, rc.bottom);
+        break;
+    }
+    linearGradient.setSpread(QGradient::RepeatSpread);
+    for (const ColourStop &stop : stops) {
+        linearGradient.setColorAt(stop.position, QColorFromColourRGBA(stop.colour));
+    }
+    QBrush brush = QBrush(linearGradient);
+    GetPainter()->fillRect(rect, brush);
 }
 
 static std::vector<unsigned char> ImageByteSwapped(int width, int height, const unsigned char *pixelsImage)
 {
-	// Input is RGBA, but Format_ARGB32 is BGRA, so swap the red bytes and blue bytes
-	size_t bytes = width * height * 4;
-	std::vector<unsigned char> imageBytes(pixelsImage, pixelsImage+bytes);
-	for (size_t i=0; i<bytes; i+=4)
-		std::swap(imageBytes[i], imageBytes[i+2]);
-	return imageBytes;
+    // Input is RGBA, but Format_ARGB32 is BGRA, so swap the red bytes and blue bytes
+    size_t bytes = width * height * 4;
+    std::vector<unsigned char> imageBytes(pixelsImage, pixelsImage+bytes);
+    for (size_t i=0; i<bytes; i+=4)
+        std::swap(imageBytes[i], imageBytes[i+2]);
+    return imageBytes;
 }
 
 void SurfaceImpl::DrawRGBAImage(PRectangle rc, int width, int height, const unsigned char *pixelsImage)
@@ -521,10 +521,10 @@ void SurfaceImpl::DrawRGBAImage(PRectangle rc, int width, int height, const unsi
     if (capture_only) {
         return;
     }
-	std::vector<unsigned char> imageBytes = ImageByteSwapped(width, height, pixelsImage);
-	QImage image(&imageBytes[0], width, height, QImage::Format_ARGB32);
-	QPoint pt(rc.left, rc.top);
-	GetPainter()->drawImage(pt, image);
+    std::vector<unsigned char> imageBytes = ImageByteSwapped(width, height, pixelsImage);
+    QImage image(&imageBytes[0], width, height, QImage::Format_ARGB32);
+    QPoint pt(rc.left, rc.top);
+    GetPainter()->drawImage(pt, image);
 }
 
 void SurfaceImpl::Ellipse(PRectangle rc, FillStroke fillStroke)
@@ -532,71 +532,71 @@ void SurfaceImpl::Ellipse(PRectangle rc, FillStroke fillStroke)
     if (capture_only) {
         return;
     }
-	PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
-	BrushColour(fillStroke.fill.colour);
-	const QRectF rect = QRectFFromPRect(rc.Inset(fillStroke.stroke.width / 2));
-	GetPainter()->drawEllipse(rect);
+    PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
+    BrushColour(fillStroke.fill.colour);
+    const QRectF rect = QRectFFromPRect(rc.Inset(fillStroke.stroke.width / 2));
+    GetPainter()->drawEllipse(rect);
 }
 
 void SurfaceImpl::Stadium(PRectangle rc, FillStroke fillStroke, Ends ends) {
     if (capture_only) {
         return;
     }
-	const XYPOSITION halfStroke = fillStroke.stroke.width / 2.0f;
-	const XYPOSITION radius     = rc.Height() / 2.0f - halfStroke;
-	PRectangle rcInner          = rc;
-	rcInner.left += radius;
-	rcInner.right -= radius;
-	const XYPOSITION arcHeight  = rc.Height() - fillStroke.stroke.width;
+    const XYPOSITION halfStroke = fillStroke.stroke.width / 2.0f;
+    const XYPOSITION radius     = rc.Height() / 2.0f - halfStroke;
+    PRectangle rcInner          = rc;
+    rcInner.left += radius;
+    rcInner.right -= radius;
+    const XYPOSITION arcHeight  = rc.Height() - fillStroke.stroke.width;
 
-	PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
-	BrushColour(fillStroke.fill.colour);
+    PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
+    BrushColour(fillStroke.fill.colour);
 
-	QPainterPath path;
+    QPainterPath path;
 
-	const Ends leftSide  = static_cast<Ends>(static_cast<unsigned int>(ends) & 0xfu);
-	const Ends rightSide = static_cast<Ends>(static_cast<unsigned int>(ends) & 0xf0u);
-	switch (leftSide) {
-		case Ends::leftFlat:
-			path.moveTo(rc.left + halfStroke, rc.top + halfStroke);
-			path.lineTo(rc.left + halfStroke, rc.bottom - halfStroke);
-			break;
-		case Ends::leftAngle:
-			path.moveTo(rcInner.left + halfStroke, rc.top + halfStroke);
-			path.lineTo(rc.left + halfStroke, rc.Centre().y);
-			path.lineTo(rcInner.left + halfStroke, rc.bottom - halfStroke);
-			break;
-		case Ends::semiCircles:
-		default:
-			path.moveTo(rcInner.left + halfStroke, rc.top + halfStroke);
-			QRectF rectangleArc(rc.left + halfStroke, rc.top + halfStroke,
-					    arcHeight, arcHeight);
-			path.arcTo(rectangleArc, 90, 180);
-			break;
-	}
+    const Ends leftSide  = static_cast<Ends>(static_cast<unsigned int>(ends) & 0xfu);
+    const Ends rightSide = static_cast<Ends>(static_cast<unsigned int>(ends) & 0xf0u);
+    switch (leftSide) {
+        case Ends::leftFlat:
+            path.moveTo(rc.left + halfStroke, rc.top + halfStroke);
+            path.lineTo(rc.left + halfStroke, rc.bottom - halfStroke);
+            break;
+        case Ends::leftAngle:
+            path.moveTo(rcInner.left + halfStroke, rc.top + halfStroke);
+            path.lineTo(rc.left + halfStroke, rc.Centre().y);
+            path.lineTo(rcInner.left + halfStroke, rc.bottom - halfStroke);
+            break;
+        case Ends::semiCircles:
+        default:
+            path.moveTo(rcInner.left + halfStroke, rc.top + halfStroke);
+            QRectF rectangleArc(rc.left + halfStroke, rc.top + halfStroke,
+                        arcHeight, arcHeight);
+            path.arcTo(rectangleArc, 90, 180);
+            break;
+    }
 
-	switch (rightSide) {
-		case Ends::rightFlat:
-			path.lineTo(rc.right - halfStroke, rc.bottom - halfStroke);
-			path.lineTo(rc.right - halfStroke, rc.top + halfStroke);
-			break;
-		case Ends::rightAngle:
-			path.lineTo(rcInner.right - halfStroke, rc.bottom - halfStroke);
-			path.lineTo(rc.right - halfStroke, rc.Centre().y);
-			path.lineTo(rcInner.right - halfStroke, rc.top + halfStroke);
-			break;
-		case Ends::semiCircles:
-		default:
-			path.lineTo(rcInner.right - halfStroke, rc.bottom - halfStroke);
-			QRectF rectangleArc(rc.right - arcHeight - halfStroke, rc.top + halfStroke,
-					    arcHeight, arcHeight);
-			path.arcTo(rectangleArc, 270, 180);
-			break;
-	}
+    switch (rightSide) {
+        case Ends::rightFlat:
+            path.lineTo(rc.right - halfStroke, rc.bottom - halfStroke);
+            path.lineTo(rc.right - halfStroke, rc.top + halfStroke);
+            break;
+        case Ends::rightAngle:
+            path.lineTo(rcInner.right - halfStroke, rc.bottom - halfStroke);
+            path.lineTo(rc.right - halfStroke, rc.Centre().y);
+            path.lineTo(rcInner.right - halfStroke, rc.top + halfStroke);
+            break;
+        case Ends::semiCircles:
+        default:
+            path.lineTo(rcInner.right - halfStroke, rc.bottom - halfStroke);
+            QRectF rectangleArc(rc.right - arcHeight - halfStroke, rc.top + halfStroke,
+                        arcHeight, arcHeight);
+            path.arcTo(rectangleArc, 270, 180);
+            break;
+    }
 
-	// Close the path to enclose it for stroking and for filling, then draw it
-	path.closeSubpath();
-	GetPainter()->drawPath(path);
+    // Close the path to enclose it for stroking and for filling, then draw it
+    path.closeSubpath();
+    GetPainter()->drawPath(path);
 }
 
 void SurfaceImpl::Copy(PRectangle rc, Point from, Surface &surfaceSource)
@@ -604,70 +604,70 @@ void SurfaceImpl::Copy(PRectangle rc, Point from, Surface &surfaceSource)
     if (capture_only) {
         return;
     }
-	SurfaceImpl *source = as_surface_impl(surfaceSource);
-	Q_ASSERT(source);
-	if (!source) {
-		return;
-	}
-	QPixmap *pixmap = static_cast<QPixmap *>(source->GetPaintDevice());
-	if (!pixmap) {
-		return;
-	}
+    SurfaceImpl *source = as_surface_impl(surfaceSource);
+    Q_ASSERT(source);
+    if (!source) {
+        return;
+    }
+    QPixmap *pixmap = static_cast<QPixmap *>(source->GetPaintDevice());
+    if (!pixmap) {
+        return;
+    }
 
-	GetPainter()->drawPixmap(rc.left, rc.top, *pixmap, from.x, from.y, -1, -1);
+    GetPainter()->drawPixmap(rc.left, rc.top, *pixmap, from.x, from.y, -1, -1);
 }
 
 std::unique_ptr<IScreenLineLayout> SurfaceImpl::Layout(const IScreenLine *)
 {
-	return {};
+    return {};
 }
 
 void SurfaceImpl::DrawTextNoClip(PRectangle rc,
-				 const Font *font,
+                 const Font *font,
                                  XYPOSITION ybase,
-				 std::string_view text,
-				 ColourRGBA fore,
-				 ColourRGBA back)
+                 std::string_view text,
+                 ColourRGBA fore,
+                 ColourRGBA back)
 {
     if (capture_only) {
         return;
     }
-	SetFont(font);
-	PenColour(fore);
+    SetFont(font);
+    PenColour(fore);
 
-	GetPainter()->setBackground(QColorFromColourRGBA(back));
-	GetPainter()->setBackgroundMode(Qt::OpaqueMode);
-	QString su = unicode_from_text(text);
-	GetPainter()->drawText(QPointF(rc.left, ybase), su);
+    GetPainter()->setBackground(QColorFromColourRGBA(back));
+    GetPainter()->setBackgroundMode(Qt::OpaqueMode);
+    QString su = unicode_from_text(text);
+    GetPainter()->drawText(QPointF(rc.left, ybase), su);
 }
 
 void SurfaceImpl::DrawTextClipped(PRectangle rc,
-				  const Font *font,
+                  const Font *font,
                                   XYPOSITION ybase,
-				  std::string_view text,
-				  ColourRGBA fore,
-				  ColourRGBA back)
+                  std::string_view text,
+                  ColourRGBA fore,
+                  ColourRGBA back)
 {
-	SetClip(rc);
-	DrawTextNoClip(rc, font, ybase, text, fore, back);
-	PopClip();
+    SetClip(rc);
+    DrawTextNoClip(rc, font, ybase, text, fore, back);
+    PopClip();
 }
 
 void SurfaceImpl::DrawTextTransparent(PRectangle rc,
-				      const Font *font,
+                      const Font *font,
                                       XYPOSITION ybase,
-				      std::string_view text,
-	ColourRGBA fore)
+                      std::string_view text,
+    ColourRGBA fore)
 {
     if (capture_only) {
         return;
     }
-	SetFont(font);
-	PenColour(fore);
+    SetFont(font);
+    PenColour(fore);
 
-	GetPainter()->setBackgroundMode(Qt::TransparentMode);
-	QString su = unicode_from_text(text);
-	GetPainter()->drawText(QPointF(rc.left, ybase), su);
+    GetPainter()->setBackgroundMode(Qt::TransparentMode);
+    QString su = unicode_from_text(text);
+    GetPainter()->drawText(QPointF(rc.left, ybase), su);
 }
 
 void SurfaceImpl::SetClip(PRectangle rc)
@@ -675,8 +675,8 @@ void SurfaceImpl::SetClip(PRectangle rc)
     if (capture_only) {
         return;
     }
-	GetPainter()->save();
-	GetPainter()->setClipRect(QRectFFromPRect(rc));
+    GetPainter()->save();
+    GetPainter()->setClipRect(QRectFFromPRect(rc));
 }
 
 void SurfaceImpl::PopClip()
@@ -684,201 +684,201 @@ void SurfaceImpl::PopClip()
     if (capture_only) {
         return;
     }
-	GetPainter()->restore();
+    GetPainter()->restore();
 }
 
 void SurfaceImpl::MeasureWidths(const Font *font,
-				std::string_view text,
+                std::string_view text,
                                 XYPOSITION *positions)
 {
-	SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths");
-	if (!font)
-		return;
-	QString su;
-	{
-		SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.to_qstring");
-		su = unicode_from_text(text);
-	}
-	QTextLayout tlay(su, *font_pointer(font), GetPaintDevice());
-	QTextLine tl;
-	{
-		SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.layout_text");
-		tlay.beginLayout();
-		tl = tlay.createLine();
-		tlay.endLayout();
-	}
-	{
-		SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions");
-		if (is_simple_printable_ascii(text)) {
-			SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions.simple_glyph_path");
-			if (fill_simple_glyph_positions(tl, text, positions)) {
-				return;
-			}
-		}
+    SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths");
+    if (!font)
+        return;
+    QString su;
+    {
+        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.to_qstring");
+        su = unicode_from_text(text);
+    }
+    QTextLayout tlay(su, *font_pointer(font), GetPaintDevice());
+    QTextLine tl;
+    {
+        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.layout_text");
+        tlay.beginLayout();
+        tl = tlay.createLine();
+        tlay.endLayout();
+    }
+    {
+        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions");
+        if (is_simple_printable_ascii(text)) {
+            SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions.simple_glyph_path");
+            if (fill_simple_glyph_positions(tl, text, positions)) {
+                return;
+            }
+        }
 
-		SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions.cursor_walk");
-		if (mode.codePage == SC_CP_UTF8) {
-			int fit  = su.size();
-			int ui   = 0;
-			size_t i = 0;
-			while (ui<fit) {
-				const unsigned char uch      = text[i];
-				const unsigned int byteCount = UTF8BytesOfLead[uch];
-				const int codeUnits          = UTF16LengthFromUTF8ByteCount(byteCount);
-				qreal xPosition              = tl.cursorToX(ui+codeUnits);
-				for (size_t bytePos=0; (bytePos<byteCount) && (i<text.length()); bytePos++) {
-					positions[i++] = xPosition;
-				}
-				ui += codeUnits;
-			}
-			XYPOSITION lastPos = 0;
-			if (i > 0)
-				lastPos = positions[i-1];
-			while (i<text.length()) {
-				positions[i++] = lastPos;
-			}
-		} else if (mode.codePage) {
-			// DBCS
-			int ui = 0;
-			for (size_t i=0; i<text.length();) {
-				size_t lenChar  = DBCSIsLeadByte(mode.codePage, text[i]) ? 2 : 1;
-				qreal xPosition = tl.cursorToX(ui+1);
-				for (unsigned int bytePos=0; (bytePos<lenChar) && (i<text.length()); bytePos++) {
-					positions[i++] = xPosition;
-				}
-				ui++;
-			}
-		} else {
-			// Single byte encoding
-			for (int i=0; i<static_cast<int>(text.length()); i++) {
-				positions[i] = tl.cursorToX(i+1);
-			}
-		}
-	}
+        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions.cursor_walk");
+        if (mode.codePage == SC_CP_UTF8) {
+            int fit  = su.size();
+            int ui   = 0;
+            size_t i = 0;
+            while (ui<fit) {
+                const unsigned char uch      = text[i];
+                const unsigned int byteCount = UTF8BytesOfLead[uch];
+                const int codeUnits          = UTF16LengthFromUTF8ByteCount(byteCount);
+                qreal xPosition              = tl.cursorToX(ui+codeUnits);
+                for (size_t bytePos=0; (bytePos<byteCount) && (i<text.length()); bytePos++) {
+                    positions[i++] = xPosition;
+                }
+                ui += codeUnits;
+            }
+            XYPOSITION lastPos = 0;
+            if (i > 0)
+                lastPos = positions[i-1];
+            while (i<text.length()) {
+                positions[i++] = lastPos;
+            }
+        } else if (mode.codePage) {
+            // DBCS
+            int ui = 0;
+            for (size_t i=0; i<text.length();) {
+                size_t lenChar  = DBCSIsLeadByte(mode.codePage, text[i]) ? 2 : 1;
+                qreal xPosition = tl.cursorToX(ui+1);
+                for (unsigned int bytePos=0; (bytePos<lenChar) && (i<text.length()); bytePos++) {
+                    positions[i++] = xPosition;
+                }
+                ui++;
+            }
+        } else {
+            // Single byte encoding
+            for (int i=0; i<static_cast<int>(text.length()); i++) {
+                positions[i] = tl.cursorToX(i+1);
+            }
+        }
+    }
 }
 
 XYPOSITION SurfaceImpl::WidthText(const Font *font, std::string_view text)
 {
-	QFontMetricsF metrics(*font_pointer(font), device);
-	QString su = unicode_from_text(text);
+    QFontMetricsF metrics(*font_pointer(font), device);
+    QString su = unicode_from_text(text);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	return metrics.horizontalAdvance(su);
+    return metrics.horizontalAdvance(su);
 #else
-	return metrics.width(su);
+    return metrics.width(su);
 #endif
 }
 
 void SurfaceImpl::DrawTextNoClipUTF8(PRectangle rc,
-				 const Font *font,
-				 XYPOSITION ybase,
-				 std::string_view text,
-				 ColourRGBA fore,
-				 ColourRGBA back)
+                 const Font *font,
+                 XYPOSITION ybase,
+                 std::string_view text,
+                 ColourRGBA fore,
+                 ColourRGBA back)
 {
-	DrawTextNoClip(rc, font, ybase, text, fore, back);
+    DrawTextNoClip(rc, font, ybase, text, fore, back);
 }
 
 void SurfaceImpl::DrawTextClippedUTF8(PRectangle rc,
-				  const Font *font,
-				  XYPOSITION ybase,
-				  std::string_view text,
-				  ColourRGBA fore,
-				  ColourRGBA back)
+                  const Font *font,
+                  XYPOSITION ybase,
+                  std::string_view text,
+                  ColourRGBA fore,
+                  ColourRGBA back)
 {
-	DrawTextClipped(rc, font, ybase, text, fore, back);
+    DrawTextClipped(rc, font, ybase, text, fore, back);
 }
 
 void SurfaceImpl::DrawTextTransparentUTF8(PRectangle rc,
-				      const Font *font,
-				      XYPOSITION ybase,
-				      std::string_view text,
-	ColourRGBA fore)
+                      const Font *font,
+                      XYPOSITION ybase,
+                      std::string_view text,
+    ColourRGBA fore)
 {
-	DrawTextTransparent(rc, font, ybase, text, fore);
+    DrawTextTransparent(rc, font, ybase, text, fore);
 }
 
 void SurfaceImpl::MeasureWidthsUTF8(const Font *font,
-				std::string_view text,
-				XYPOSITION *positions)
+                std::string_view text,
+                XYPOSITION *positions)
 {
-	if (!font)
-		return;
-	QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
-	QTextLayout tlay(su, *font_pointer(font), GetPaintDevice());
-	tlay.beginLayout();
-	QTextLine tl = tlay.createLine();
-	tlay.endLayout();
-	int fit  = su.size();
-	int ui   = 0;
-	size_t i = 0;
-	while (ui<fit) {
-		const unsigned char uch      = text[i];
-		const unsigned int byteCount = UTF8BytesOfLead[uch];
-		const int codeUnits          = UTF16LengthFromUTF8ByteCount(byteCount);
-		qreal xPosition              = tl.cursorToX(ui+codeUnits);
-		for (size_t bytePos=0; (bytePos<byteCount) && (i<text.length()); bytePos++) {
-			positions[i++] = xPosition;
-		}
-		ui += codeUnits;
-	}
-	XYPOSITION lastPos = 0;
-	if (i > 0)
-		lastPos = positions[i-1];
-	while (i<text.length()) {
-		positions[i++] = lastPos;
-	}
+    if (!font)
+        return;
+    QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
+    QTextLayout tlay(su, *font_pointer(font), GetPaintDevice());
+    tlay.beginLayout();
+    QTextLine tl = tlay.createLine();
+    tlay.endLayout();
+    int fit  = su.size();
+    int ui   = 0;
+    size_t i = 0;
+    while (ui<fit) {
+        const unsigned char uch      = text[i];
+        const unsigned int byteCount = UTF8BytesOfLead[uch];
+        const int codeUnits          = UTF16LengthFromUTF8ByteCount(byteCount);
+        qreal xPosition              = tl.cursorToX(ui+codeUnits);
+        for (size_t bytePos=0; (bytePos<byteCount) && (i<text.length()); bytePos++) {
+            positions[i++] = xPosition;
+        }
+        ui += codeUnits;
+    }
+    XYPOSITION lastPos = 0;
+    if (i > 0)
+        lastPos = positions[i-1];
+    while (i<text.length()) {
+        positions[i++] = lastPos;
+    }
 }
 
 XYPOSITION SurfaceImpl::WidthTextUTF8(const Font *font, std::string_view text)
 {
-	QFontMetricsF metrics(*font_pointer(font), device);
-	QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
+    QFontMetricsF metrics(*font_pointer(font), device);
+    QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	return metrics.horizontalAdvance(su);
+    return metrics.horizontalAdvance(su);
 #else
-	return metrics.width(su);
+    return metrics.width(su);
 #endif
 }
 
 XYPOSITION SurfaceImpl::Ascent(const Font *font)
 {
-	QFontMetricsF metrics(*font_pointer(font), device);
-	return metrics.ascent();
+    QFontMetricsF metrics(*font_pointer(font), device);
+    return metrics.ascent();
 }
 
 XYPOSITION SurfaceImpl::Descent(const Font *font)
 {
-	QFontMetricsF metrics(*font_pointer(font), device);
-	// Qt returns 1 less than true descent
-	// See: QFontEngineWin::descent which says:
-	// ### we subtract 1 to even out the historical +1 in QFontMetrics's
-	// ### height=asc+desc+1 equation. Fix in Qt5.
-	return metrics.descent() + 1;
+    QFontMetricsF metrics(*font_pointer(font), device);
+    // Qt returns 1 less than true descent
+    // See: QFontEngineWin::descent which says:
+    // ### we subtract 1 to even out the historical +1 in QFontMetrics's
+    // ### height=asc+desc+1 equation. Fix in Qt5.
+    return metrics.descent() + 1;
 }
 
 XYPOSITION SurfaceImpl::InternalLeading(const Font * /* font */)
 {
-	return 0;
+    return 0;
 }
 
 XYPOSITION SurfaceImpl::Height(const Font *font)
 {
-	QFontMetricsF metrics(*font_pointer(font), device);
-	return metrics.height();
+    QFontMetricsF metrics(*font_pointer(font), device);
+    return metrics.height();
 }
 
 XYPOSITION SurfaceImpl::AverageCharWidth(const Font *font)
 {
-	QFontMetricsF metrics(*font_pointer(font), device);
-	return metrics.averageCharWidth();
+    QFontMetricsF metrics(*font_pointer(font), device);
+    return metrics.averageCharWidth();
 }
 
 void SurfaceImpl::FlushCachedState()
 {
-	if (device->paintingActive()) {
-		GetPainter()->setPen(QPen());
-		GetPainter()->setBrush(QBrush());
-	}
+    if (device->paintingActive()) {
+        GetPainter()->setPen(QPen());
+        GetPainter()->setBrush(QBrush());
+    }
 }
 
 void SurfaceImpl::FlushDrawing()
@@ -887,26 +887,26 @@ void SurfaceImpl::FlushDrawing()
 
 QPaintDevice *SurfaceImpl::GetPaintDevice()
 {
-	return device ? device : (painter ? painter->device() : nullptr);
+    return device ? device : (painter ? painter->device() : nullptr);
 }
 
 QPainter *SurfaceImpl::GetPainter()
 {
-	if (!painter) {
-		if (device->paintingActive()) {
-			painter = device->paintEngine()->painter();
-		} else {
-			painterOwned = true;
-			painter      = new QPainter(device);
-		}
+    if (!painter) {
+        if (device->paintingActive()) {
+            painter = device->paintEngine()->painter();
+        } else {
+            painterOwned = true;
+            painter      = new QPainter(device);
+        }
 
-		// Set text antialiasing unconditionally.
-		// The font's style strategy will override.
-		painter->setRenderHint(QPainter::TextAntialiasing, true);
-		painter->setRenderHint(QPainter::Antialiasing, false);
-	}
+        // Set text antialiasing unconditionally.
+        // The font's style strategy will override.
+        painter->setRenderHint(QPainter::TextAntialiasing, true);
+        painter->setRenderHint(QPainter::Antialiasing, false);
+    }
 
-	return painter;
+    return painter;
 }
 
 void SurfaceImpl::SetCaptureOnly(bool value)
@@ -916,7 +916,7 @@ void SurfaceImpl::SetCaptureOnly(bool value)
 
 std::unique_ptr<Surface> Surface::Allocate(Technology)
 {
-	return std::make_unique<SurfaceImpl>();
+    return std::make_unique<SurfaceImpl>();
 }
 
 
@@ -926,20 +926,20 @@ namespace {
 
 QQuickItem *window(WindowID wid) noexcept
 {
-	return static_cast<QQuickItem *>(wid);
+    return static_cast<QQuickItem *>(wid);
 }
 
 QRect ScreenRectangleForPoint(QPoint posGlobal)
 {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-	const QScreen *screen = QGuiApplication::screenAt(posGlobal);
-	if (!screen) {
-		screen = QGuiApplication::primaryScreen();
-	}
+    const QScreen *screen = QGuiApplication::screenAt(posGlobal);
+    if (!screen) {
+        screen = QGuiApplication::primaryScreen();
+    }
 #else
-	const QScreen *screen = QGuiApplication::primaryScreen();
+    const QScreen *screen = QGuiApplication::primaryScreen();
 #endif
-	return screen ? screen->availableGeometry() : QRect();
+    return screen ? screen->availableGeometry() : QRect();
 }
 
 }
@@ -948,75 +948,75 @@ Window::~Window() noexcept = default;
 
 void Window::Destroy() noexcept
 {
-	if (wid)
-		delete window(wid);
-	wid = nullptr;
+    if (wid)
+        delete window(wid);
+    wid = nullptr;
 }
 PRectangle Window::GetPosition() const
 {
-	// Before any size allocated pretend its 1000 wide so not scrolled
-	return wid ? PRectangle(window(wid)->x(), window(wid)->y(),
-				window(wid)->x() + window(wid)->width(),
-				window(wid)->y() + window(wid)->height()) : PRectangle(0, 0, 1000, 1000);
+    // Before any size allocated pretend its 1000 wide so not scrolled
+    return wid ? PRectangle(window(wid)->x(), window(wid)->y(),
+                window(wid)->x() + window(wid)->width(),
+                window(wid)->y() + window(wid)->height()) : PRectangle(0, 0, 1000, 1000);
 }
 
 void Window::SetPosition(PRectangle rc)
 {
-	if (wid)
-	{
-		QRect aRect = QRectFromPRect(rc);
-		window(wid)->setPosition(QPointF(aRect.x(),aRect.y()));
-		window(wid)->setSize(QSizeF(aRect.width(),aRect.height()));
-	}
+    if (wid)
+    {
+        QRect aRect = QRectFromPRect(rc);
+        window(wid)->setPosition(QPointF(aRect.x(),aRect.y()));
+        window(wid)->setSize(QSizeF(aRect.width(),aRect.height()));
+    }
 }
 
 void Window::SetPositionRelative(PRectangle rc, const Window *relativeTo)
 {
-	QPointF oPos = window(relativeTo->wid)->mapToGlobal(QPointF(0,0));
-	int ox       = oPos.x();
-	int oy       = oPos.y();
-	ox += rc.left;
-	oy += rc.top;
+    QPointF oPos = window(relativeTo->wid)->mapToGlobal(QPointF(0,0));
+    int ox       = oPos.x();
+    int oy       = oPos.y();
+    ox += rc.left;
+    oy += rc.top;
 
-	const QRect rectDesk = ScreenRectangleForPoint(QPoint(ox, oy));
-	/* do some corrections to fit into screen */
-	int sizex       = rc.right - rc.left;
-	int sizey       = rc.bottom - rc.top;
-	int screenWidth = rectDesk.width();
-	if (ox < rectDesk.x())
-		ox = rectDesk.x();
-	if (sizex > screenWidth)
-		ox = rectDesk.x(); /* the best we can do */
-	else if (ox + sizex > rectDesk.right())
-		ox = rectDesk.right() - sizex;
-	if (oy + sizey > rectDesk.bottom())
-		oy = rectDesk.bottom() - sizey;
+    const QRect rectDesk = ScreenRectangleForPoint(QPoint(ox, oy));
+    /* do some corrections to fit into screen */
+    int sizex       = rc.right - rc.left;
+    int sizey       = rc.bottom - rc.top;
+    int screenWidth = rectDesk.width();
+    if (ox < rectDesk.x())
+        ox = rectDesk.x();
+    if (sizex > screenWidth)
+        ox = rectDesk.x(); /* the best we can do */
+    else if (ox + sizex > rectDesk.right())
+        ox = rectDesk.right() - sizex;
+    if (oy + sizey > rectDesk.bottom())
+        oy = rectDesk.bottom() - sizey;
     if (oy < rectDesk.top())
         oy = rectDesk.top();
 
-	Q_ASSERT(wid);
-	QQuickItem *target           = window(wid);
-	QQuickItem *target_parent    = target->parentItem();
-	const QPointF local_position = target_parent ? target_parent->mapFromGlobal(QPointF(ox, oy)) : QPointF(ox, oy);
-	target->setPosition(local_position);
-	window(wid)->setSize(QSizeF(sizex, sizey));
+    Q_ASSERT(wid);
+    QQuickItem *target           = window(wid);
+    QQuickItem *target_parent    = target->parentItem();
+    const QPointF local_position = target_parent ? target_parent->mapFromGlobal(QPointF(ox, oy)) : QPointF(ox, oy);
+    target->setPosition(local_position);
+    window(wid)->setSize(QSizeF(sizex, sizey));
 }
 
 PRectangle Window::GetClientPosition() const
 {
-	// The client position is the window position
-	return GetPosition();
+    // The client position is the window position
+    return GetPosition();
 }
 
 void Window::Show(bool show)
 {
-	if (wid)
-		window(wid)->setVisible(show);
+    if (wid)
+        window(wid)->setVisible(show);
 }
 
 void Window::InvalidateAll()
 {
-	if (wid) {
+    if (wid) {
         if (auto *item = qobject_cast<ScintillaQuickItem *>(window(wid))) {
             item->request_scene_graph_update();
         }
@@ -1028,8 +1028,8 @@ void Window::InvalidateAll()
 
 void Window::InvalidateRectangle(PRectangle rc)
 {
-	Q_UNUSED(rc);
-	if (wid) {
+    Q_UNUSED(rc);
+    if (wid) {
         if (auto *item = qobject_cast<ScintillaQuickItem *>(window(wid))) {
             item->request_scene_graph_update();
         }
@@ -1041,478 +1041,478 @@ void Window::InvalidateRectangle(PRectangle rc)
 
 void Window::SetCursor(Cursor curs)
 {
-	if (wid) {
-		Qt::CursorShape shape;
+    if (wid) {
+        Qt::CursorShape shape;
 
-		switch (curs) {
-			case Cursor::text:  shape      = Qt::IBeamCursor;        break;
-			case Cursor::arrow: shape      = Qt::ArrowCursor;        break;
-			case Cursor::up:    shape      = Qt::UpArrowCursor;      break;
-			case Cursor::wait:  shape      = Qt::WaitCursor;         break;
-			case Cursor::horizontal: shape = Qt::SizeHorCursor; break;
-			case Cursor::vertical:  shape  = Qt::SizeVerCursor;  break;
-			case Cursor::hand:  shape      = Qt::PointingHandCursor; break;
-			default:            shape      = Qt::ArrowCursor;        break;
-		}
+        switch (curs) {
+            case Cursor::text:  shape      = Qt::IBeamCursor;        break;
+            case Cursor::arrow: shape      = Qt::ArrowCursor;        break;
+            case Cursor::up:    shape      = Qt::UpArrowCursor;      break;
+            case Cursor::wait:  shape      = Qt::WaitCursor;         break;
+            case Cursor::horizontal: shape = Qt::SizeHorCursor; break;
+            case Cursor::vertical:  shape  = Qt::SizeVerCursor;  break;
+            case Cursor::hand:  shape      = Qt::PointingHandCursor; break;
+            default:            shape      = Qt::ArrowCursor;        break;
+        }
 
-		QCursor cursor = QCursor(shape);
+        QCursor cursor = QCursor(shape);
 
-		if (curs != cursorLast) {
-			window(wid)->setCursor(cursor);
-			cursorLast = curs;
-		}
-	}
+        if (curs != cursorLast) {
+            window(wid)->setCursor(cursor);
+            cursorLast = curs;
+        }
+    }
 }
 
 /* Returns rectangle of monitor pt is on, both rect and pt are in Window's
    window coordinates */
 PRectangle Window::GetMonitorRect(Point pt)
 {
-	const QPointF originGlobal = window(wid)->mapToGlobal(QPoint(0, 0));
-	const QPointF posGlobal    = window(wid)->mapToGlobal(QPoint(pt.x, pt.y));
-	QRect rectScreen           = ScreenRectangleForPoint(QPoint(posGlobal.x(), posGlobal.y()));
-	rectScreen.translate(-originGlobal.x(), -originGlobal.y());
-	return PRectFromQRect(rectScreen);
+    const QPointF originGlobal = window(wid)->mapToGlobal(QPoint(0, 0));
+    const QPointF posGlobal    = window(wid)->mapToGlobal(QPoint(pt.x, pt.y));
+    QRect rectScreen           = ScreenRectangleForPoint(QPoint(posGlobal.x(), posGlobal.y()));
+    rectScreen.translate(-originGlobal.x(), -originGlobal.y());
+    return PRectFromQRect(rectScreen);
 }
 
 //----------------------------------------------------------------------
 struct quick_list_entry {
-	QString text;
-	int type = -1;
+    QString text;
+    int type = -1;
 };
 
 class quick_list_box_item final : public QQuickItem {
 public:
-	explicit quick_list_box_item(QQuickItem *parent)
-		: QQuickItem(parent)
-	{
-		setAcceptedMouseButtons(Qt::LeftButton);
-		setAcceptHoverEvents(false);
-		setClip(true);
-		setFlag(QQuickItem::ItemHasContents, true);
-		setVisible(false);
-		setZ(1000.0);
-	}
+    explicit quick_list_box_item(QQuickItem *parent)
+        : QQuickItem(parent)
+    {
+        setAcceptedMouseButtons(Qt::LeftButton);
+        setAcceptHoverEvents(false);
+        setClip(true);
+        setFlag(QQuickItem::ItemHasContents, true);
+        setVisible(false);
+        setZ(1000.0);
+    }
 
-	void setListFont(const QFont &font)
-	{
-		m_font = font;
-		update();
-	}
+    void setListFont(const QFont &font)
+    {
+        m_font = font;
+        update();
+    }
 
-	void setVisibleRowCount(int rows)
-	{
-		m_visible_rows = std::max(1, rows);
-		clampState();
-		update();
-	}
+    void setVisibleRowCount(int rows)
+    {
+        m_visible_rows = std::max(1, rows);
+        clampState();
+        update();
+    }
 
-	int visibleRowCount() const noexcept
-	{
-		return m_visible_rows;
-	}
+    int visibleRowCount() const noexcept
+    {
+        return m_visible_rows;
+    }
 
-	void clearItems() noexcept
-	{
-		m_entries.clear();
-		m_current_row = -1;
-		m_top_row     = 0;
-		update();
-	}
+    void clearItems() noexcept
+    {
+        m_entries.clear();
+        m_current_row = -1;
+        m_top_row     = 0;
+        update();
+    }
 
-	void appendItem(QString text, int type)
-	{
-		m_entries.push_back({std::move(text), type});
-		update();
-	}
+    void appendItem(QString text, int type)
+    {
+        m_entries.push_back({std::move(text), type});
+        update();
+    }
 
-	int count() const noexcept
-	{
-		return static_cast<int>(m_entries.size());
-	}
+    int count() const noexcept
+    {
+        return static_cast<int>(m_entries.size());
+    }
 
-	void setSelection(int row, bool notify_delegate)
-	{
-		if (m_entries.empty()) {
-			m_current_row = -1;
-			m_top_row     = 0;
-			update();
-			return;
-		}
+    void setSelection(int row, bool notify_delegate)
+    {
+        if (m_entries.empty()) {
+            m_current_row = -1;
+            m_top_row     = 0;
+            update();
+            return;
+        }
 
-		const int bounded_row = std::clamp(row, 0, count() - 1);
-		const bool changed    = bounded_row != m_current_row;
-		m_current_row         = bounded_row;
-		ensureVisible(m_current_row);
-		update();
+        const int bounded_row = std::clamp(row, 0, count() - 1);
+        const bool changed    = bounded_row != m_current_row;
+        m_current_row         = bounded_row;
+        ensureVisible(m_current_row);
+        update();
 
-		if (changed && notify_delegate && m_delegate) {
-			ListBoxEvent event(ListBoxEvent::EventType::selectionChange);
-			m_delegate->ListNotify(&event);
-		}
-	}
+        if (changed && notify_delegate && m_delegate) {
+            ListBoxEvent event(ListBoxEvent::EventType::selectionChange);
+            m_delegate->ListNotify(&event);
+        }
+    }
 
-	int currentSelection() const noexcept
-	{
-		return m_current_row;
-	}
+    int currentSelection() const noexcept
+    {
+        return m_current_row;
+    }
 
-	int findPrefix(const QString &prefix) const noexcept
-	{
-		for (int index = 0; index < count(); ++index) {
-			if (m_entries[static_cast<size_t>(index)].text.startsWith(prefix)) {
-				return index;
-			}
-		}
-		return -1;
-	}
+    int findPrefix(const QString &prefix) const noexcept
+    {
+        for (int index = 0; index < count(); ++index) {
+            if (m_entries[static_cast<size_t>(index)].text.startsWith(prefix)) {
+                return index;
+            }
+        }
+        return -1;
+    }
 
-	QString valueAt(int row) const
-	{
-		if (row < 0 || row >= count()) {
-			return {};
-		}
-		return m_entries[static_cast<size_t>(row)].text;
-	}
+    QString valueAt(int row) const
+    {
+        if (row < 0 || row >= count()) {
+            return {};
+        }
+        return m_entries[static_cast<size_t>(row)].text;
+    }
 
-	void registerImage(int type, const QPixmap &pixmap)
-	{
-		m_images[type] = pixmap;
-		update();
-	}
+    void registerImage(int type, const QPixmap &pixmap)
+    {
+        m_images[type] = pixmap;
+        update();
+    }
 
-	void clearImages() noexcept
-	{
-		m_images.clear();
-		update();
-	}
+    void clearImages() noexcept
+    {
+        m_images.clear();
+        update();
+    }
 
-	void setDelegate(IListBoxDelegate *delegate) noexcept
-	{
-		m_delegate = delegate;
-	}
+    void setDelegate(IListBoxDelegate *delegate) noexcept
+    {
+        m_delegate = delegate;
+    }
 
-	void setOptions(const ListOptions &options)
-	{
-		m_options = options;
-		update();
-	}
+    void setOptions(const ListOptions &options)
+    {
+        m_options = options;
+        update();
+    }
 
-	int caretFromEdge() const
-	{
-		return maxIconWidth() + frameWidth() * 2 + horizontalPadding() * 2 + (maxIconWidth() > 0 ? iconSpacing() : 0);
-	}
+    int caretFromEdge() const
+    {
+        return maxIconWidth() + frameWidth() * 2 + horizontalPadding() * 2 + (maxIconWidth() > 0 ? iconSpacing() : 0);
+    }
 
-	PRectangle desiredRect() const
-	{
-		const int rows = std::max(1, std::min(count(), m_visible_rows));
-		return PRectangle(0, 0, desiredWidth(), rows * rowHeight() + frameWidth() * 2);
-	}
+    PRectangle desiredRect() const
+    {
+        const int rows = std::max(1, std::min(count(), m_visible_rows));
+        return PRectangle(0, 0, desiredWidth(), rows * rowHeight() + frameWidth() * 2);
+    }
 
-	QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override
-	{
-		QQuickWindow *window = this->window();
-		if (!window || width() <= 0.0 || height() <= 0.0) {
-			delete oldNode;
-			return nullptr;
-		}
+    QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override
+    {
+        QQuickWindow *window = this->window();
+        if (!window || width() <= 0.0 || height() <= 0.0) {
+            delete oldNode;
+            return nullptr;
+        }
 
-		delete oldNode;
-		m_layouts.clear();
+        delete oldNode;
+        m_layouts.clear();
 
-		auto *root             = new QSGNode();
-		const QPalette palette = QGuiApplication::palette();
-		const QColor base_color = m_options.back
-			? QColorFromColourRGBA(*m_options.back)
-			: palette.base().color();
-		const QColor text_color = m_options.fore
-			? QColorFromColourRGBA(*m_options.fore)
-			: palette.text().color();
-		const QColor selected_back_color = m_options.backSelected
-			? QColorFromColourRGBA(*m_options.backSelected)
-			: palette.highlight().color();
-		const QColor selected_text_color = m_options.foreSelected
-			? QColorFromColourRGBA(*m_options.foreSelected)
-			: palette.highlightedText().color();
-		const QRectF item_rect = boundingRect();
-		const QFont font       = resolvedFont();
-		const QFontMetricsF metrics(font);
-		const int rows = std::max(0, std::min(m_visible_rows, count() - m_top_row));
+        auto *root             = new QSGNode();
+        const QPalette palette = QGuiApplication::palette();
+        const QColor base_color = m_options.back
+            ? QColorFromColourRGBA(*m_options.back)
+            : palette.base().color();
+        const QColor text_color = m_options.fore
+            ? QColorFromColourRGBA(*m_options.fore)
+            : palette.text().color();
+        const QColor selected_back_color = m_options.backSelected
+            ? QColorFromColourRGBA(*m_options.backSelected)
+            : palette.highlight().color();
+        const QColor selected_text_color = m_options.foreSelected
+            ? QColorFromColourRGBA(*m_options.foreSelected)
+            : palette.highlightedText().color();
+        const QRectF item_rect = boundingRect();
+        const QFont font       = resolvedFont();
+        const QFontMetricsF metrics(font);
+        const int rows = std::max(0, std::min(m_visible_rows, count() - m_top_row));
 
-		if (auto *background = window->createRectangleNode()) {
-			background->setRect(item_rect);
-			background->setColor(base_color);
-			root->appendChildNode(background);
-		}
+        if (auto *background = window->createRectangleNode()) {
+            background->setRect(item_rect);
+            background->setColor(base_color);
+            root->appendChildNode(background);
+        }
 
-		const QColor border_color = palette.mid().color();
-		if (auto *top_border = window->createRectangleNode()) {
-			top_border->setRect(QRectF(item_rect.left(), item_rect.top(), item_rect.width(), 1.0));
-			top_border->setColor(border_color);
-			root->appendChildNode(top_border);
-		}
-		if (auto *bottom_border = window->createRectangleNode()) {
-			bottom_border->setRect(QRectF(item_rect.left(), item_rect.bottom() - 1.0, item_rect.width(), 1.0));
-			bottom_border->setColor(border_color);
-			root->appendChildNode(bottom_border);
-		}
-		if (auto *left_border = window->createRectangleNode()) {
-			left_border->setRect(QRectF(item_rect.left(), item_rect.top(), 1.0, item_rect.height()));
-			left_border->setColor(border_color);
-			root->appendChildNode(left_border);
-		}
-		if (auto *right_border = window->createRectangleNode()) {
-			right_border->setRect(QRectF(item_rect.right() - 1.0, item_rect.top(), 1.0, item_rect.height()));
-			right_border->setColor(border_color);
-			root->appendChildNode(right_border);
-		}
+        const QColor border_color = palette.mid().color();
+        if (auto *top_border = window->createRectangleNode()) {
+            top_border->setRect(QRectF(item_rect.left(), item_rect.top(), item_rect.width(), 1.0));
+            top_border->setColor(border_color);
+            root->appendChildNode(top_border);
+        }
+        if (auto *bottom_border = window->createRectangleNode()) {
+            bottom_border->setRect(QRectF(item_rect.left(), item_rect.bottom() - 1.0, item_rect.width(), 1.0));
+            bottom_border->setColor(border_color);
+            root->appendChildNode(bottom_border);
+        }
+        if (auto *left_border = window->createRectangleNode()) {
+            left_border->setRect(QRectF(item_rect.left(), item_rect.top(), 1.0, item_rect.height()));
+            left_border->setColor(border_color);
+            root->appendChildNode(left_border);
+        }
+        if (auto *right_border = window->createRectangleNode()) {
+            right_border->setRect(QRectF(item_rect.right() - 1.0, item_rect.top(), 1.0, item_rect.height()));
+            right_border->setColor(border_color);
+            root->appendChildNode(right_border);
+        }
 
-		for (int row = 0; row < rows; ++row) {
-			const int index = m_top_row + row;
-			const QRectF row_rect(
-				frameWidth(),
-				frameWidth() + row * rowHeight(),
-				width() - frameWidth() * 2,
-				rowHeight());
-			const bool selected           = index == m_current_row;
-			const QColor row_background   = selected ? selected_back_color : base_color;
-			const QColor row_foreground   = selected ? selected_text_color : text_color;
-			const quick_list_entry &entry = m_entries[static_cast<size_t>(index)];
+        for (int row = 0; row < rows; ++row) {
+            const int index = m_top_row + row;
+            const QRectF row_rect(
+                frameWidth(),
+                frameWidth() + row * rowHeight(),
+                width() - frameWidth() * 2,
+                rowHeight());
+            const bool selected           = index == m_current_row;
+            const QColor row_background   = selected ? selected_back_color : base_color;
+            const QColor row_foreground   = selected ? selected_text_color : text_color;
+            const quick_list_entry &entry = m_entries[static_cast<size_t>(index)];
 
-			if (auto *row_background_node = window->createRectangleNode()) {
-				row_background_node->setRect(row_rect);
-				row_background_node->setColor(row_background);
-				root->appendChildNode(row_background_node);
-			}
+            if (auto *row_background_node = window->createRectangleNode()) {
+                row_background_node->setRect(row_rect);
+                row_background_node->setColor(row_background);
+                root->appendChildNode(row_background_node);
+            }
 
-			qreal x            = row_rect.left() + horizontalPadding();
-			const QPixmap icon = iconFor(index);
-			if (!icon.isNull()) {
-				const qreal icon_y = row_rect.top() + std::max(0.0, (row_rect.height() - icon.height()) * 0.5);
-				if (auto *icon_node = window->createImageNode()) {
-					const QImage icon_image = icon.toImage();
-					QSGTexture *texture     = window->createTextureFromImage(icon_image);
-					icon_node->setTexture(texture);
-					icon_node->setOwnsTexture(true);
-					icon_node->setRect(QRectF(x, icon_y, icon.width(), icon.height()));
-					icon_node->setSourceRect(QRectF(0.0, 0.0, icon_image.width(), icon_image.height()));
-					icon_node->setFiltering(QSGTexture::Linear);
-					root->appendChildNode(icon_node);
-				}
-				x += icon.width() + iconSpacing();
-			}
+            qreal x            = row_rect.left() + horizontalPadding();
+            const QPixmap icon = iconFor(index);
+            if (!icon.isNull()) {
+                const qreal icon_y = row_rect.top() + std::max(0.0, (row_rect.height() - icon.height()) * 0.5);
+                if (auto *icon_node = window->createImageNode()) {
+                    const QImage icon_image = icon.toImage();
+                    QSGTexture *texture     = window->createTextureFromImage(icon_image);
+                    icon_node->setTexture(texture);
+                    icon_node->setOwnsTexture(true);
+                    icon_node->setRect(QRectF(x, icon_y, icon.width(), icon.height()));
+                    icon_node->setSourceRect(QRectF(0.0, 0.0, icon_image.width(), icon_image.height()));
+                    icon_node->setFiltering(QSGTexture::Linear);
+                    root->appendChildNode(icon_node);
+                }
+                x += icon.width() + iconSpacing();
+            }
 
-			auto layout = std::make_unique<QTextLayout>(entry.text, font);
-			QTextOption option;
-			option.setWrapMode(QTextOption::NoWrap);
-			layout->setTextOption(option);
-			layout->beginLayout();
-			QTextLine line = layout->createLine();
-			if (line.isValid()) {
-				line.setLineWidth(1000000.0);
-				line.setPosition(QPointF(0.0, 0.0));
-			}
-			layout->endLayout();
+            auto layout = std::make_unique<QTextLayout>(entry.text, font);
+            QTextOption option;
+            option.setWrapMode(QTextOption::NoWrap);
+            layout->setTextOption(option);
+            layout->beginLayout();
+            QTextLine line = layout->createLine();
+            if (line.isValid()) {
+                line.setLineWidth(1000000.0);
+                line.setPosition(QPointF(0.0, 0.0));
+            }
+            layout->endLayout();
 
-			if (auto *text_node = window->createTextNode()) {
-				text_node->setRenderType(map_text_render_type());
-				text_node->setColor(row_foreground);
-				text_node->setViewport(item_rect);
-				text_node->clear();
-				text_node->addTextLayout(
-					QPointF(x, row_rect.top() + (row_rect.height() - metrics.height()) * 0.5),
-					layout.get());
-				root->appendChildNode(text_node);
-			}
-			m_layouts.push_back(std::move(layout));
-		}
+            if (auto *text_node = window->createTextNode()) {
+                text_node->setRenderType(map_text_render_type());
+                text_node->setColor(row_foreground);
+                text_node->setViewport(item_rect);
+                text_node->clear();
+                text_node->addTextLayout(
+                    QPointF(x, row_rect.top() + (row_rect.height() - metrics.height()) * 0.5),
+                    layout.get());
+                root->appendChildNode(text_node);
+            }
+            m_layouts.push_back(std::move(layout));
+        }
 
-		return root;
-	}
+        return root;
+    }
 
 protected:
-	void mousePressEvent(QMouseEvent *event) override
-	{
-		const int row = rowAt(event->position().y());
-		if (row >= 0) {
-			setSelection(row, true);
-			event->accept();
-			return;
-		}
-		QQuickItem::mousePressEvent(event);
-	}
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        const int row = rowAt(event->position().y());
+        if (row >= 0) {
+            setSelection(row, true);
+            event->accept();
+            return;
+        }
+        QQuickItem::mousePressEvent(event);
+    }
 
-	void mouseDoubleClickEvent(QMouseEvent *event) override
-	{
-		const int row = rowAt(event->position().y());
-		if (row >= 0) {
-			setSelection(row, true);
-			if (m_delegate) {
-				ListBoxEvent notify_event(ListBoxEvent::EventType::doubleClick);
-				m_delegate->ListNotify(&notify_event);
-			}
-			event->accept();
-			return;
-		}
-		QQuickItem::mouseDoubleClickEvent(event);
-	}
+    void mouseDoubleClickEvent(QMouseEvent *event) override
+    {
+        const int row = rowAt(event->position().y());
+        if (row >= 0) {
+            setSelection(row, true);
+            if (m_delegate) {
+                ListBoxEvent notify_event(ListBoxEvent::EventType::doubleClick);
+                m_delegate->ListNotify(&notify_event);
+            }
+            event->accept();
+            return;
+        }
+        QQuickItem::mouseDoubleClickEvent(event);
+    }
 
-	void wheelEvent(QWheelEvent *event) override
-	{
-		if (count() <= m_visible_rows) {
-			event->ignore();
-			return;
-		}
+    void wheelEvent(QWheelEvent *event) override
+    {
+        if (count() <= m_visible_rows) {
+            event->ignore();
+            return;
+        }
 
-		const int delta = event->angleDelta().y();
-		if (delta == 0) {
-			event->ignore();
-			return;
-		}
+        const int delta = event->angleDelta().y();
+        if (delta == 0) {
+            event->ignore();
+            return;
+        }
 
-		m_top_row = std::clamp(
-			m_top_row + (delta > 0 ? -1 : 1),
-			0,
-			std::max(0, count() - m_visible_rows));
-		update();
-		event->accept();
-	}
+        m_top_row = std::clamp(
+            m_top_row + (delta > 0 ? -1 : 1),
+            0,
+            std::max(0, count() - m_visible_rows));
+        update();
+        event->accept();
+    }
 
 private:
-	static constexpr int frameWidth() noexcept { return 1; }
-	static constexpr int horizontalPadding() noexcept { return 6; }
-	static constexpr int iconSpacing() noexcept { return 4; }
+    static constexpr int frameWidth() noexcept { return 1; }
+    static constexpr int horizontalPadding() noexcept { return 6; }
+    static constexpr int iconSpacing() noexcept { return 4; }
 
-	QFont resolvedFont() const
-	{
-		return m_font.family().isEmpty() ? QFontDatabase::systemFont(QFontDatabase::FixedFont) : m_font;
-	}
+    QFont resolvedFont() const
+    {
+        return m_font.family().isEmpty() ? QFontDatabase::systemFont(QFontDatabase::FixedFont) : m_font;
+    }
 
-	int rowHeight() const
-	{
-		return std::max(maxIconHeight() + 4, QFontMetrics(resolvedFont()).height() + 4);
-	}
+    int rowHeight() const
+    {
+        return std::max(maxIconHeight() + 4, QFontMetrics(resolvedFont()).height() + 4);
+    }
 
-	int desiredWidth() const
-	{
-		const QFontMetrics metrics(resolvedFont());
-		int width = frameWidth() * 2 + horizontalPadding() * 2 + maxIconWidth();
-		if (maxIconWidth() > 0) {
-			width += iconSpacing();
-		}
-		for (const quick_list_entry &entry : m_entries) {
-			width = std::max(width, frameWidth() * 2 + horizontalPadding() * 2 + maxIconWidth() + (maxIconWidth() > 0 ? iconSpacing() : 0) + metrics.horizontalAdvance(entry.text));
-		}
-		return width;
-	}
+    int desiredWidth() const
+    {
+        const QFontMetrics metrics(resolvedFont());
+        int width = frameWidth() * 2 + horizontalPadding() * 2 + maxIconWidth();
+        if (maxIconWidth() > 0) {
+            width += iconSpacing();
+        }
+        for (const quick_list_entry &entry : m_entries) {
+            width = std::max(width, frameWidth() * 2 + horizontalPadding() * 2 + maxIconWidth() + (maxIconWidth() > 0 ? iconSpacing() : 0) + metrics.horizontalAdvance(entry.text));
+        }
+        return width;
+    }
 
-	int maxIconWidth() const
-	{
-		int width = 0;
-		for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
-			width = std::max(width, it.value().width());
-		}
-		return width;
-	}
+    int maxIconWidth() const
+    {
+        int width = 0;
+        for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
+            width = std::max(width, it.value().width());
+        }
+        return width;
+    }
 
-	int maxIconHeight() const
-	{
-		int height = 0;
-		for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
-			height = std::max(height, it.value().height());
-		}
-		return height;
-	}
+    int maxIconHeight() const
+    {
+        int height = 0;
+        for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
+            height = std::max(height, it.value().height());
+        }
+        return height;
+    }
 
-	QPixmap iconFor(int index) const
-	{
-		if (index < 0 || index >= count()) {
-			return {};
-		}
-		return m_images.value(m_entries[static_cast<size_t>(index)].type);
-	}
+    QPixmap iconFor(int index) const
+    {
+        if (index < 0 || index >= count()) {
+            return {};
+        }
+        return m_images.value(m_entries[static_cast<size_t>(index)].type);
+    }
 
-	int rowAt(qreal y) const
-	{
-		const int row   = static_cast<int>((y - frameWidth()) / rowHeight());
-		const int index = m_top_row + row;
-		return row >= 0 && index >= 0 && index < count() ? index : -1;
-	}
+    int rowAt(qreal y) const
+    {
+        const int row   = static_cast<int>((y - frameWidth()) / rowHeight());
+        const int index = m_top_row + row;
+        return row >= 0 && index >= 0 && index < count() ? index : -1;
+    }
 
-	void ensureVisible(int row)
-	{
-		if (row < m_top_row) {
-			m_top_row = row;
-		} else if (row >= m_top_row + m_visible_rows) {
-			m_top_row = row - m_visible_rows + 1;
-		}
-		clampState();
-	}
+    void ensureVisible(int row)
+    {
+        if (row < m_top_row) {
+            m_top_row = row;
+        } else if (row >= m_top_row + m_visible_rows) {
+            m_top_row = row - m_visible_rows + 1;
+        }
+        clampState();
+    }
 
-	void clampState()
-	{
-		m_top_row = std::clamp(m_top_row, 0, std::max(0, count() - m_visible_rows));
-		if (m_current_row >= count()) {
-			m_current_row = count() - 1;
-		}
-	}
+    void clampState()
+    {
+        m_top_row = std::clamp(m_top_row, 0, std::max(0, count() - m_visible_rows));
+        if (m_current_row >= count()) {
+            m_current_row = count() - 1;
+        }
+    }
 
-	std::vector<quick_list_entry> m_entries;
-	QMap<int, QPixmap> m_images;
-	QFont m_font;
-	IListBoxDelegate *m_delegate = nullptr;
-	int m_visible_rows           = 5;
-	int m_current_row            = -1;
-	int m_top_row                = 0;
-	std::vector<std::unique_ptr<QTextLayout>> m_layouts;
-	ListOptions m_options;
+    std::vector<quick_list_entry> m_entries;
+    QMap<int, QPixmap> m_images;
+    QFont m_font;
+    IListBoxDelegate *m_delegate = nullptr;
+    int m_visible_rows           = 5;
+    int m_current_row            = -1;
+    int m_top_row                = 0;
+    std::vector<std::unique_ptr<QTextLayout>> m_layouts;
+    ListOptions m_options;
 };
 
 class list_box_impl : public ListBox {
 public:
-	list_box_impl() noexcept;
+    list_box_impl() noexcept;
 
-	void SetFont(const Font *font) override;
-	void Create(
-		Window &parent,
-		int ctrlID,
-		Point location,
-		int lineHeight,
-		bool unicode_mode,
-		Technology technology) override;
-	void SetAverageCharWidth(int width) override;
-	void SetVisibleRows(int rows) override;
-	int GetVisibleRows() const override;
-	PRectangle GetDesiredRect() override;
-	int CaretFromEdge() override;
-	void Clear() noexcept override;
-	void Append(char *s, int type) override;
-	int Length() override;
-	void Select(int n) override;
-	int GetSelection() override;
-	int Find(const char *prefix) override;
-	std::string GetValue(int n) override;
-	void RegisterImage(int type, const char *xpmData) override;
-	void RegisterRGBAImage(
-		int type,
-		int width,
-		int height,
-		const unsigned char *pixelsImage) override;
-	virtual void RegisterQPixmapImage(int type, const QPixmap &pm);
-	void ClearRegisteredImages() override;
-	void SetDelegate(IListBoxDelegate *delegate) override;
-	void SetList(const char *list, char separator, char typesep) override;
-	void SetOptions(ListOptions options) override;
+    void SetFont(const Font *font) override;
+    void Create(
+        Window &parent,
+        int ctrlID,
+        Point location,
+        int lineHeight,
+        bool unicode_mode,
+        Technology technology) override;
+    void SetAverageCharWidth(int width) override;
+    void SetVisibleRows(int rows) override;
+    int GetVisibleRows() const override;
+    PRectangle GetDesiredRect() override;
+    int CaretFromEdge() override;
+    void Clear() noexcept override;
+    void Append(char *s, int type) override;
+    int Length() override;
+    void Select(int n) override;
+    int GetSelection() override;
+    int Find(const char *prefix) override;
+    std::string GetValue(int n) override;
+    void RegisterImage(int type, const char *xpmData) override;
+    void RegisterRGBAImage(
+        int type,
+        int width,
+        int height,
+        const unsigned char *pixelsImage) override;
+    virtual void RegisterQPixmapImage(int type, const QPixmap &pm);
+    void ClearRegisteredImages() override;
+    void SetDelegate(IListBoxDelegate *delegate) override;
+    void SetList(const char *list, char separator, char typesep) override;
+    void SetOptions(ListOptions options) override;
 
-	[[nodiscard]] quick_list_box_item *GetWidget() const noexcept;
+    [[nodiscard]] quick_list_box_item *GetWidget() const noexcept;
 private:
-	bool m_unicode_mode{false};
-	int m_visible_rows{5};
-	QMap<int, QPixmap> m_images;
-	QFont m_font;
-	bool m_font_set{false};
-	IListBoxDelegate *m_delegate{nullptr};
-	ListOptions m_options;
+    bool m_unicode_mode{false};
+    int m_visible_rows{5};
+    QMap<int, QPixmap> m_images;
+    QFont m_font;
+    bool m_font_set{false};
+    IListBoxDelegate *m_delegate{nullptr};
+    ListOptions m_options;
 };
 list_box_impl::list_box_impl() noexcept = default;
 
@@ -1523,107 +1523,107 @@ void list_box_impl::Create(Window &parent,
                          bool unicode_mode,
                          Technology)
 {
-	m_unicode_mode             = unicode_mode;
-	QQuickItem *qparent        = window(parent.GetID());
-	QQuickItem *overlay_parent = qparent && qparent->window() ? qparent->window()->contentItem() : qparent;
-	quick_list_box_item *list  = new quick_list_box_item(overlay_parent);
-	list->setPosition(QPointF(location.x, location.y));
-	list->setVisibleRowCount(m_visible_rows);
-	if (m_font_set) {
-		list->setListFont(m_font);
-	}
-	if (m_delegate) {
-		list->setDelegate(m_delegate);
-	}
-	for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
-		list->registerImage(it.key(), it.value());
-	}
-	wid = list;
+    m_unicode_mode             = unicode_mode;
+    QQuickItem *qparent        = window(parent.GetID());
+    QQuickItem *overlay_parent = qparent && qparent->window() ? qparent->window()->contentItem() : qparent;
+    quick_list_box_item *list  = new quick_list_box_item(overlay_parent);
+    list->setPosition(QPointF(location.x, location.y));
+    list->setVisibleRowCount(m_visible_rows);
+    if (m_font_set) {
+        list->setListFont(m_font);
+    }
+    if (m_delegate) {
+        list->setDelegate(m_delegate);
+    }
+    for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
+        list->registerImage(it.key(), it.value());
+    }
+    wid = list;
 }
 void list_box_impl::SetFont(const Font *font)
 {
-	const font_and_character_set *pfacs = as_font_and_character_set(font);
-	if (pfacs && pfacs->m_font) {
-		m_font     = *(pfacs->m_font);
-		m_font_set = true;
-	}
-	quick_list_box_item *list = GetWidget();
-	if (list && m_font_set) {
-		list->setListFont(m_font);
-	}
+    const font_and_character_set *pfacs = as_font_and_character_set(font);
+    if (pfacs && pfacs->m_font) {
+        m_font     = *(pfacs->m_font);
+        m_font_set = true;
+    }
+    quick_list_box_item *list = GetWidget();
+    if (list && m_font_set) {
+        list->setListFont(m_font);
+    }
 }
 void list_box_impl::SetAverageCharWidth(int /*width*/) {}
 
 void list_box_impl::SetVisibleRows(int rows)
 {
-	m_visible_rows = rows;
-	if (quick_list_box_item *list = GetWidget()) {
-		list->setVisibleRowCount(rows);
-	}
+    m_visible_rows = rows;
+    if (quick_list_box_item *list = GetWidget()) {
+        list->setVisibleRowCount(rows);
+    }
 }
 
 int list_box_impl::GetVisibleRows() const
 {
-	return m_visible_rows;
+    return m_visible_rows;
 }
 PRectangle list_box_impl::GetDesiredRect()
 {
-	quick_list_box_item *list = GetWidget();
-	return list ? list->desiredRect() : PRectangle(0, 0, 0, 0);
+    quick_list_box_item *list = GetWidget();
+    return list ? list->desiredRect() : PRectangle(0, 0, 0, 0);
 }
 int list_box_impl::CaretFromEdge()
 {
-	quick_list_box_item *list = GetWidget();
-	return list ? list->caretFromEdge() : 0;
+    quick_list_box_item *list = GetWidget();
+    return list ? list->caretFromEdge() : 0;
 }
 void list_box_impl::Clear() noexcept
 {
-	if (quick_list_box_item *list = GetWidget()) {
-		list->clearItems();
-	}
+    if (quick_list_box_item *list = GetWidget()) {
+        list->clearItems();
+    }
 }
 void list_box_impl::Append(char *s, int type)
 {
-	if (quick_list_box_item *list = GetWidget()) {
-		list->appendItem(m_unicode_mode ? QString::fromUtf8(s) : QString::fromLocal8Bit(s), type);
-	}
+    if (quick_list_box_item *list = GetWidget()) {
+        list->appendItem(m_unicode_mode ? QString::fromUtf8(s) : QString::fromLocal8Bit(s), type);
+    }
 }
 int list_box_impl::Length()
 {
-	quick_list_box_item *list = GetWidget();
-	return list ? list->count() : 0;
+    quick_list_box_item *list = GetWidget();
+    return list ? list->count() : 0;
 }
 void list_box_impl::Select(int n)
 {
-	if (quick_list_box_item *list = GetWidget()) {
-		list->setSelection(n, true);
-	}
+    if (quick_list_box_item *list = GetWidget()) {
+        list->setSelection(n, true);
+    }
 }
 int list_box_impl::GetSelection()
 {
-	quick_list_box_item *list = GetWidget();
-	return list ? list->currentSelection() : -1;
+    quick_list_box_item *list = GetWidget();
+    return list ? list->currentSelection() : -1;
 }
 int list_box_impl::Find(const char *prefix)
 {
-	quick_list_box_item *list = GetWidget();
-	return list ? list->findPrefix(m_unicode_mode ? QString::fromUtf8(prefix) : QString::fromLocal8Bit(prefix)) : -1;
+    quick_list_box_item *list = GetWidget();
+    return list ? list->findPrefix(m_unicode_mode ? QString::fromUtf8(prefix) : QString::fromLocal8Bit(prefix)) : -1;
 }
 std::string list_box_impl::GetValue(int n)
 {
-	quick_list_box_item *list = GetWidget();
-	QString str               = list ? list->valueAt(n) : QString();
-	QByteArray bytes          = m_unicode_mode ? str.toUtf8() : str.toLocal8Bit();
-	return std::string(bytes.constData());
+    quick_list_box_item *list = GetWidget();
+    QString str               = list ? list->valueAt(n) : QString();
+    QByteArray bytes          = m_unicode_mode ? str.toUtf8() : str.toLocal8Bit();
+    return std::string(bytes.constData());
 }
 
 void list_box_impl::RegisterQPixmapImage(int type, const QPixmap &pm)
 {
-	m_images[type]            = pm;
-	quick_list_box_item *list = GetWidget();
-	if (list) {
-		list->registerImage(type, pm);
-	}
+    m_images[type]            = pm;
+    quick_list_box_item *list = GetWidget();
+    if (list) {
+        list->registerImage(type, pm);
+    }
 }
 
 void list_box_impl::RegisterImage(int type, const char *xpmData)
@@ -1636,63 +1636,63 @@ void list_box_impl::RegisterImage(int type, const char *xpmData)
 
 void list_box_impl::RegisterRGBAImage(int type, int width, int height, const unsigned char *pixelsImage)
 {
-	std::vector<unsigned char> imageBytes = ImageByteSwapped(width, height, pixelsImage);
-	QImage image(&imageBytes[0], width, height, QImage::Format_ARGB32);
-	RegisterQPixmapImage(type, QPixmap::fromImage(image));
+    std::vector<unsigned char> imageBytes = ImageByteSwapped(width, height, pixelsImage);
+    QImage image(&imageBytes[0], width, height, QImage::Format_ARGB32);
+    RegisterQPixmapImage(type, QPixmap::fromImage(image));
 }
 
 void list_box_impl::ClearRegisteredImages()
 {
-	m_images.clear();
-	if (quick_list_box_item *list = GetWidget()) {
-		list->clearImages();
-	}
+    m_images.clear();
+    if (quick_list_box_item *list = GetWidget()) {
+        list->clearImages();
+    }
 }
 void list_box_impl::SetDelegate(IListBoxDelegate *delegate)
 {
-	m_delegate = delegate;
-	if (quick_list_box_item *list = GetWidget()) {
-		list->setDelegate(delegate);
-	}
+    m_delegate = delegate;
+    if (quick_list_box_item *list = GetWidget()) {
+        list->setDelegate(delegate);
+    }
 }
 void list_box_impl::SetList(const char *list, char separator, char typesep)
 {
-	// This method is *not* platform dependent.
-	// It is borrowed from the GTK implementation.
-	Clear();
-	size_t count = strlen(list) + 1;
-	std::vector<char> words(list, list+count);
-	char *startword = &words[0];
-	char *numword   = nullptr;
-	int i           = 0;
-	for (; words[i]; i++) {
-		if (words[i] == separator) {
-			words[i] = '\0';
-			if (numword)
-				*numword = '\0';
-			Append(startword, numword?atoi(numword + 1):-1);
-			startword = &words[0] + i + 1;
-			numword   = nullptr;
-		} else if (words[i] == typesep) {
-			numword = &words[0] + i;
-		}
-	}
-	if (startword) {
-		if (numword)
-			*numword = '\0';
-		Append(startword, numword?atoi(numword + 1):-1);
-	}
+    // This method is *not* platform dependent.
+    // It is borrowed from the GTK implementation.
+    Clear();
+    size_t count = strlen(list) + 1;
+    std::vector<char> words(list, list+count);
+    char *startword = &words[0];
+    char *numword   = nullptr;
+    int i           = 0;
+    for (; words[i]; i++) {
+        if (words[i] == separator) {
+            words[i] = '\0';
+            if (numword)
+                *numword = '\0';
+            Append(startword, numword?atoi(numword + 1):-1);
+            startword = &words[0] + i + 1;
+            numword   = nullptr;
+        } else if (words[i] == typesep) {
+            numword = &words[0] + i;
+        }
+    }
+    if (startword) {
+        if (numword)
+            *numword = '\0';
+        Append(startword, numword?atoi(numword + 1):-1);
+    }
 }
 void list_box_impl::SetOptions(ListOptions options)
 {
-	m_options = options;
-	if (quick_list_box_item *list = GetWidget()) {
-		list->setOptions(m_options);
-	}
+    m_options = options;
+    if (quick_list_box_item *list = GetWidget()) {
+        list->setOptions(m_options);
+    }
 }
 quick_list_box_item *list_box_impl::GetWidget() const noexcept
 {
-	return static_cast<quick_list_box_item *>(wid);
+    return static_cast<quick_list_box_item *>(wid);
 }
 
 ListBox::ListBox() noexcept  = default;
@@ -1700,95 +1700,95 @@ ListBox::~ListBox() noexcept = default;
 
 std::unique_ptr<ListBox> ListBox::Allocate()
 {
-	return std::make_unique<list_box_impl>();
+    return std::make_unique<list_box_impl>();
 }
 //----------------------------------------------------------------------
 Menu::Menu() noexcept : mid(nullptr) {}
 void Menu::CreatePopUp()
 {
-	Destroy();
-	mid = new QList<QPair<QString, QPair<int, bool>>>();	// text, menuId, enabled
+    Destroy();
+    mid = new QList<QPair<QString, QPair<int, bool>>>();    // text, menuId, enabled
 }
 
 void Menu::Destroy() noexcept
 {
-	if (mid) {
-		QList<QPair<QString, QPair<int, bool>>> *menu = static_cast<QList<QPair<QString, QPair<int, bool>>> *>(mid);
-		delete menu;
-	}
-	mid = nullptr;
+    if (mid) {
+        QList<QPair<QString, QPair<int, bool>>> *menu = static_cast<QList<QPair<QString, QPair<int, bool>>> *>(mid);
+        delete menu;
+    }
+    mid = nullptr;
 }
 
 void Menu::Show(Point pt, const Window & w)
 {
-	QList<QPair<QString, QPair<int, bool>>> *menu = static_cast<QList<QPair<QString, QPair<int, bool>>> *>(mid);
+    QList<QPair<QString, QPair<int, bool>>> *menu = static_cast<QList<QPair<QString, QPair<int, bool>>> *>(mid);
     ProcessScintillaContextMenu(pt, w, *menu);
-	Destroy();
+    Destroy();
 }
 
 //----------------------------------------------------------------------
 
 ColourRGBA Platform::Chrome()
 {
-	QColor c(Qt::gray);
-	return ColourRGBA(c.red(), c.green(), c.blue());
+    QColor c(Qt::gray);
+    return ColourRGBA(c.red(), c.green(), c.blue());
 }
 
 ColourRGBA Platform::ChromeHighlight()
 {
-	QColor c(Qt::lightGray);
-	return ColourRGBA(c.red(), c.green(), c.blue());
+    QColor c(Qt::lightGray);
+    return ColourRGBA(c.red(), c.green(), c.blue());
 }
 
 const char *Platform::DefaultFont()
 {
-	static char fontNameDefault[200] = "";
-	if (!fontNameDefault[0]) {
-		QFont font          = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-		const auto fontName = font.family().toUtf8();
-		std::snprintf(fontNameDefault, sizeof(fontNameDefault), "%s", fontName.constData());
-	}
-	return fontNameDefault;
+    static char fontNameDefault[200] = "";
+    if (!fontNameDefault[0]) {
+        QFont font          = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        const auto fontName = font.family().toUtf8();
+        std::snprintf(fontNameDefault, sizeof(fontNameDefault), "%s", fontName.constData());
+    }
+    return fontNameDefault;
 }
 
 int Platform::DefaultFontSize()
 {
-	QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-	return font.pointSize();
+    QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    return font.pointSize();
 }
 
 unsigned int Platform::DoubleClickTime()
 {
-	return QGuiApplication::styleHints()->mouseDoubleClickInterval();
+    return QGuiApplication::styleHints()->mouseDoubleClickInterval();
 }
 
 void Platform::DebugDisplay(const char *s) noexcept
 {
-	qWarning("Scintilla: %s", s);
+    qWarning("Scintilla: %s", s);
 }
 
 void Platform::DebugPrintf(const char *format, ...) noexcept
 {
-	char buffer[2000];
-	va_list pArguments{};
-	va_start(pArguments, format);
-	std::vsnprintf(buffer, sizeof(buffer), format, pArguments);
-	buffer[sizeof(buffer) - 1] = '\0';
-	va_end(pArguments);
-	Platform::DebugDisplay(buffer);
+    char buffer[2000];
+    va_list pArguments{};
+    va_start(pArguments, format);
+    std::vsnprintf(buffer, sizeof(buffer), format, pArguments);
+    buffer[sizeof(buffer) - 1] = '\0';
+    va_end(pArguments);
+    Platform::DebugDisplay(buffer);
 }
 
 bool Platform::ShowAssertionPopUps(bool /*assertionPopUps*/) noexcept
 {
-	return false;
+    return false;
 }
 
 void Platform::Assert(const char *c, const char *file, int line) noexcept
 {
-	char buffer[2000];
-	std::snprintf(buffer, sizeof(buffer), "Assertion [%s] failed at %s %d", c, file, line);
-	std::strncat(buffer, "\n", sizeof(buffer) - std::strlen(buffer) - 1);
-	Platform::DebugDisplay(buffer);
+    char buffer[2000];
+    std::snprintf(buffer, sizeof(buffer), "Assertion [%s] failed at %s %d", c, file, line);
+    std::strncat(buffer, "\n", sizeof(buffer) - std::strlen(buffer) - 1);
+    Platform::DebugDisplay(buffer);
 }
 
 }
