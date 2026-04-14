@@ -46,12 +46,12 @@ QRectF rect_from_capture(double left, double top, double right, double bottom)
 text_direction direction_from_capture(Capture_text_direction direction)
 {
     switch (direction) {
-    case Capture_text_direction::left_to_right:
-        return text_direction::left_to_right;
-    case Capture_text_direction::right_to_left:
-        return text_direction::right_to_left;
-    case Capture_text_direction::mixed:
-        return text_direction::mixed;
+        case Capture_text_direction::left_to_right:
+            return text_direction::left_to_right;
+        case Capture_text_direction::right_to_left:
+            return text_direction::right_to_left;
+        case Capture_text_direction::mixed:
+            return text_direction::mixed;
     }
 
     return text_direction::left_to_right;
@@ -280,7 +280,7 @@ public:
         primitive.bottom = mark.bottom;
         primitive.mid_y  = mark.mid_y;
         primitive.rgba   = mark.rgba;
-        primitive.kind = (mark.kind == Whitespace_mark_kind::tab_arrow)
+        primitive.kind   = (mark.kind == Whitespace_mark_kind::tab_arrow)
             ? whitespace_mark_kind::tab_arrow
             : whitespace_mark_kind::space_dot;
         m_frame.whitespace_marks.push_back(std::move(primitive));
@@ -294,7 +294,7 @@ public:
         primitive.right  = underline.right;
         primitive.bottom = underline.bottom;
         primitive.rgba   = underline.rgba;
-        primitive.kind = (underline.kind == Decoration_kind::hotspot)
+        primitive.kind   = (underline.kind == Decoration_kind::hotspot)
             ? decoration_kind::hotspot
             : decoration_kind::style_underline;
         m_frame.decoration_underlines.push_back(std::move(primitive));
@@ -364,7 +364,9 @@ void ScintillaQuickCore::selectCurrentWord()
 
     if (pos < 0) {
         pos = 0;
-    } else if (pos >= max) {
+    }
+    else
+    if (pos >= max) {
         pos = max - 1;
     }
 
@@ -1120,7 +1122,8 @@ void ScintillaQuickCore::ClaimSelection()
             SelectionText st;
             CopySelectionRange(&st);
             CopyToModeClipboard(st, QClipboard::Selection);
-        } else {
+        }
+        else {
             primarySelection = false;
         }
     }
@@ -1130,17 +1133,18 @@ void ScintillaQuickCore::NotifyChange()
 {
     emit notifyChange();
     emit command(
-            Platform::LongFromTwoShorts(GetCtrlID(), SCEN_CHANGE),
-            reinterpret_cast<sptr_t>(wMain.GetID()));
+        Platform::LongFromTwoShorts(GetCtrlID(), SCEN_CHANGE),
+        reinterpret_cast<sptr_t>(wMain.GetID()));
 }
 
 void ScintillaQuickCore::NotifyFocus(bool focus)
 {
     if (commandEvents) {
         emit command(
-                Platform::LongFromTwoShorts
-                        (GetCtrlID(), focus ? SCEN_SETFOCUS : SCEN_KILLFOCUS),
-                reinterpret_cast<sptr_t>(wMain.GetID()));
+            Platform::LongFromTwoShorts(
+                GetCtrlID(),
+                focus ? SCEN_SETFOCUS : SCEN_KILLFOCUS),
+            reinterpret_cast<sptr_t>(wMain.GetID()));
     }
 
     Editor::NotifyFocus(focus);
@@ -1229,7 +1233,8 @@ bool ScintillaQuickCore::ChangeIdle(bool on)
             timer->start(0);
             idler.idlerID = timer;
         }
-    } else {
+    }
+    else {
         // Stop idler, if it's running.
         if (idler.state) {
             idler.state = false;
@@ -1397,7 +1402,9 @@ void ScintillaQuickCore::CreateCallTipWindow(PRectangle rc)
 {
 
     if (!ct.wCallTip.Created()) {
-        QQuickItem *parentItem = m_owner->window() ? m_owner->window()->contentItem() : static_cast<QQuickItem *>(m_owner);
+        QQuickItem *parentItem = m_owner->window()
+            ? m_owner->window()->contentItem()
+            : static_cast<QQuickItem *>(m_owner);
         QQuickItem *pCallTip   = new call_tip_item(&ct, parentItem);
         ct.wCallTip            = pCallTip;
         pCallTip->setPosition(QPointF(rc.left, rc.top));
@@ -1410,7 +1417,8 @@ void ScintillaQuickCore::AddToPopUp(const char *label,
                              int cmd,
                              bool enabled)
 {
-    QList<QPair<QString, QPair<int, bool>>> *menu = static_cast<QList<QPair<QString, QPair<int, bool>>> *>(popup.GetID());
+    QList<QPair<QString, QPair<int, bool>>> *menu =
+        static_cast<QList<QPair<QString, QPair<int, bool>>> *>(popup.GetID());
 
     QPair<QString, QPair<int, bool>> item(label, QPair<int, bool>(cmd, enabled));
     menu->append(item);
@@ -1421,42 +1429,44 @@ sptr_t ScintillaQuickCore::WndProc(Message iMessage, uptr_t wParam, sptr_t lPara
     try {
         switch (iMessage) {
 
-        case Message::SetBidirectional:
-            bidirectional = static_cast<Scintilla::Bidirectional>(wParam);
-            InvalidateStyleData();
-            break;
+            case Message::SetBidirectional:
+                bidirectional = static_cast<Scintilla::Bidirectional>(wParam);
+                InvalidateStyleData();
+                break;
 
-        case Message::SetIMEInteraction:
-            // Only inline IME supported on Qt
-            break;
+            case Message::SetIMEInteraction:
+                // Only inline IME supported on Qt
+                break;
 
-        case Message::GrabFocus:
-            m_owner->setFocus(true);
-            m_owner->forceActiveFocus(Qt::OtherFocusReason);
-            break;
+            case Message::GrabFocus:
+                m_owner->setFocus(true);
+                m_owner->forceActiveFocus(Qt::OtherFocusReason);
+                break;
 
-        case Message::GetDirectFunction:
-            return reinterpret_cast<sptr_t>(DirectFunction);
+            case Message::GetDirectFunction:
+                return reinterpret_cast<sptr_t>(DirectFunction);
 
-        case Message::GetDirectStatusFunction:
-            return reinterpret_cast<sptr_t>(DirectStatusFunction);
+            case Message::GetDirectStatusFunction:
+                return reinterpret_cast<sptr_t>(DirectStatusFunction);
 
-        case Message::GetDirectPointer:
-            return reinterpret_cast<sptr_t>(this);
+            case Message::GetDirectPointer:
+                return reinterpret_cast<sptr_t>(this);
 
-        case Message::SetRectangularSelectionModifier:
-            m_rectangular_selection_modifier = static_cast<int>(wParam);
-            break;
+            case Message::SetRectangularSelectionModifier:
+                m_rectangular_selection_modifier = static_cast<int>(wParam);
+                break;
 
-        case Message::GetRectangularSelectionModifier:
-            return m_rectangular_selection_modifier;
+            case Message::GetRectangularSelectionModifier:
+                return m_rectangular_selection_modifier;
 
-        default:
-            return ScintillaBase::WndProc(iMessage, wParam, lParam);
+            default:
+                return ScintillaBase::WndProc(iMessage, wParam, lParam);
         }
-    } catch (std::bad_alloc &) {
+    }
+    catch (std::bad_alloc &) {
         errorStatus = Status::BadAlloc;
-    } catch (...) {
+    }
+    catch (...) {
         errorStatus = Status::Failure;
     }
     return 0;
@@ -1524,8 +1534,7 @@ void ScintillaQuickCore::PartialPaintQml(const PRectangle & rect, QPainter *pain
 
 void ScintillaQuickCore::DragEnter(const Point &point)
 {
-    SetDragPosition(SPositionFromLocation(point,
-                          false, false, UserVirtualSpace()));
+    SetDragPosition(SPositionFromLocation(point, false, false, UserVirtualSpace()));
 }
 
 void ScintillaQuickCore::DragMove(const Point &point)
@@ -1545,8 +1554,7 @@ void ScintillaQuickCore::Drop(const Point &point, const QMimeData *data, bool mo
     QByteArray bytes = BytesForDocument(text);
     int len          = bytes.length();
 
-    SelectionPosition movePos = SPositionFromLocation(point,
-                false, false, UserVirtualSpace());
+    SelectionPosition movePos = SPositionFromLocation(point, false, false, UserVirtualSpace());
 
     DropAt(movePos, bytes, len, move, rectangular);
 }
@@ -1578,7 +1586,8 @@ void ScintillaQuickCore::timerEvent(QTimerEvent *event)
                 const bool horizontal_scroll_changed = xOffset != previous_x_offset;
                 if (vertical_scroll_changed || horizontal_scroll_changed) {
                     m_owner->request_scene_graph_update(true, false, vertical_scroll_changed);
-                } else {
+                }
+                else {
                     m_owner->request_scene_graph_update();
                 }
             }

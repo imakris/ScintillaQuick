@@ -106,7 +106,8 @@ class scintillaquick_validation_access;
 // In this modus the scintilla editor control runs alway with a (maximal)
 // surface area to show the control completely. Rendering is handled through the
 // Qt Quick scene graph in updatePaintNode().
-class SCINTILLAQUICK_EXPORT ScintillaQuickItem : public QQuickItem {
+class SCINTILLAQUICK_EXPORT ScintillaQuickItem : public QQuickItem
+{
     Q_OBJECT
 
     Q_PROPERTY(QString text READ getText WRITE setText NOTIFY textChanged)
@@ -143,7 +144,8 @@ public:
     Q_INVOKABLE void scrollColumn(int deltaColumns);
     Q_INVOKABLE void enableUpdate(bool enable);
     Q_INVOKABLE virtual void cmdContextMenu(int menuID);
-    Q_INVOKABLE bool startProfilingSession(const QString &outputDirectory = QString(), double durationSeconds = 10.0);
+    Q_INVOKABLE bool startProfilingSession(
+	    const QString &outputDirectory = QString(), double durationSeconds = 10.0);
     Q_INVOKABLE void stopProfilingSession();
     Q_INVOKABLE bool profilingActive() const;
     void request_scene_graph_update(
@@ -181,9 +183,19 @@ signals:
     void key(int key);
     void doubleClick(Scintilla::Position position, Scintilla::Position line);
     void updateUi(Scintilla::Update updated);
-    void modified(Scintilla::ModificationFlags type, Scintilla::Position position, Scintilla::Position length, Scintilla::Position linesAdded,
-              const QByteArray &text, Scintilla::Position line, Scintilla::FoldLevel foldNow, Scintilla::FoldLevel foldPrev);
-    void macroRecord(Scintilla::Message message, Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
+    void modified(
+        Scintilla::ModificationFlags type,
+        Scintilla::Position position,
+        Scintilla::Position length,
+        Scintilla::Position linesAdded,
+        const QByteArray& text,
+        Scintilla::Position line,
+        Scintilla::FoldLevel foldNow,
+        Scintilla::FoldLevel foldPrev);
+    void macroRecord(
+        Scintilla::Message message,
+        Scintilla::uptr_t wParam,
+        Scintilla::sptr_t lParam);
     void marginClicked(Scintilla::Position position, Scintilla::KeyMod modifiers, int margin);
     void textAreaClicked(Scintilla::Position line, int modifiers);
     void needShown(Scintilla::Position position, Scintilla::Position length);

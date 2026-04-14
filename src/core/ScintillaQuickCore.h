@@ -80,7 +80,8 @@ class ScintillaQuickItem;
 
 namespace Scintilla::Internal {
 
-class ScintillaQuickCore : public QObject, public ScintillaBase {
+class ScintillaQuickCore : public QObject, public ScintillaBase
+{
     Q_OBJECT
 
 public:
@@ -94,7 +95,7 @@ public:
         bool static_content_dirty           = true,
         bool ensure_styled                  = true,
         bool scrolling                      = false,
-        int extra_capture_lines             = 0);
+        int  extra_capture_lines            = 0);
 
     // Called from `~ScintillaQuickItem()` before the derived
     // `ScintillaQuickItem` subobject finishes destructing. Stops all
@@ -156,7 +157,7 @@ private:
     void NotifyFocus(bool focus) override;
     void NotifyParent(Scintilla::NotificationData scn) override;
     void NotifyURIDropped(const char *uri);
-    int timers[static_cast<size_t>(TickReason::dwell)+1]{};
+    int  timers[static_cast<size_t>(TickReason::dwell)+1]{};
     bool FineTickerRunning(TickReason reason) override;
     void FineTickerStart(TickReason reason, int millis, int tolerance) override;
     void CancelTimers();
@@ -178,12 +179,13 @@ public:
     sptr_t WndProc(Scintilla::Message iMessage, uptr_t wParam, sptr_t lParam) override;
     sptr_t DefWndProc(Scintilla::Message iMessage, uptr_t wParam, sptr_t lParam) override;
 private:
-    static sptr_t DirectFunction(sptr_t ptr,
-                     unsigned int iMessage, uptr_t wParam, sptr_t lParam);
-    static sptr_t DirectStatusFunction(sptr_t ptr,
-                     unsigned int iMessage, uptr_t wParam, sptr_t lParam, int *pStatus);
+    static sptr_t DirectFunction(
+        sptr_t ptr, unsigned int iMessage, uptr_t wParam, sptr_t lParam);
+    static sptr_t DirectStatusFunction(
+        sptr_t ptr, unsigned int iMessage, uptr_t wParam, sptr_t lParam, int *pStatus);
     struct style_attributes;
-    captured_frame capture_current_frame(bool static_content_dirty, bool ensure_styled, bool scrolling, int extra_capture_lines = 0);
+    captured_frame capture_current_frame(
+        bool static_content_dirty, bool ensure_styled, bool scrolling, int extra_capture_lines = 0);
     render_frame render_frame_from_capture(const captured_frame &capture_frame) const;
     style_attributes style_attributes_for(int style) const;
 
@@ -219,12 +221,12 @@ private:
     // if `ChangeIdle(false)` is somehow missed.
     std::unique_ptr<QTimer> m_idle_timer;
 
-    int m_v_max, m_h_max;   // Scroll bar maximums.
-    int m_v_page, m_h_page; // Scroll bar page sizes.
+    int  m_v_max,  m_h_max;   // Scroll bar maximums.
+    int  m_v_page, m_h_page; // Scroll bar page sizes.
 
     bool m_have_mouse_capture;
     bool m_drag_was_dropped;
-    int m_rectangular_selection_modifier;
+    int  m_rectangular_selection_modifier;
 
     QPainter *m_current_painter;  // temporary variable for paint() handling
 

@@ -345,14 +345,14 @@ QColor margin_background_color_for(
     }
 
     switch (margin_type) {
-    case SC_MARGIN_BACK:
-        return style_attributes_for(item, style_cache, STYLE_DEFAULT).background;
-    case SC_MARGIN_FORE:
-        return style_attributes_for(item, style_cache, STYLE_DEFAULT).foreground;
-    case SC_MARGIN_COLOUR:
-        return color_from_scintilla(item->send(SCI_GETMARGINBACKN, margin));
-    default:
-        return style_attributes_for(item, style_cache, STYLE_LINENUMBER).background;
+        case SC_MARGIN_BACK:
+            return style_attributes_for(item, style_cache, STYLE_DEFAULT).background;
+        case SC_MARGIN_FORE:
+            return style_attributes_for(item, style_cache, STYLE_DEFAULT).foreground;
+        case SC_MARGIN_COLOUR:
+            return color_from_scintilla(item->send(SCI_GETMARGINBACKN, margin));
+        default:
+            return style_attributes_for(item, style_cache, STYLE_LINENUMBER).background;
     }
 }
 
@@ -485,29 +485,29 @@ ScintillaQuickItem::ScintillaQuickItem(QQuickItem *parent)
 #ifndef PLAT_QT_QML
     // scrollbars are handled by the QML ScrollView outside this class
     connect(verticalScrollBar(), SIGNAL(valueChanged(int)),
-            this, SLOT(scrollVertical(int)));
+            this,                SLOT(scrollVertical(int)));
     connect(horizontalScrollBar(), SIGNAL(valueChanged(int)),
-            this, SLOT(scrollHorizontal(int)));
+            this,                  SLOT(scrollHorizontal(int)));
 #endif
 
     // Connect pass-through signals.
     connect(m_core, SIGNAL(horizontalRangeChanged(int,int)),
-            this, SIGNAL(horizontalRangeChanged(int,int)));
+            this,   SIGNAL(horizontalRangeChanged(int,int)));
     connect(m_core, SIGNAL(verticalRangeChanged(int,int)),
-            this, SIGNAL(verticalRangeChanged(int,int)));
+            this,   SIGNAL(verticalRangeChanged(int,int)));
     connect(m_core, SIGNAL(horizontalScrolled(int)),
-            this, SIGNAL(horizontalScrolled(int)));
+            this,   SIGNAL(horizontalScrolled(int)));
     connect(m_core, SIGNAL(verticalScrolled(int)),
-            this, SIGNAL(verticalScrolled(int)));
+            this,   SIGNAL(verticalScrolled(int)));
 
     connect(m_core, SIGNAL(notifyChange()),
             this, SIGNAL(notifyChange()));
 
     connect(m_core, SIGNAL(command(Scintilla::uptr_t,Scintilla::sptr_t)),
-        this, SLOT(event_command(Scintilla::uptr_t,Scintilla::sptr_t)));
+            this,   SLOT(event_command(Scintilla::uptr_t,Scintilla::sptr_t)));
 
     connect(m_core, SIGNAL(aboutToCopy(QMimeData*)),
-        this, SIGNAL(aboutToCopy(QMimeData*)));
+            this,   SIGNAL(aboutToCopy(QMimeData*)));
 
 #ifdef PLAT_QT_QML
     connect(m_core, SIGNAL(cursorPositionChanged()), this, SIGNAL(cursorPositionChanged()));   // needed to update markers on android platform
@@ -700,7 +700,8 @@ void ScintillaQuickItem::stopProfilingSession()
     if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
         write_ok = file.commit();
-    } else {
+    }
+    else {
         qWarning().noquote()
             << "ScintillaQuick profiling failed to open report file."
             << " path=" << report_path;
@@ -710,7 +711,8 @@ void ScintillaQuickItem::stopProfilingSession()
         qWarning().noquote()
             << "ScintillaQuick profiling finished."
             << " report_path=" << report_path;
-    } else {
+    }
+    else {
         qWarning().noquote()
             << "ScintillaQuick profiling finished without report."
             << " report_path=" << report_path;
@@ -898,7 +900,8 @@ void ScintillaQuickItem::wheelEvent(QWheelEvent *event)
             // Number of steps/line is ignored, we just care if sizing up or down
             if (wheelEventYDelta(event) > 0) {
                 m_core->KeyCommand(Message::ZoomIn);
-            } else {
+            }
+            else {
                 m_core->KeyCommand(Message::ZoomOut);
             }
             if (m_render_data) {
@@ -911,7 +914,8 @@ void ScintillaQuickItem::wheelEvent(QWheelEvent *event)
 #ifndef PLAT_QT_QML
             if (verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOff) {
                 event->ignore();
-            } else {
+            }
+            else {
 #endif
 #ifdef PLAT_QT_QML
                 // Scroll
@@ -1063,7 +1067,8 @@ void ScintillaQuickItem::keyPressEvent(QKeyEvent *event)
             QByteArray utext = m_core->BytesForDocument(text);
             m_core->InsertCharacter(std::string_view(utext.data(), utext.size()), CharacterSource::DirectInput);
             view_changed = true;
-        } else {
+        }
+        else {
             event->ignore();
         }
     }
@@ -1236,7 +1241,8 @@ void ScintillaQuickItem::mouseMoveEvent(QMouseEvent *event)
     if (vertical_scroll_changed || horizontal_scroll_changed) {
         syncQuickViewProperties();
         request_scene_graph_update(true, false, vertical_scroll_changed);
-    } else {
+    }
+    else {
         request_scene_graph_update();
     }
 
@@ -1264,12 +1270,15 @@ void ScintillaQuickItem::dragEnterEvent(QDragEnterEvent *event)
 {
     if (event->mimeData()->hasUrls()) {
         event->acceptProposedAction();
-    } else if (event->mimeData()->hasText()) {
+    }
+    else
+    if (event->mimeData()->hasText()) {
         event->acceptProposedAction();
 
         Point point = PointFromQPoint(event->pos());
         m_core->DragEnter(point);
-    } else {
+    }
+    else {
         event->ignore();
     }
 }
@@ -1283,12 +1292,15 @@ void ScintillaQuickItem::dragMoveEvent(QDragMoveEvent *event)
 {
     if (event->mimeData()->hasUrls()) {
         event->acceptProposedAction();
-    } else if (event->mimeData()->hasText()) {
+    }
+    else
+    if (event->mimeData()->hasText()) {
         event->acceptProposedAction();
 
         Point point = PointFromQPoint(event->pos());
         m_core->DragMove(point);
-    } else {
+    }
+    else {
         event->ignore();
     }
 }
@@ -1298,14 +1310,17 @@ void ScintillaQuickItem::dropEvent(QDropEvent *event)
     if (event->mimeData()->hasUrls()) {
         event->acceptProposedAction();
         m_core->DropUrls(event->mimeData());
-    } else if (event->mimeData()->hasText()) {
+    }
+    else
+    if (event->mimeData()->hasText()) {
         event->acceptProposedAction();
 
         Point point = PointFromQPoint(event->pos());
         bool move = (event->source() == this &&
                  event->proposedAction() == Qt::MoveAction);
         m_core->Drop(point, event->mimeData(), move);
-    } else {
+    }
+    else {
         event->ignore();
     }
 }
@@ -1436,7 +1451,8 @@ void ScintillaQuickItem::inputMethodEvent(QInputMethodEvent *event)
             SelectionPosition newEnd(paraStart + a.start + a.length);
             if (newStart > newEnd) {
                 m_core->SetSelection(newEnd, newStart);
-            } else {
+            }
+            else {
                 m_core->SetSelection(newStart, newEnd);
             }
 
@@ -1450,7 +1466,8 @@ void ScintillaQuickItem::inputMethodEvent(QInputMethodEvent *event)
     bool initialCompose = false;
     if (m_core->pdoc->TentativeActive()) {
         m_core->pdoc->TentativeUndo();
-    } else {
+    }
+    else {
         // No tentative undo means start of this composition so
         // Fill in any virtual spaces.
         initialCompose = true;
@@ -1544,8 +1561,7 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery property, QVa
     }
 
     auto v = inputMethodQuery(property);
-    if (property == Qt::ImCursorRectangle || property == Qt::ImAnchorRectangle)
-    {
+    if (property == Qt::ImCursorRectangle || property == Qt::ImAnchorRectangle) {
         v = QVariant(v.toRectF().translated(textOffset));
     }
 
@@ -1570,8 +1586,7 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
         // see: QQuickTextControl::inputMethodQuery()
         case Qt::ImMaximumTextLength:
             return QVariant(); // No limit.
-        case Qt::ImAnchorRectangle:
-            {
+        case Qt::ImAnchorRectangle: {
                 SelectionPosition selStart = m_core->SelectionStart();
                 SelectionPosition selEnd   = m_core->SelectionEnd();
                 //Sci::Position ptStart = selStart.Position();
@@ -1583,10 +1598,9 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
                 int width  = send(SCI_GETCARETWIDTH);
                 int height = send(SCI_TEXTHEIGHT, line);
                 return QRect(ptEnd.x, ptEnd.y, width, height);
-            }
+        }
         // selection == Position <--> AnchorPosition
-        case Qt::ImAnchorPosition:
-            {
+        case Qt::ImAnchorPosition: {
                 //Sci::Position curPos = m_core->CurrentPosition();
                 SelectionPosition selStart = m_core->SelectionStart();
                 SelectionPosition selEnd   = m_core->SelectionEnd();
@@ -1595,15 +1609,13 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
 
                 int paraStart = m_core->pdoc->ParaUp(pos);
                 return (int)selEnd.Position() - paraStart;
-            }
-        case Qt::ImAbsolutePosition:
-            {
+        }
+        case Qt::ImAbsolutePosition: {
                 //Sci::Position curPos = m_core->CurrentPosition();
                 //return QVariant((int)curPos);
                 return QVariant((int)pos);
-            }
-        case Qt::ImTextAfterCursor:
-        {
+        }
+        case Qt::ImTextAfterCursor: {
             // from Qt::ImSurroundingText:
             int paraStart = m_core->pdoc->ParaUp(pos);
             int paraEnd   = m_core->pdoc->ParaDown(pos);
@@ -1621,8 +1633,7 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
 
             return m_core->StringFromDocument(buffer.constData());
         }
-        case Qt::ImTextBeforeCursor:
-        {
+        case Qt::ImTextBeforeCursor: {
             // from Qt::ImSurroundingText:
             int paraStart = m_core->pdoc->ParaUp(pos);
             int paraEnd   = m_core->pdoc->ParaDown(pos);
@@ -1641,8 +1652,7 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
             return m_core->StringFromDocument(buffer.constData());
         }
 #endif
-        case Qt::ImCursorRectangle:
-        {
+        case Qt::ImCursorRectangle: {
             const Scintilla::Position startPos = (m_preedit_pos >= 0) ? m_preedit_pos : pos;
             const Point pt                     = m_core->LocationFromPosition(startPos);
             const int width                    = static_cast<int>(send(SCI_GETCARETWIDTH));
@@ -1650,28 +1660,24 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
             return QRectF(pt.x, pt.y, width, height).toRect();
         }
 
-        case Qt::ImFont:
-        {
+        case Qt::ImFont: {
             const sptr_t style = send(SCI_GETSTYLEAT, pos);
             return font_for_style(this, static_cast<int>(style));
         }
 
-        case Qt::ImCursorPosition:
-        {
+        case Qt::ImCursorPosition: {
             const Scintilla::Position paraStart = m_core->pdoc->ParaUp(pos);
             return QVariant(static_cast<int>(pos - paraStart));
         }
 
-        case Qt::ImSurroundingText:
-        {
+        case Qt::ImSurroundingText: {
             const Scintilla::Position paraStart = m_core->pdoc->ParaUp(pos);
             const Scintilla::Position paraEnd   = m_core->pdoc->ParaDown(pos);
             const std::string buffer            = m_core->RangeText(paraStart, paraEnd);
             return m_core->StringFromDocument(buffer.c_str());
         }
 
-        case Qt::ImCurrentSelection:
-        {
+        case Qt::ImCurrentSelection: {
             QVarLengthArray<char,1024> buffer(send(SCI_GETSELTEXT));
             sends(SCI_GETSELTEXT, 0, buffer.data());
 
@@ -1687,24 +1693,21 @@ QVariant ScintillaQuickItem::inputMethodQuery(Qt::InputMethodQuery query) const
 
 void ScintillaQuickItem::touchEvent(QTouchEvent *event)
 {
-    if(m_core->pdoc->IsReadOnly())
-    {
+    if(m_core->pdoc->IsReadOnly()) {
         //event->ignore();        // --> transformiert touchEvents in mouseEvents !!!
         return;
     }
 
     forceActiveFocus();
 
-    if( event->touchPointStates() == Qt::TouchPointPressed && event->touchPoints().count()>0 )
-    {
+    if( event->touchPointStates() == Qt::TouchPointPressed && event->touchPoints().count()>0 ) {
         m_last_touch_press_time = m_elapsed_timer.elapsed();
         cursorChangedUpdateMarker();
     }
-    else if( event->touchPointStates() == Qt::TouchPointReleased && event->touchPoints().count()>0 )
-    {
+    else
+    if( event->touchPointStates() == Qt::TouchPointReleased && event->touchPoints().count()>0 ) {
         // is ths a short touch (m_elapsed_timer between press and release < 100ms) ?
-        if(m_last_touch_press_time>=0 && (m_elapsed_timer.elapsed()-m_last_touch_press_time)<100)
-        {
+        if(m_last_touch_press_time>=0 && (m_elapsed_timer.elapsed()-m_last_touch_press_time)<100) {
             QTouchEvent::TouchPoint point = event->touchPoints().first();
             QPoint mousePressedPoint      = point.pos().toPoint();
             Point scintillaPoint          = PointFromQPoint(mousePressedPoint);
@@ -1735,8 +1738,7 @@ void ScintillaQuickItem::touchEvent(QTouchEvent *event)
             cursorChangedUpdateMarker();
         }
     }
-    else
-    {
+    else {
         QQuickItem::touchEvent(event);
         return;
     }
@@ -1884,14 +1886,18 @@ void ScintillaQuickItem::build_render_snapshot()
     if (can_reuse_vertical_scroll) {
         frame = m_render_data->frame;
         translate_render_frame(frame, -static_cast<qreal>(scroll_delta_lines * line_height));
-    } else if (overlay_only_capture && m_core) {
+    }
+    else
+    if (overlay_only_capture && m_core) {
         frame = m_core->current_render_frame(
             nullptr,
             false,
             false,
             false,
             0);
-    } else if (m_core) {
+    }
+    else
+    if (m_core) {
         frame = m_core->current_render_frame(
             nullptr,
             static_content_dirty,
@@ -2048,7 +2054,9 @@ void ScintillaQuickItem::notifyParent(NotificationData scn)
 
             if (scn.linesAdded != 0) {
                 emit linesAdded(scn.linesAdded);
-            } else if (firstLineAdded) {
+            }
+            else
+            if (firstLineAdded) {
                 emit linesAdded(added ? 1 : -1);
             }
 
@@ -2425,8 +2433,9 @@ void ScintillaQuickItem::setStylesFont(const QFont &f, int style)
     // Tie the font settings of the default style to that of style 0 (the style
     // conventionally used for whitespace by lexers).  This is needed so that
     // fold marks, indentations, edge columns etc are set properly.
-    if (style == 0)
+    if (style == 0) {
         setStylesFont(f, STYLE_DEFAULT);
+    }
 }
 
 void ScintillaQuickItem::cursorChangedUpdateMarker()

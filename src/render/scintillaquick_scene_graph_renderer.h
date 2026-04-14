@@ -12,12 +12,14 @@ namespace Scintilla::Internal {
 
 struct render_frame;
 
-struct gutter_band {
+struct gutter_band
+{
     QRectF rect;
     QColor color;
 };
 
-struct render_snapshot {
+struct render_snapshot
+{
     QSizeF item_size;
     QColor background;
     std::vector<gutter_band> gutter_bands;

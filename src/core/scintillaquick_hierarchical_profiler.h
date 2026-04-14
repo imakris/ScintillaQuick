@@ -1,3 +1,6 @@
+// Copyright (c) 2026, Ioannis Makris
+// Licensed under the BSD 2-Clause License, see LICENSE.md file for details.
+
 #pragma once
 
 #include <QJsonArray>
@@ -208,9 +211,9 @@ inline hierarchical_profiler *active_hierarchical_profiler()
 #define SCINTILLAQUICK_CONCAT_IMPL(a, b) a##b
 #define SCINTILLAQUICK_CONCAT(a, b) SCINTILLAQUICK_CONCAT_IMPL(a, b)
 
-#define SCINTILLAQUICK_PROFILE_SCOPE(profiler, name) \
+#define SCINTILLAQUICK_PROFILE_SCOPE(profiler, name)  \
     ::Scintilla::Internal::hierarchical_profile_scope \
-        SCINTILLAQUICK_CONCAT(scintillaquick_profile_scope_, __LINE__)((profiler), (name))
+    SCINTILLAQUICK_CONCAT(scintillaquick_profile_scope_, __LINE__)((profiler), (name))
 
 #define SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE(name) \
     SCINTILLAQUICK_PROFILE_SCOPE(::Scintilla::Internal::active_hierarchical_profiler(), (name))
