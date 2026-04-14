@@ -29,7 +29,8 @@ int g_failures = 0;
             std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr);  \
             ++g_failures;                                                         \
         }                                                                         \
-    } while (0)
+    }                                                                             \
+    while (0)
 
 void pump_events()
 {

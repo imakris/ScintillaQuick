@@ -448,7 +448,8 @@ comparison_result compare_images(const QImage &actual, const QImage &expected)
                 db > k_channel_tolerance || da > k_channel_tolerance) {
                 ++diffs;
                 dl[x] = qRgb(255, 0, 0);
-            } else {
+            }
+            else {
                 dl[x] = qRgb(qRed(al[x]) / 3,
                               qGreen(al[x]) / 3,
                               qBlue(al[x]) / 3);
@@ -538,7 +539,9 @@ fixture_outcome run_visual_fixture(const char *name, const QImage &actual)
             qWarning("  [%s] FAIL: missing baseline %s", name, qPrintable(bp));
             return fixture_outcome::fail;
         }
-    } else if (!regenerate) {
+    }
+    else
+    if (!regenerate) {
         expected.load(bp);
         if (expected.isNull()) {
             qWarning("  [%s] FAIL: could not load baseline %s", name, qPrintable(bp));
@@ -657,7 +660,9 @@ fixture_outcome run_scroll_probe_fixture(
         }
         if (outcome == fixture_outcome::generated) {
             generated_any = true;
-        } else if (outcome != fixture_outcome::pass) {
+        }
+        else
+        if (outcome != fixture_outcome::pass) {
             return outcome;
         }
     }
@@ -1185,7 +1190,9 @@ int main(int argc, char **argv)
         const QString arg = QString::fromLocal8Bit(argv[i]);
         if (arg == QStringLiteral("--fixture") && i + 1 < argc) {
             selected_fixture_name = QString::fromLocal8Bit(argv[++i]);
-        } else if (arg.startsWith(QStringLiteral("--fixture="))) {
+        }
+        else
+        if (arg.startsWith(QStringLiteral("--fixture="))) {
             selected_fixture_name = arg.mid(QStringLiteral("--fixture=").size());
         }
     }
@@ -1258,18 +1265,18 @@ int main(int argc, char **argv)
         qDebug("--- %s", f.name);
         fixture_outcome outcome = f.fn();
         switch (outcome) {
-        case fixture_outcome::pass:
-            qDebug("  PASS [%s]\n", f.name);
-            ++g_pass_count;
-            break;
-        case fixture_outcome::generated:
-            qDebug("  GENERATED [%s] (needs review before commit)\n", f.name);
-            ++g_gen_count;
-            break;
-        case fixture_outcome::fail:
-            qWarning("  FIXTURE FAILED [%s]\n", f.name);
-            ++g_fail_count;
-            break;
+            case fixture_outcome::pass:
+                qDebug("  PASS [%s]\n", f.name);
+                ++g_pass_count;
+                break;
+            case fixture_outcome::generated:
+                qDebug("  GENERATED [%s] (needs review before commit)\n", f.name);
+                ++g_gen_count;
+                break;
+            case fixture_outcome::fail:
+                qWarning("  FIXTURE FAILED [%s]\n", f.name);
+                ++g_fail_count;
+                break;
         }
     }
 

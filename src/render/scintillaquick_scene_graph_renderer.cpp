@@ -556,52 +556,52 @@ bool append_rasterized_fold_marker_rects(
     };
 
     switch (primitive.marker_type) {
-    case static_cast<int>(MarkerSymbol::VLine):
-        fill_rect(connector_vertical_line, colors.body);
-        break;
-    case static_cast<int>(MarkerSymbol::LCorner):
-    case static_cast<int>(MarkerSymbol::LCornerCurve):
-        fill_rect(
-            QRectF(
-                connector_line_left,
-                whole_rect.top(),
-                pixel,
-                std::max<qreal>(0.0, connector_center_y + pixel - whole_rect.top())),
-            colors.tail);
-        fill_rect(connector_right_stick, colors.tail);
-        break;
-    case static_cast<int>(MarkerSymbol::TCorner):
-    case static_cast<int>(MarkerSymbol::TCornerCurve):
-        fill_rect(
-            QRectF(
-                connector_line_left,
-                whole_rect.top(),
-                pixel,
-                std::max<qreal>(0.0, connector_center_y + pixel - whole_rect.top())),
-            colors.body);
-        fill_rect(
-            QRectF(
-                connector_line_left,
-                connector_center_y + pixel,
-                pixel,
-                std::max<qreal>(0.0, whole_rect.bottom() - (connector_center_y + pixel))),
-            colors.head);
-        fill_rect(connector_right_stick, colors.tail);
-        break;
-    case static_cast<int>(MarkerSymbol::BoxPlus):
-        draw_box_symbol(true, false);
-        break;
-    case static_cast<int>(MarkerSymbol::BoxMinus):
-        draw_box_symbol(false, false);
-        break;
-    case static_cast<int>(MarkerSymbol::BoxPlusConnected):
-        draw_box_symbol(true, true);
-        break;
-    case static_cast<int>(MarkerSymbol::BoxMinusConnected):
-        draw_box_symbol(false, true);
-        break;
-    default:
-        return false;
+        case static_cast<int>(MarkerSymbol::VLine):
+            fill_rect(connector_vertical_line, colors.body);
+            break;
+        case static_cast<int>(MarkerSymbol::LCorner):
+        case static_cast<int>(MarkerSymbol::LCornerCurve):
+            fill_rect(
+                QRectF(
+                    connector_line_left,
+                    whole_rect.top(),
+                    pixel,
+                    std::max<qreal>(0.0, connector_center_y + pixel - whole_rect.top())),
+                colors.tail);
+            fill_rect(connector_right_stick, colors.tail);
+            break;
+        case static_cast<int>(MarkerSymbol::TCorner):
+        case static_cast<int>(MarkerSymbol::TCornerCurve):
+            fill_rect(
+                QRectF(
+                    connector_line_left,
+                    whole_rect.top(),
+                    pixel,
+                    std::max<qreal>(0.0, connector_center_y + pixel - whole_rect.top())),
+                colors.body);
+            fill_rect(
+                QRectF(
+                    connector_line_left,
+                    connector_center_y + pixel,
+                    pixel,
+                    std::max<qreal>(0.0, whole_rect.bottom() - (connector_center_y + pixel))),
+                colors.head);
+            fill_rect(connector_right_stick, colors.tail);
+            break;
+        case static_cast<int>(MarkerSymbol::BoxPlus):
+            draw_box_symbol(true, false);
+            break;
+        case static_cast<int>(MarkerSymbol::BoxMinus):
+            draw_box_symbol(false, false);
+            break;
+        case static_cast<int>(MarkerSymbol::BoxPlusConnected):
+            draw_box_symbol(true, true);
+            break;
+        case static_cast<int>(MarkerSymbol::BoxMinusConnected):
+            draw_box_symbol(false, true);
+            break;
+        default:
+            return false;
     }
 
     painter.end();
@@ -1011,16 +1011,16 @@ std::vector<QPointF> make_indicator_squiggle_triangles(
         }
         else {
             switch (pixel % 4) {
-            case 0:
-                row = 0;
-                break;
-            case 1:
-            case 3:
-                row = 1;
-                break;
-            default:
-                row = 2;
-                break;
+                case 0:
+                    row = 0;
+                    break;
+                case 1:
+                case 3:
+                    row = 1;
+                    break;
+                default:
+                    row = 2;
+                    break;
             }
         }
         row = std::min(row, row_limit - 1);
@@ -1066,13 +1066,12 @@ void append_indicator_squiggle_rects(
         if (low) {
             row = (pixel % 4 >= 2) ? 1 : 0;
         }
+        else
+        if (pixel == 1 || (pixel >= 4 && ((pixel % 4) == 0 || (pixel % 4) == 1))) {
+            row = 0;
+        }
         else {
-            if (pixel == 1 || (pixel >= 4 && ((pixel % 4) == 0 || (pixel % 4) == 1))) {
-                row = 0;
-            }
-            else {
-                row = 1;
-            }
+            row = 1;
         }
         row = std::min(row, row_limit - 1);
         rects.push_back({
@@ -2234,25 +2233,24 @@ public:
                     under_geo_idx.push_back(j);
                 }
             }
-            else {
-                if (is_rectangle) {
-                    over_fill_idx.push_back(j);
-                }
-                else
-                if (uses_stroke_rects) {
-                    if (primitive.indicator_style == static_cast<int>(IndicatorStyle::Box)) {
-                        append_indicator_box_rects(over_stroke_rects, primitive, window);
-                    }
-                    else {
-                        append_indicator_squiggle_rects(
-                            over_stroke_rects,
-                            primitive,
-                            window);
-                    }
+            else
+            if (is_rectangle) {
+                over_fill_idx.push_back(j);
+            }
+            else
+            if (uses_stroke_rects) {
+                if (primitive.indicator_style == static_cast<int>(IndicatorStyle::Box)) {
+                    append_indicator_box_rects(over_stroke_rects, primitive, window);
                 }
                 else {
-                    over_geo_idx.push_back(j);
+                    append_indicator_squiggle_rects(
+                        over_stroke_rects,
+                        primitive,
+                        window);
                 }
+            }
+            else {
+                over_geo_idx.push_back(j);
             }
         }
 

@@ -2191,7 +2191,8 @@ int main(int argc, char **argv)
         if (ok) {
             qDebug("  PASS [%s]\n", f.name);
             ++fixture_pass;
-        } else {
+        }
+        else {
             qWarning("  FIXTURE FAILED [%s]\n", f.name);
             ++fixture_fail;
         }

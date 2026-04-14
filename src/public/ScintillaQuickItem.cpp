@@ -827,21 +827,26 @@ bool ScintillaQuickItem::event(QEvent *event)
         // Circumvent the tab focus convention.
         keyPressEvent(static_cast<QKeyEvent *>(event));
         result = event->isAccepted();
-    } else if (event->type() == QEvent::Show) {
+    }
+    else
+    if (event->type() == QEvent::Show) {
 #ifndef PLAT_QT_QML
         setMouseTracking(true);
         result = QAbstractScrollArea::event(event);
 #else
         result = QQuickItem::event(event);
 #endif
-    } else if (event->type() == QEvent::Hide) {
+    }
+    else
+    if (event->type() == QEvent::Hide) {
 #ifndef PLAT_QT_QML
         setMouseTracking(false);
         result = QAbstractScrollArea::event(event);
 #else
         result = QQuickItem::event(event);
 #endif
-    } else {
+    }
+    else {
 #ifndef PLAT_QT_QML
         result = QAbstractScrollArea::event(event);
 #else
@@ -894,43 +899,45 @@ void ScintillaQuickItem::wheelEvent(QWheelEvent *event)
 #else
             QQuickItem::wheelEvent(event);
 #endif
-    } else {
-        if (QGuiApplication::keyboardModifiers() & Qt::ControlModifier) {
-            // Zoom! We play with the font sizes in the styles.
-            // Number of steps/line is ignored, we just care if sizing up or down
-            if (wheelEventYDelta(event) > 0) {
-                m_core->KeyCommand(Message::ZoomIn);
-            }
-            else {
-                m_core->KeyCommand(Message::ZoomOut);
-            }
-            if (m_render_data) {
-                m_render_data->content_modified_since_last_capture = true;
-            }
-            syncQuickViewProperties();
-            request_scene_graph_update(true, true, false);
-        } else {
-            // Ignore wheel events when the scroll bars are disabled.
+    }
+    else
+    if (QGuiApplication::keyboardModifiers() & Qt::ControlModifier) {
+        // Zoom! We play with the font sizes in the styles.
+        // Number of steps/line is ignored, we just care if sizing up or down
+        if (wheelEventYDelta(event) > 0) {
+            m_core->KeyCommand(Message::ZoomIn);
+        }
+        else {
+            m_core->KeyCommand(Message::ZoomOut);
+        }
+        if (m_render_data) {
+            m_render_data->content_modified_since_last_capture = true;
+        }
+        syncQuickViewProperties();
+        request_scene_graph_update(true, true, false);
+    }
+    else {
+        // Ignore wheel events when the scroll bars are disabled.
 #ifndef PLAT_QT_QML
-            if (verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOff) {
-                event->ignore();
-            }
-            else {
+        if (verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOff) {
+            event->ignore();
+        }
+        else {
 #endif
 #ifdef PLAT_QT_QML
-                // Scroll
-                int linesToScroll = 3;
-                if (event->angleDelta().y() > 0) {
-                    scrollVertical(m_core->topLine - linesToScroll);
-                } else {
-                    scrollVertical(m_core->topLine + linesToScroll);
-                }
-                QQuickItem::wheelEvent(event);
-#else
-                QAbstractScrollArea::wheelEvent(event);
+            // Scroll
+            int linesToScroll = 3;
+            if (event->angleDelta().y() > 0) {
+                scrollVertical(m_core->topLine - linesToScroll);
             }
-#endif
+            else {
+                scrollVertical(m_core->topLine + linesToScroll);
+            }
+            QQuickItem::wheelEvent(event);
+#else
+            QAbstractScrollArea::wheelEvent(event);
         }
+#endif
     }
 }
 
@@ -1488,7 +1495,9 @@ void ScintillaQuickItem::inputMethodEvent(QInputMethodEvent *event)
             i += ucWidth;
         }
 
-    } else if (!event->preeditString().isEmpty()) {
+    }
+    else
+    if (!event->preeditString().isEmpty()) {
         const QString preeditStr = event->preeditString();
         const int preeditStrLen  = preeditStr.length();
         if (preeditStrLen == 0) {
@@ -1809,7 +1818,8 @@ void ScintillaQuickItem::build_render_snapshot()
         const int caret_width = static_cast<int>(send(SCI_GETCARETWIDTH));
         if (hasActiveFocus() && m_core && m_core->caret.active && m_caret_blink_visible && caret_width > 0) {
             m_render_data->frame.caret_primitives = m_render_data->captured_caret_primitives;
-        } else {
+        }
+        else {
             m_render_data->frame.caret_primitives.clear();
         }
         m_render_data->snapshot_dirty = false;
@@ -1933,7 +1943,8 @@ void ScintillaQuickItem::build_render_snapshot()
     if (m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)) {
         if (static_content_dirty && !can_reuse_vertical_scroll) {
             m_profiling_state->full_update_count.fetch_add(1, std::memory_order_relaxed);
-        } else {
+        }
+        else {
             m_profiling_state->overlay_only_update_count.fetch_add(1, std::memory_order_relaxed);
         }
         m_profiling_state->snapshot_build_count.fetch_add(1, std::memory_order_relaxed);

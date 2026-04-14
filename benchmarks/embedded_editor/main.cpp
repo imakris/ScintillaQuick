@@ -359,7 +359,8 @@ std::optional<correctness_issue_t> verify_visible_rows(
                         .arg(expected_document_line)
                         .arg(row.subline_index)};
             }
-        } else {
+        }
+        else {
             if (row.subline_index != 0) {
                 return correctness_issue_t{
                     step,

@@ -486,13 +486,13 @@ void SurfaceImpl::GradientRectangle(PRectangle rc, const std::vector<ColourStop>
     QRectF rect = QRectFFromPRect(rc);
     QLinearGradient linearGradient;
     switch (m_options) {
-    case GradientOptions::leftToRight:
-        linearGradient = QLinearGradient(rc.left, rc.top, rc.right, rc.top);
-        break;
-    case GradientOptions::topToBottom:
-    default:
-        linearGradient = QLinearGradient(rc.left, rc.top, rc.left, rc.bottom);
-        break;
+        case GradientOptions::leftToRight:
+            linearGradient = QLinearGradient(rc.left, rc.top, rc.right, rc.top);
+            break;
+        case GradientOptions::topToBottom:
+        default:
+            linearGradient = QLinearGradient(rc.left, rc.top, rc.left, rc.bottom);
+            break;
     }
     linearGradient.setSpread(QGradient::RepeatSpread);
     for (const ColourStop &stop : stops) {
@@ -1445,7 +1445,9 @@ private:
     {
         if (row < m_top_row) {
             m_top_row = row;
-        } else if (row >= m_top_row + m_visible_rows) {
+        }
+        else
+        if (row >= m_top_row + m_visible_rows) {
             m_top_row = row - m_visible_rows + 1;
         }
         clampState();
