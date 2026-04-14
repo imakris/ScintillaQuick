@@ -1356,6 +1356,19 @@ std::vector<QPointF> make_diamond_points(const QRectF &rect)
 class Scene_graph_frame_text_node final : public QSGNode
 {
 public:
+    ~Scene_graph_frame_text_node() override
+    {
+        // The active `m_text_node` is owned by the scene graph parent chain
+        // (m_clip_node -> m_transform_node -> m_text_node) and will be
+        // cleaned up automatically when `this` is destroyed. The backup
+        // slot's `text_node`, however, is deliberately detached from the
+        // transform node while inactive; nothing in the scene graph owns it,
+        // so it must be deleted here explicitly. Everything else in the
+        // backup struct is value-typed and cleans itself up.
+        delete m_backup.text_node;
+        m_backup.text_node = nullptr;
+    }
+
     void update_from_visual_line(
         QQuickWindow *window,
         const Visual_line_frame &visual_line,
@@ -1391,6 +1404,80 @@ public:
                 // Same content, but positions are no longer a pure translation.
             }
         }
+
+        // Secondary-slot cache. Before rebuilding the active slot from
+        // scratch, see whether the most recently evicted state (stored in
+        // `m_backup`) already matches this request. The canonical case is
+        // zoom-bounce: alternating zoom-in / zoom-out reaches the same two
+        // font configurations for the same visible line over and over.
+        // Rebuilding both QTextLayouts and the QSGTextNode glyph runs on
+        // every such paint dominates `zoom_wheel_bounce_latency_*`, so
+        // keeping one prior snapshot per node lets the bounce path hit a
+        // cheap "swap QSGTextNode pointers + update transform" fast path
+        // instead of re-shaping and re-attaching every run.
+        if (same_viewport_size &&
+            m_backup.populated &&
+            m_backup.has_key &&
+            m_backup.key.document_line == visual_line.key.document_line &&
+            m_backup.key.subline_index == visual_line.key.subline_index &&
+            backup_layouts_match_content(visual_line))
+        {
+            // A previously-evicted snapshot matches content + key. We can
+            // only reuse the glyph runs it already baked into its
+            // QSGTextNode if the new request's per-run positions are a
+            // uniform translation of the backup's cached positions; the
+            // glyph positions inside a QSGTextNode are baked in at
+            // `addTextLayout` time and cannot be shifted per-run after the
+            // fact, only by the transform node. Compute the translation
+            // against the backup *before* committing to the swap so that a
+            // non-uniform mismatch falls through to the normal rebuild
+            // path rather than leaving glyphs at stale positions.
+            QPointF restore_delta(0.0, 0.0);
+            bool have_delta = false;
+            bool uniform    = true;
+            size_t cached_idx = 0;
+            for (const Text_run &run : visual_line.text_runs) {
+                if (run.text.isEmpty() || run.represented_as_blob) {
+                    continue;
+                }
+                if (cached_idx >= m_backup.layout_positions.size()) {
+                    uniform = false;
+                    break;
+                }
+                const QPointF d = run.position - m_backup.layout_positions[cached_idx];
+                if (!have_delta) {
+                    restore_delta = d;
+                    have_delta    = true;
+                }
+                else
+                if (d != restore_delta) {
+                    uniform = false;
+                    break;
+                }
+                ++cached_idx;
+            }
+            if (uniform && cached_idx == m_backup.layout_positions.size()) {
+                SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_visual_line.restore_from_backup");
+                swap_active_with_backup();
+                m_text_node->setRenderType(map_render_type());
+                m_text_node->setColor(Qt::white);
+                m_text_node->setViewport(viewport);
+                update_clip_node(m_clip_node, viewport);
+                set_translation(restore_delta);
+                m_cached_key      = visual_line.key;
+                m_has_cached_key  = true;
+                m_cached_viewport = viewport;
+                return;
+            }
+        }
+
+        // Neither the active slot nor the backup can serve the request.
+        // Save whatever is currently active into the backup slot before we
+        // rebuild, so that if the *next* frame flips back to this state we
+        // can restore from backup instead of paying the rebuild cost again.
+        // This is what turns the cache into a true 2-state LRU instead of
+        // a single-state cache.
+        evict_active_to_backup(window);
 
         {
             SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_visual_line.rebuild");
@@ -1643,7 +1730,9 @@ public:
                m_layout_positions[0] + m_translation == margin.position;
     }
 
-    bool layouts_match_content(const Visual_line_frame &vl) const
+    static bool runs_match_content(
+        const std::vector<Text_run> &cached_runs,
+        const Visual_line_frame &vl)
     {
         // Compare only translation-invariant fields. Viewport-relative
         // coordinates (top/bottom and the blob rects) change on every
@@ -1655,10 +1744,10 @@ public:
             if (run.text.isEmpty() || run.represented_as_blob) {
                 continue;
             }
-            if (cached_idx >= m_cached_runs.size()) {
+            if (cached_idx >= cached_runs.size()) {
                 return false;
             }
-            const Text_run &cached_run = m_cached_runs[cached_idx];
+            const Text_run &cached_run = cached_runs[cached_idx];
             if (cached_run.style_id != run.style_id ||
                 cached_run.direction != run.direction ||
                 cached_run.is_represented_text != run.is_represented_text ||
@@ -1671,7 +1760,104 @@ public:
             }
             ++cached_idx;
         }
-        return cached_idx == m_cached_runs.size();
+        return cached_idx == cached_runs.size();
+    }
+
+    bool layouts_match_content(const Visual_line_frame &vl) const
+    {
+        return runs_match_content(m_cached_runs, vl);
+    }
+
+    bool backup_layouts_match_content(const Visual_line_frame &vl) const
+    {
+        return runs_match_content(m_backup.cached_runs, vl);
+    }
+
+    void evict_active_to_backup(QQuickWindow *window)
+    {
+        // Move the currently-active cached state into the backup slot so
+        // that a subsequent rebuild of the active slot does not destroy
+        // the ability to restore this snapshot later. This is only useful
+        // when the active slot actually holds content worth preserving:
+        // if there is no cached layout there is nothing to save.
+        if (!m_has_cached_key || m_cached_runs.empty()) {
+            return;
+        }
+        if (!m_transform_node) {
+            return;
+        }
+
+        m_backup.layouts          = std::move(m_layouts);
+        m_backup.cached_runs      = std::move(m_cached_runs);
+        m_backup.layout_positions = std::move(m_layout_positions);
+        m_backup.translation      = m_translation;
+        m_backup.key              = m_cached_key;
+        m_backup.has_key          = true;
+        m_backup.populated        = true;
+
+        // Ensure the active-slot vectors are empty (move-from leaves them
+        // in a valid but unspecified state; clear() makes that explicit).
+        m_layouts.clear();
+        m_cached_runs.clear();
+        m_layout_positions.clear();
+
+        // Swap which QSGTextNode is attached to the transform node. The
+        // previously-active text_node becomes the backup (still carrying
+        // its shaped glyph runs), and a fresh text_node takes its place
+        // as the active one. If a backup text_node already existed from a
+        // prior eviction it is reused as the new active so we do not
+        // allocate a new scene-graph node every eviction.
+        QSGTextNode *prev_active = m_text_node;
+        QSGTextNode *reuse_node  = m_backup.text_node;
+        if (prev_active) {
+            m_transform_node->removeChildNode(prev_active);
+        }
+        m_backup.text_node = prev_active;
+        m_text_node        = reuse_node;
+        if (!m_text_node && window) {
+            m_text_node = window->createTextNode();
+        }
+        if (m_text_node) {
+            m_transform_node->appendChildNode(m_text_node);
+            // The freshly-activated text_node is either a brand-new one
+            // or an older cache node whose glyph runs belonged to some
+            // prior request. Its content will be explicitly cleared and
+            // re-populated in the rebuild scope that follows this call,
+            // so no state carries over.
+        }
+    }
+
+    void swap_active_with_backup()
+    {
+        // Restore the backup snapshot into the active slot. Used when the
+        // backup already matches the new request so no re-shape is needed.
+        std::swap(m_layouts, m_backup.layouts);
+        std::swap(m_cached_runs, m_backup.cached_runs);
+        std::swap(m_layout_positions, m_backup.layout_positions);
+        std::swap(m_translation, m_backup.translation);
+        std::swap(m_cached_key, m_backup.key);
+        std::swap(m_has_cached_key, m_backup.has_key);
+        // The backup slot's `populated` flag tracks whether the data now
+        // sitting in the backup is a valid, restorable snapshot. After
+        // the swap, the backup holds whatever the active slot held a
+        // moment ago, so re-derive the flag from the moved-in state.
+        m_backup.populated = !m_backup.cached_runs.empty();
+
+        // Swap the QSGTextNode children so the one that holds the
+        // previously-cached glyph runs becomes the active, visible one.
+        if (!m_transform_node) {
+            return;
+        }
+        QSGTextNode *prev_active = m_text_node;
+        QSGTextNode *cached_node = m_backup.text_node;
+        if (prev_active) {
+            m_transform_node->removeChildNode(prev_active);
+        }
+        m_text_node        = cached_node;
+        m_backup.text_node = prev_active;
+        if (m_text_node) {
+            m_transform_node->appendChildNode(m_text_node);
+        }
     }
 
     bool positions_match(const Visual_line_frame &vl, const QRectF &viewport) const
@@ -1730,6 +1916,18 @@ public:
         return true;
     }
 
+    struct Backup_shape_state
+    {
+        QSGTextNode *text_node = nullptr; // detached from the scene graph
+        std::vector<std::unique_ptr<QTextLayout>> layouts;
+        std::vector<Text_run> cached_runs;
+        std::vector<QPointF> layout_positions;
+        QPointF translation{0.0, 0.0};
+        Visual_line_key key{};
+        bool has_key   = false;
+        bool populated = false;
+    };
+
     QSGClipNode *m_clip_node           = nullptr;
     QSGTextNode *m_text_node           = nullptr;
     QSGTransformNode *m_transform_node = nullptr;
@@ -1744,6 +1942,7 @@ public:
     QFont m_cached_margin_font;
     QColor m_cached_margin_foreground;
     QPointF m_translation;
+    Backup_shape_state m_backup;
 };
 
 template <typename NodeT, typename UpdateFn>
