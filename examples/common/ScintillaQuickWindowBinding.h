@@ -11,7 +11,7 @@
 
 namespace scintillaquick::examples {
 
-inline void bindItemToWindow(ScintillaQuickItem &editor, QQuickWindow &window) {
+inline void bindItemToWindow(ScintillaQuick_item &editor, QQuickWindow &window) {
     auto *root = window.contentItem();
     editor.setParentItem(root);
     editor.setPosition({0.0, 0.0});

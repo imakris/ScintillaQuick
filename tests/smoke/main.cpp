@@ -1,9 +1,9 @@
 // Copyright (c) 2026, Ioannis Makris
 // Licensed under the BSD 2-Clause License, see LICENSE file for details.
 
-// Smoke coverage for ScintillaQuickItem's message pipeline.
+// Smoke coverage for ScintillaQuick_item's message pipeline.
 //
-// These tests do not run a full Qt Quick window — they drive the
+// These tests do not run a full Qt Quick window - they drive the
 // editor entirely through `send()` to exercise Scintilla's message
 // dispatch behind the item. The goal is to guard against the most
 // common kinds of upstream-Scintilla-update breakage (missed message
@@ -40,27 +40,27 @@ void pump_events()
     QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 }
 
-int text_length(ScintillaQuickItem &editor)
+int text_length(ScintillaQuick_item &editor)
 {
     return static_cast<int>(editor.send(SCI_GETTEXTLENGTH));
 }
 
-int current_position(ScintillaQuickItem &editor)
+int current_position(ScintillaQuick_item &editor)
 {
     return static_cast<int>(editor.send(SCI_GETCURRENTPOS));
 }
 
-int selection_start(ScintillaQuickItem &editor)
+int selection_start(ScintillaQuick_item &editor)
 {
     return static_cast<int>(editor.send(SCI_GETSELECTIONSTART));
 }
 
-int selection_end(ScintillaQuickItem &editor)
+int selection_end(ScintillaQuick_item &editor)
 {
     return static_cast<int>(editor.send(SCI_GETSELECTIONEND));
 }
 
-void test_property_roundtrip(ScintillaQuickItem &editor)
+void test_property_roundtrip(ScintillaQuick_item &editor)
 {
     const QString text = QStringLiteral("smoke test\nsecond line");
     editor.setProperty("font", QFont(QStringLiteral("Consolas"), 11));
@@ -73,7 +73,7 @@ void test_property_roundtrip(ScintillaQuickItem &editor)
     SQ_EXPECT(editor.property("text").toString() == text);
 }
 
-void test_insert_and_delete(ScintillaQuickItem &editor)
+void test_insert_and_delete(ScintillaQuick_item &editor)
 {
     editor.setProperty("text", QString());
     SQ_EXPECT(text_length(editor) == 0);
@@ -94,7 +94,7 @@ void test_insert_and_delete(ScintillaQuickItem &editor)
     SQ_EXPECT(editor.send(SCI_GETLINECOUNT) == 2);
 }
 
-void test_selection_api(ScintillaQuickItem &editor)
+void test_selection_api(ScintillaQuick_item &editor)
 {
     editor.setProperty("text", QStringLiteral("abcdef"));
     editor.send(SCI_SETSEL, 1, 4);
@@ -113,7 +113,7 @@ void test_selection_api(ScintillaQuickItem &editor)
     SQ_EXPECT(selection_end(editor) == 6);
 }
 
-void test_undo_redo(ScintillaQuickItem &editor)
+void test_undo_redo(ScintillaQuick_item &editor)
 {
     editor.setProperty("text", QString());
     editor.send(SCI_EMPTYUNDOBUFFER);
@@ -128,7 +128,7 @@ void test_undo_redo(ScintillaQuickItem &editor)
     SQ_EXPECT(text_length(editor) == 5);
 }
 
-void test_readonly_property(ScintillaQuickItem &editor)
+void test_readonly_property(ScintillaQuick_item &editor)
 {
     editor.setProperty("text", QStringLiteral("seed"));
     SQ_EXPECT(text_length(editor) == 4);
@@ -146,7 +146,7 @@ void test_readonly_property(ScintillaQuickItem &editor)
     SQ_EXPECT(text_length(editor) == 8);
 }
 
-void test_wrap_mode_toggle(ScintillaQuickItem &editor)
+void test_wrap_mode_toggle(ScintillaQuick_item &editor)
 {
     editor.setProperty("text", QStringLiteral("some text"));
     editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
@@ -165,7 +165,7 @@ int main(int argc, char **argv)
 {
     QGuiApplication app(argc, argv);
 
-    ScintillaQuickItem editor;
+    ScintillaQuick_item editor;
     editor.setWidth(640);
     editor.setHeight(480);
 

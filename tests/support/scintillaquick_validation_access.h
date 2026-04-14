@@ -19,10 +19,10 @@
 
 namespace Scintilla::Internal {
 
-class scintillaquick_validation_access
+class ScintillaQuick_validation_access
 {
 public:
-    static render_frame capture_frame(ScintillaQuickItem &item)
+    static Render_frame capture_frame(ScintillaQuick_item &item)
     {
         if (!item.m_core) {
             return {};
@@ -31,7 +31,7 @@ public:
         return item.m_core->current_render_frame();
     }
 
-    static render_frame capture_cached_frame(ScintillaQuickItem &item)
+    static Render_frame capture_cached_frame(ScintillaQuick_item &item)
     {
         if (!item.m_render_data) {
             return {};
@@ -41,7 +41,7 @@ public:
         return item.rendered_frame_for_test();
     }
 
-    static QImage capture_raster_reference(ScintillaQuickItem &item)
+    static QImage capture_raster_reference(ScintillaQuick_item &item)
     {
         if (!item.m_core) {
             return {};

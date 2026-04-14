@@ -79,7 +79,7 @@ inline Point PointFromQPointF(QPointF qp)
     return Point(qp.x(), qp.y());
 }
 
-class SurfaceImpl : public Surface {
+class Surface_impl : public Surface {
 private:
     QPaintDevice *device = nullptr;
     QPainter *painter    = nullptr;
@@ -91,11 +91,11 @@ private:
     void Clear();
 
 public:
-    SurfaceImpl();
-    SurfaceImpl(int width, int height, SurfaceMode mode_);
-    virtual ~SurfaceImpl();
+    Surface_impl();
+    Surface_impl(int width, int height, SurfaceMode surface_mode);
+    virtual ~Surface_impl();
 
-    void Init(bool signatureFlag, Scintilla::Internal::PainterID pid) override;
+    void Init(bool signature_flag, Scintilla::Internal::PainterID pid) override;
     void Init(WindowID wid) override;
     void Init(SurfaceID sid, WindowID wid) override;
     std::unique_ptr<Surface> AllocatePixMap(int width, int height) override;
@@ -122,32 +122,32 @@ public:
     void AlphaRectangle(PRectangle rc, XYPOSITION cornerSize, FillStroke fillStroke) override;
     void GradientRectangle(PRectangle rc, const std::vector<ColourStop> &stops, GradientOptions options) override;
     void DrawRGBAImage(PRectangle rc, int width, int height,
-        const unsigned char *pixelsImage) override;
+        const unsigned char *pixels_image) override;
     void Ellipse(PRectangle rc, FillStroke fillStroke) override;
     void Stadium(PRectangle rc, FillStroke fillStroke, Ends ends) override;
     void Copy(PRectangle rc, Point from, Surface &surfaceSource) override;
 
     std::unique_ptr<IScreenLineLayout> Layout(const IScreenLine *screenLine) override;
 
-    void DrawTextNoClip(PRectangle rc, const Font *font, XYPOSITION ybase,
+    void DrawTextNoClip(PRectangle rc, const Font *font, XYPOSITION y_base,
         std::string_view text, ColourRGBA fore, ColourRGBA back) override;
-    void DrawTextClipped(PRectangle rc, const Font *font, XYPOSITION ybase,
+    void DrawTextClipped(PRectangle rc, const Font *font, XYPOSITION y_base,
         std::string_view text, ColourRGBA fore, ColourRGBA back) override;
-    void DrawTextTransparent(PRectangle rc, const Font *font, XYPOSITION ybase,
+    void DrawTextTransparent(PRectangle rc, const Font *font, XYPOSITION y_base,
         std::string_view text, ColourRGBA fore) override;
     void MeasureWidths(const Font *font, std::string_view text,
         XYPOSITION *positions) override;
     XYPOSITION WidthText(const Font *font, std::string_view text) override;
 
-    void DrawTextNoClipUTF8(PRectangle rc, const Font *font_, XYPOSITION ybase,
+    void DrawTextNoClipUTF8(PRectangle rc, const Font *font, XYPOSITION y_base,
         std::string_view text, ColourRGBA fore, ColourRGBA back) override;
-    void DrawTextClippedUTF8(PRectangle rc, const Font *font_, XYPOSITION ybase,
+    void DrawTextClippedUTF8(PRectangle rc, const Font *font, XYPOSITION y_base,
         std::string_view text, ColourRGBA fore, ColourRGBA back) override;
-    void DrawTextTransparentUTF8(PRectangle rc, const Font *font_, XYPOSITION ybase,
+    void DrawTextTransparentUTF8(PRectangle rc, const Font *font, XYPOSITION y_base,
         std::string_view text, ColourRGBA fore) override;
-    void MeasureWidthsUTF8(const Font *font_, std::string_view text,
+    void MeasureWidthsUTF8(const Font *font, std::string_view text,
         XYPOSITION *positions) override;
-    XYPOSITION WidthTextUTF8(const Font *font_, std::string_view text) override;
+    XYPOSITION WidthTextUTF8(const Font *font, std::string_view text) override;
 
     XYPOSITION Ascent(const Font *font) override;
     XYPOSITION Descent(const Font *font) override;

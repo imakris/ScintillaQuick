@@ -1,11 +1,11 @@
 // Copyright (c) 2026, Ioannis Makris
 // Licensed under the BSD 2-Clause License, see LICENSE file for details.
 //
-// @file ScintillaQuickItem.h - Qt Quick item (QQuickItem) that wraps
-// ScintillaQuickCore and drives events, input method handling and
+// @file ScintillaQuick_item.h - Qt Quick item (QQuickItem) that wraps
+// ScintillaQuick_core and drives events, input method handling and
 // scene-graph rendering. This is NOT a QWidget; earlier revisions of
 // upstream Scintilla-Qt were widget-based and the comment used to say
-// "Qt widget" — the current integration is fully Qt Quick / scene-graph
+// "Qt widget" - the current integration is fully Qt Quick / scene-graph
 // native.
 
 
@@ -62,14 +62,14 @@ inline constexpr int version_patch = 0;
 
 namespace Scintilla::Internal {
 
-class ScintillaQuickCore;
-class SurfaceImpl;
-struct render_frame;
+class ScintillaQuick_core;
+class Surface_impl;
+struct Render_frame;
 
 // Test / benchmark support type. Consumed by the in-tree benchmark harness
-// and by test_support/scintillaquick_validation_access.h. Not intended as
+// and by test_support/ScintillaQuick_validation_access.h. Not intended as
 // part of the long-term public API; treat as internal.
-struct displayed_row_for_test
+struct Displayed_row_for_test
 {
     int document_line = 0;
     int subline_index = 0;
@@ -79,7 +79,7 @@ struct displayed_row_for_test
 };
 
 #ifdef SCINTILLAQUICK_ENABLE_TEST_ACCESS
-class scintillaquick_validation_access;
+class ScintillaQuick_validation_access;
 #endif
 
 }
@@ -106,7 +106,7 @@ class scintillaquick_validation_access;
 // In this modus the scintilla editor control runs alway with a (maximal)
 // surface area to show the control completely. Rendering is handled through the
 // Qt Quick scene graph in updatePaintNode().
-class SCINTILLAQUICK_EXPORT ScintillaQuickItem : public QQuickItem
+class SCINTILLAQUICK_EXPORT ScintillaQuick_item : public QQuickItem
 {
     Q_OBJECT
 
@@ -127,25 +127,25 @@ class SCINTILLAQUICK_EXPORT ScintillaQuickItem : public QQuickItem
     Q_PROPERTY(Qt::InputMethodHints inputMethodHints READ inputMethodHints WRITE setInputMethodHints NOTIFY inputMethodHintsChanged)
 
 public:
-    explicit ScintillaQuickItem(QQuickItem *parent = nullptr);
-    virtual ~ScintillaQuickItem();
+    explicit ScintillaQuick_item(QQuickItem *parent = nullptr);
+    virtual ~ScintillaQuick_item();
 
     virtual sptr_t send(
-        unsigned int iMessage,
-        uptr_t wParam = 0,
-        sptr_t lParam = 0) const;
+        unsigned int i_message,
+        uptr_t w_param = 0,
+        sptr_t l_param = 0) const;
 
     virtual sptr_t sends(
-        unsigned int iMessage,
-        uptr_t wParam = 0,
+        unsigned int i_message,
+        uptr_t w_param = 0,
         const char *s = 0) const;
 
-    Q_INVOKABLE void scrollRow(int deltaLines);
-    Q_INVOKABLE void scrollColumn(int deltaColumns);
+    Q_INVOKABLE void scrollRow(int delta_lines);
+    Q_INVOKABLE void scrollColumn(int delta_columns);
     Q_INVOKABLE void enableUpdate(bool enable);
-    Q_INVOKABLE virtual void cmdContextMenu(int menuID);
+    Q_INVOKABLE virtual void cmdContextMenu(int menu_id);
     Q_INVOKABLE bool startProfilingSession(
-	    const QString &outputDirectory = QString(), double durationSeconds = 10.0);
+	    const QString &output_directory = QString(), double duration_seconds = 10.0);
     Q_INVOKABLE void stopProfilingSession();
     Q_INVOKABLE bool profilingActive() const;
     void request_scene_graph_update(
@@ -160,7 +160,7 @@ public slots:
 
     // Emit Scintilla notifications as signals.
     void notifyParent(Scintilla::NotificationData scn);
-    void event_command(Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
+    void event_command(Scintilla::uptr_t w_param, Scintilla::sptr_t l_param);
 
 signals:
     void cursorPositionChanged();
@@ -194,8 +194,8 @@ signals:
         Scintilla::FoldLevel foldPrev);
     void macroRecord(
         Scintilla::Message message,
-        Scintilla::uptr_t wParam,
-        Scintilla::sptr_t lParam);
+        Scintilla::uptr_t w_param,
+        Scintilla::sptr_t l_param);
     void marginClicked(Scintilla::Position position, Scintilla::KeyMod modifiers, int margin);
     void textAreaClicked(Scintilla::Position line, int modifiers);
     void needShown(Scintilla::Position position, Scintilla::Position length);
@@ -214,7 +214,7 @@ signals:
 
     // Base Scintilla notifications exposed by this item.
     void notify(Scintilla::NotificationData *pscn);
-    void command(Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
+    void command(Scintilla::uptr_t w_param, Scintilla::sptr_t l_param);
 
     // GUI event notifications needed under Qt
     void buttonPressed(QMouseEvent *event);
@@ -262,15 +262,15 @@ protected:
     Q_INVOKABLE QVariant inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const;
     void touchEvent(QTouchEvent *event) override;
     void updatePolish() override;
-    QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *updatePaintNodeData) override;
+    QSGNode *updatePaintNode(QSGNode *old_node, UpdatePaintNodeData *update_paint_node_data) override;
 
 private:
 #ifdef SCINTILLAQUICK_ENABLE_TEST_ACCESS
-    friend class Scintilla::Internal::scintillaquick_validation_access;
+    friend class Scintilla::Internal::ScintillaQuick_validation_access;
 #endif
 
-    class render_data;
-    class profiling_state;
+    class Render_data;
+    class Profiling_state;
 
     QString getText() const;
     void setText(const QString & txt);
@@ -297,14 +297,14 @@ private:
     void syncCaretBlinkTimer(bool resetPhase = false);
     void updateQuickView(Scintilla::Update updated);
     void build_render_snapshot();
-    std::vector<Scintilla::Internal::displayed_row_for_test> displayed_rows_for_test() const;
-    const Scintilla::Internal::render_frame &rendered_frame_for_test() const;
+    std::vector<Scintilla::Internal::Displayed_row_for_test> displayed_rows_for_test() const;
+    const Scintilla::Internal::Render_frame &rendered_frame_for_test() const;
     void reset_tracked_scroll_width();
 
     bool m_updates_enabled;
     int m_logical_width;
     int m_logical_height;
-    // The following members are NOT a read cache — `getCharHeight()`,
+    // The following members are NOT a read cache - `getCharHeight()`,
     // `getCharWidth()`, etc. re-query Scintilla on every call. They
     // are the "last value we emitted a NOTIFY signal for" so that
     // `syncQuickViewProperties()` can avoid spurious property-change
@@ -322,13 +322,13 @@ private:
     Qt::InputMethodHints m_input_method_hints;
     qint64 m_last_touch_press_time;
 
-    Scintilla::Internal::ScintillaQuickCore *m_core;
+    Scintilla::Internal::ScintillaQuick_core *m_core;
 
     QElapsedTimer m_elapsed_timer;
 
     Scintilla::Position m_preedit_pos;
-    std::unique_ptr<render_data> m_render_data;
-    std::unique_ptr<profiling_state> m_profiling_state;
+    std::unique_ptr<Render_data> m_render_data;
+    std::unique_ptr<Profiling_state> m_profiling_state;
     QTimer m_caret_blink_timer;
     bool m_caret_blink_visible = true;
     // Re-entry guard for `send()`'s dispatch -> `syncQuickViewProperties()`

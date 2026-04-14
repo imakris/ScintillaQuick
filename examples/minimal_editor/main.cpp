@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
     window.resize(1100, 720);
     window.setColor(Qt::white);
 
-    ScintillaQuickItem editor;
+    ScintillaQuick_item editor;
     scintillaquick::examples::bindItemToWindow(editor, window);
 
     editor.setProperty("font", QFont(QStringLiteral("Consolas"), 11));

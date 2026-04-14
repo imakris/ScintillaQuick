@@ -39,7 +39,7 @@ int g_failures = 0;
     while (0)
 
 using Scintilla::Internal::scene_graph_update_request;
-using Scintilla::Internal::scene_graph_update_request_info;
+using Scintilla::Internal::scene_graph_update_request_info_t;
 using Scintilla::Internal::scene_graph_message_is_known_read_only;
 using Scintilla::Internal::tracked_scroll_width_should_reset;
 
@@ -72,7 +72,7 @@ void test_known_mutating_messages_request_update()
     };
 
     for (unsigned int msg : mutators) {
-        const scene_graph_update_request_info req = scene_graph_update_request(msg);
+        const scene_graph_update_request_info_t req = scene_graph_update_request(msg);
         SQ_EXPECT(req.needed);
     }
 }
@@ -80,7 +80,7 @@ void test_known_mutating_messages_request_update()
 void test_specific_scroll_dispatch()
 {
     // SCI_SETFIRSTVISIBLELINE is the one message that sets `scrolling=true`.
-    const scene_graph_update_request_info set_first = scene_graph_update_request(SCI_SETFIRSTVISIBLELINE);
+    const scene_graph_update_request_info_t set_first = scene_graph_update_request(SCI_SETFIRSTVISIBLELINE);
     SQ_EXPECT(set_first.needed);
     SQ_EXPECT(set_first.static_content_dirty);
     SQ_EXPECT(set_first.needs_style_sync);
@@ -88,7 +88,7 @@ void test_specific_scroll_dispatch()
 
     // SCI_SETXOFFSET dirties static content but is not treated as a
     // vertical scroll.
-    const scene_graph_update_request_info set_xoff = scene_graph_update_request(SCI_SETXOFFSET);
+    const scene_graph_update_request_info_t set_xoff = scene_graph_update_request(SCI_SETXOFFSET);
     SQ_EXPECT(set_xoff.needed);
     SQ_EXPECT(set_xoff.static_content_dirty);
     SQ_EXPECT(!set_xoff.scrolling);
@@ -138,7 +138,7 @@ void test_known_read_only_messages_take_fast_path()
     for (unsigned int msg : hot_path_queries) {
         SQ_EXPECT(scene_graph_message_is_known_read_only(msg));
 
-        const scene_graph_update_request_info req = scene_graph_update_request(msg);
+        const scene_graph_update_request_info_t req = scene_graph_update_request(msg);
         SQ_EXPECT(!req.needed);
         SQ_EXPECT(!req.static_content_dirty);
         SQ_EXPECT(!req.needs_style_sync);
@@ -176,7 +176,7 @@ void test_public_query_messages_take_fast_path()
     for (unsigned int msg : public_queries) {
         SQ_EXPECT(scene_graph_message_is_known_read_only(msg));
 
-        const scene_graph_update_request_info req = scene_graph_update_request(msg);
+        const scene_graph_update_request_info_t req = scene_graph_update_request(msg);
         SQ_EXPECT(!req.needed);
         SQ_EXPECT(!req.static_content_dirty);
         SQ_EXPECT(!req.needs_style_sync);
@@ -184,7 +184,7 @@ void test_public_query_messages_take_fast_path()
     }
 }
 
-// Regression: every SCI_* message that ScintillaQuickItem issues
+// Regression: every SCI_* message that ScintillaQuick_item issues
 // internally via `send()` from inside `syncQuickViewProperties()` or a
 // getter called by it MUST take the fast path, otherwise `send()` will
 // re-enter `syncQuickViewProperties()` and recurse until the stack
@@ -214,7 +214,7 @@ void test_sync_quick_view_properties_path_is_recursion_safe()
 
     for (unsigned int msg : sync_path_messages) {
         SQ_EXPECT(scene_graph_message_is_known_read_only(msg));
-        const scene_graph_update_request_info req = scene_graph_update_request(msg);
+        const scene_graph_update_request_info_t req = scene_graph_update_request(msg);
         if (req.needed) {
             // Log the failing message so that a future regression
             // surfaces with a concrete SCI_ id instead of an opaque
@@ -248,7 +248,7 @@ void test_unknown_messages_trigger_conservative_full_resync()
     };
 
     for (unsigned int msg : unknown_messages) {
-        const scene_graph_update_request_info req = scene_graph_update_request(msg);
+        const scene_graph_update_request_info_t req = scene_graph_update_request(msg);
         SQ_EXPECT(req.needed);
         SQ_EXPECT(req.static_content_dirty);
         SQ_EXPECT(req.needs_style_sync);
@@ -305,7 +305,7 @@ void test_tracked_scroll_width_reset_table()
 //   (b) be classified as needing a scene-graph update
 //       (scene_graph_update_request() returns `needed=true`).
 //
-// There must be no third case — no silent "not read-only AND not
+// There must be no third case - no silent "not read-only AND not
 // scheduling a resync" fall-through. That third case is the
 // historical bug: a default branch that returned an empty request,
 // meaning messages absent from the allow-list silently skipped the
@@ -337,7 +337,7 @@ void test_full_scintilla_message_range_is_classified()
 
     for (unsigned int msg = SCI_START; msg <= sweep_upper_bound; ++msg) {
         const bool read_only = scene_graph_message_is_known_read_only(msg);
-        const scene_graph_update_request_info req = scene_graph_update_request(msg);
+        const scene_graph_update_request_info_t req = scene_graph_update_request(msg);
 
         if (read_only) {
             ++classified_as_read_only;

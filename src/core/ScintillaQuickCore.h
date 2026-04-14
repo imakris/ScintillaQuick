@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Ioannis Makris
 // Licensed under the BSD 2-Clause License, see LICENSE file for details.
 //
-// @file ScintillaQuickCore.h - Qt specific subclass of ScintillaBase
+// @file ScintillaQuick_core.h - Qt specific subclass of ScintillaBase
 
 #ifndef SCINTILLAQUICKCORE_H
 #define SCINTILLAQUICKCORE_H
@@ -76,39 +76,39 @@ class QPainter;
 class QQuickItem;
 class QTimerEvent;
 
-class ScintillaQuickItem;
+class ScintillaQuick_item;
 
 namespace Scintilla::Internal {
 
-class ScintillaQuickCore : public QObject, public ScintillaBase
+class ScintillaQuick_core : public QObject, public ScintillaBase
 {
     Q_OBJECT
 
 public:
-    explicit ScintillaQuickCore(::ScintillaQuickItem *parent);
+    explicit ScintillaQuick_core(::ScintillaQuick_item *parent);
     void UpdateInfos(int winId);
     void ensure_visible_range_styled(bool scrolling);
     void selectCurrentWord();
     void reset_tracked_scroll_width_to_viewport();
-    render_frame current_render_frame(
-        const captured_frame *capture_frame = nullptr,
+    Render_frame current_render_frame(
+        const Captured_frame *capture_frame = nullptr,
         bool static_content_dirty           = true,
         bool ensure_styled                  = true,
         bool scrolling                      = false,
         int  extra_capture_lines            = 0);
 
-    // Called from `~ScintillaQuickItem()` before the derived
-    // `ScintillaQuickItem` subobject finishes destructing. Stops all
+    // Called from `~ScintillaQuick_item()` before the derived
+    // `ScintillaQuick_item` subobject finishes destructing. Stops all
     // timers (which may otherwise fire via Qt's event loop between the
     // derived destructor body and Qt's child-deletion pass) and nulls
     // the back-pointer so that any still-queued slot invocations that
-    // reach `ScintillaQuickCore` after this point are inert. Without
+    // reach `ScintillaQuick_core` after this point are inert. Without
     // this step, a queued `timerEvent` or clipboard `SelectionChanged`
-    // can race against the owning `ScintillaQuickItem` destructor and
+    // can race against the owning `ScintillaQuick_item` destructor and
     // reach a sliced-down QQuickItem.
     void prepare_for_owner_destruction();
 
-    virtual ~ScintillaQuickCore();
+    virtual ~ScintillaQuick_core();
 
 signals:
     void cursorPositionChanged();
@@ -124,7 +124,7 @@ signals:
     // formats (e.g. rich text) to the MIME data.
     void aboutToCopy(QMimeData *data);
 
-    void command(Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
+    void command(Scintilla::uptr_t w_param, Scintilla::sptr_t l_param);
 
 private slots:
     void onIdle();
@@ -134,23 +134,23 @@ private slots:
 private:
     void Init();
     void Finalise() override;
-    bool DragThreshold(Point ptStart, Point ptNow) override;
-    bool ValidCodePage(int codePage) const override;
+    bool DragThreshold(Point pt_start, Point pt_now) override;
+    bool ValidCodePage(int code_page) const override;
     std::string UTF8FromEncoded(std::string_view encoded) const override;
     std::string EncodedFromUTF8(std::string_view utf8) const override;
 
 private:
 #ifdef SCINTILLAQUICK_ENABLE_TEST_ACCESS
-    friend class Scintilla::Internal::scintillaquick_validation_access;
+    friend class Scintilla::Internal::ScintillaQuick_validation_access;
 #endif
 
     void SetVerticalScrollPos() override;
     void SetHorizontalScrollPos() override;
     bool ModifyScrollBars(Sci::Line nMax, Sci::Line nPage) override;
-    void CopyToModeClipboard(const SelectionText &selectedText, QClipboard::Mode clipboardMode_);
+    void CopyToModeClipboard(const SelectionText &selected_text, QClipboard::Mode clipboard_mode);
     void Copy() override;
-    void CopyToClipboard(const SelectionText &selectedText) override;
-    void PasteFromMode(QClipboard::Mode clipboardMode_);
+    void CopyToClipboard(const SelectionText &selected_text) override;
+    void PasteFromMode(QClipboard::Mode clipboard_mode);
     void Paste() override;
     void ClaimSelection() override;
     void NotifyChange() override;
@@ -176,18 +176,18 @@ private:
     void CreateCallTipWindow(PRectangle rc) override;
     void AddToPopUp(const char *label, int cmd, bool enabled) override;
 public:
-    sptr_t WndProc(Scintilla::Message iMessage, uptr_t wParam, sptr_t lParam) override;
-    sptr_t DefWndProc(Scintilla::Message iMessage, uptr_t wParam, sptr_t lParam) override;
+    sptr_t WndProc(Scintilla::Message i_message, uptr_t w_param, sptr_t l_param) override;
+    sptr_t DefWndProc(Scintilla::Message i_message, uptr_t w_param, sptr_t l_param) override;
 private:
     static sptr_t DirectFunction(
-        sptr_t ptr, unsigned int iMessage, uptr_t wParam, sptr_t lParam);
+        sptr_t ptr, unsigned int i_message, uptr_t w_param, sptr_t l_param);
     static sptr_t DirectStatusFunction(
-        sptr_t ptr, unsigned int iMessage, uptr_t wParam, sptr_t lParam, int *pStatus);
-    struct style_attributes;
-    captured_frame capture_current_frame(
+        sptr_t ptr, unsigned int i_message, uptr_t w_param, sptr_t l_param, int *p_status);
+    struct Style_attributes;
+    Captured_frame capture_current_frame(
         bool static_content_dirty, bool ensure_styled, bool scrolling, int extra_capture_lines = 0);
-    render_frame render_frame_from_capture(const captured_frame &capture_frame) const;
-    style_attributes style_attributes_for(int style) const;
+    Render_frame render_frame_from_capture(const Captured_frame &capture_frame) const;
+    Style_attributes style_attributes_for(int style) const;
 
     QPainter *GetPainter() { return m_current_painter; }
 
@@ -211,7 +211,7 @@ private:
     // Quick build the "scroll area" and the editor item are the same
     // object. Parenting is handled by the QObject parent link set up
     // in the constructor.
-    ::ScintillaQuickItem *m_owner;
+    ::ScintillaQuick_item *m_owner;
 
     // Owning idle timer. Previously this was a bare `new QTimer`
     // stashed through `idler.idlerID` as `void*`, which leaked if
@@ -230,7 +230,7 @@ private:
 
     QPainter *m_current_painter;  // temporary variable for paint() handling
 
-    friend class ::ScintillaQuickItem;
+    friend class ::ScintillaQuick_item;
 };
 
 }

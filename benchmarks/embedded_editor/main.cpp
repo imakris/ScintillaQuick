@@ -42,7 +42,7 @@ namespace Scintilla::Internal {
 class ScintillaQuick_validation_access
 {
 public:
-    static std::vector<displayed_row_for_test_t> displayed_rows(::ScintillaQuickItem &item)
+    static std::vector<Displayed_row_for_test> displayed_rows(::ScintillaQuick_item &item)
     {
         return item.displayed_rows_for_test();
     }
@@ -52,17 +52,17 @@ public:
 
 namespace {
 
-class Benchmark_editor : public ScintillaQuickItem
+class Benchmark_editor : public ScintillaQuick_item
 {
 public:
-    using ScintillaQuickItem::ScintillaQuickItem;
+    using ScintillaQuick_item::ScintillaQuick_item;
 
     std::function<void()> on_paint_node_updated;
 
 protected:
-    QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *updatePaintNodeData) override
+    QSGNode *updatePaintNode(QSGNode *old_node, UpdatePaintNodeData *update_paint_node_data) override
     {
-        QSGNode *node = ScintillaQuickItem::updatePaintNode(oldNode, updatePaintNodeData);
+        QSGNode *node = ScintillaQuick_item::updatePaintNode(old_node, update_paint_node_data);
         if (on_paint_node_updated) {
             on_paint_node_updated();
         }
@@ -186,7 +186,7 @@ struct latency_stats_t
     double max_ms = 0.0;
 };
 
-struct correctness_issue_t
+struct Correctness_issue
 {
     int step = -1;
     QString message;
@@ -266,10 +266,10 @@ QString build_wrapped_document(int line_count)
     return lines.join('\n');
 }
 
-std::vector<Scintilla::Internal::displayed_row_for_test_t> visible_rows_for_viewport(Benchmark_editor &editor)
+std::vector<Scintilla::Internal::Displayed_row_for_test> visible_rows_for_viewport(Benchmark_editor &editor)
 {
     const auto rows = ::Scintilla::Internal::ScintillaQuick_validation_access::displayed_rows(editor);
-    std::vector<Scintilla::Internal::displayed_row_for_test_t> visible_rows;
+    std::vector<Scintilla::Internal::Displayed_row_for_test> visible_rows;
     visible_rows.reserve(rows.size());
     const qreal viewport_top = 0.0;
     const qreal viewport_bottom = static_cast<qreal>(editor.height());
@@ -282,8 +282,8 @@ std::vector<Scintilla::Internal::displayed_row_for_test_t> visible_rows_for_view
     std::sort(
         visible_rows.begin(),
         visible_rows.end(),
-        [](const Scintilla::Internal::displayed_row_for_test_t &lhs,
-           const Scintilla::Internal::displayed_row_for_test_t &rhs) {
+        [](const Scintilla::Internal::Displayed_row_for_test &lhs,
+           const Scintilla::Internal::Displayed_row_for_test &rhs) {
             if (lhs.top != rhs.top) {
                 return lhs.top < rhs.top;
             }
@@ -295,7 +295,7 @@ std::vector<Scintilla::Internal::displayed_row_for_test_t> visible_rows_for_view
     return visible_rows;
 }
 
-std::optional<correctness_issue_t> verify_visible_rows(
+std::optional<Correctness_issue> verify_visible_rows(
     Benchmark_editor &editor,
     int step,
     bool expect_wrapped_rows)
@@ -303,7 +303,7 @@ std::optional<correctness_issue_t> verify_visible_rows(
     const int first_visible_line = static_cast<int>(editor.send(SCI_GETFIRSTVISIBLELINE));
     const auto rows = visible_rows_for_viewport(editor);
     if (rows.empty()) {
-        return correctness_issue_t{step, QStringLiteral("published row snapshot is empty")};
+        return Correctness_issue{step, QStringLiteral("published row snapshot is empty")};
     }
 
     int wrapped_rows_seen = 0;
@@ -313,9 +313,9 @@ std::optional<correctness_issue_t> verify_visible_rows(
         const int visible_from_document_line = static_cast<int>(editor.send(SCI_VISIBLEFROMDOCLINE, expected_document_line));
         const int expected_subline_index = expected_display_line - visible_from_document_line;
         const int wrap_count = static_cast<int>(editor.send(SCI_WRAPCOUNT, expected_document_line));
-        const Scintilla::Internal::displayed_row_for_test_t &row = rows[static_cast<size_t>(i)];
+        const Scintilla::Internal::Displayed_row_for_test &row = rows[static_cast<size_t>(i)];
         if (row.document_line != expected_document_line) {
-            return correctness_issue_t{
+            return Correctness_issue{
                 step,
                 QStringLiteral("display line %1 mismatch: expected document line %2 got %3")
                     .arg(expected_display_line)
@@ -324,7 +324,7 @@ std::optional<correctness_issue_t> verify_visible_rows(
         }
 
         if (wrap_count <= 0) {
-            return correctness_issue_t{
+            return Correctness_issue{
                 step,
                 QStringLiteral("document line %1 reported invalid wrap count %2")
                     .arg(expected_document_line)
@@ -332,7 +332,7 @@ std::optional<correctness_issue_t> verify_visible_rows(
         }
 
         if (row.subline_index != expected_subline_index) {
-            return correctness_issue_t{
+            return Correctness_issue{
                 step,
                 QStringLiteral("display line %1 mismatch: expected subline %2 got %3 for document line %4")
                     .arg(expected_display_line)
@@ -342,7 +342,7 @@ std::optional<correctness_issue_t> verify_visible_rows(
         }
 
         if (row.subline_index < 0 || row.subline_index >= wrap_count) {
-            return correctness_issue_t{
+            return Correctness_issue{
                 step,
                 QStringLiteral("document line %1 published out-of-range subline %2 with wrap count %3")
                     .arg(expected_document_line)
@@ -355,7 +355,7 @@ std::optional<correctness_issue_t> verify_visible_rows(
                 ++wrapped_rows_seen;
             }
             if (row.text.isEmpty()) {
-                return correctness_issue_t{
+                return Correctness_issue{
                     step,
                     QStringLiteral("wrapped display line %1 produced empty row text for document line %2 subline %3")
                         .arg(expected_display_line)
@@ -365,7 +365,7 @@ std::optional<correctness_issue_t> verify_visible_rows(
         }
         else {
             if (row.subline_index != 0) {
-                return correctness_issue_t{
+                return Correctness_issue{
                     step,
                     QStringLiteral("unexpected wrapped subline %1 for document line %2")
                         .arg(row.subline_index)
@@ -374,7 +374,7 @@ std::optional<correctness_issue_t> verify_visible_rows(
             const QString actual_text = row.text;
             const QString expected_text = expected_document_line_text(expected_document_line);
             if (actual_text != expected_text) {
-                return correctness_issue_t{
+                return Correctness_issue{
                     step,
                     QStringLiteral("document line %1 mismatch: expected '%2' got '%3'")
                         .arg(expected_document_line)
@@ -385,7 +385,7 @@ std::optional<correctness_issue_t> verify_visible_rows(
     }
 
     if (expect_wrapped_rows && wrapped_rows_seen == 0) {
-        return correctness_issue_t{
+        return Correctness_issue{
             step,
             QStringLiteral("wrapped scroll scenario did not expose any wrapped sublines")};
     }
@@ -431,7 +431,7 @@ QJsonObject measure_paint_latency_scenario(
     Benchmark_editor &editor,
     quint64 &paint_counter,
     StepFn &&step_fn,
-    std::function<std::optional<correctness_issue_t>(Benchmark_editor &, int)> verify_step = {})
+    std::function<std::optional<Correctness_issue>(Benchmark_editor &, int)> verify_step = {})
 {
     const QString profiling_dir = profiling_session_directory(name);
     QDir().mkpath(profiling_dir);
@@ -440,7 +440,7 @@ QJsonObject measure_paint_latency_scenario(
     std::vector<double> latencies_ms;
     latencies_ms.reserve(static_cast<size_t>(steps));
     int timeout_count = 0;
-    std::vector<correctness_issue_t> correctness_issues;
+    std::vector<Correctness_issue> correctness_issues;
 
     QElapsedTimer total_timer;
     total_timer.start();
@@ -483,7 +483,7 @@ QJsonObject measure_paint_latency_scenario(
     cleanup_profiling_session_directory(profiling_dir);
     if (!correctness_issues.empty()) {
         QJsonArray issues_json;
-        for (const correctness_issue_t &issue : correctness_issues) {
+        for (const Correctness_issue &issue : correctness_issues) {
             QJsonObject issue_json;
             issue_json.insert(QStringLiteral("step"), issue.step);
             issue_json.insert(QStringLiteral("message"), issue.message);
@@ -494,7 +494,7 @@ QJsonObject measure_paint_latency_scenario(
     return result;
 }
 
-QPointF local_point_for_position(ScintillaQuickItem &editor, sptr_t position)
+QPointF local_point_for_position(ScintillaQuick_item &editor, sptr_t position)
 {
     const int x = static_cast<int>(editor.send(SCI_POINTXFROMPOSITION, 0, position));
     const int y = static_cast<int>(editor.send(SCI_POINTYFROMPOSITION, 0, position));
@@ -505,7 +505,7 @@ QPointF local_point_for_position(ScintillaQuickItem &editor, sptr_t position)
 
 void send_mouse_event(
     QQuickWindow &window,
-    ScintillaQuickItem &editor,
+    ScintillaQuick_item &editor,
     QEvent::Type type,
     QPointF local_pos,
     Qt::MouseButton button,
@@ -520,7 +520,7 @@ void send_mouse_event(
 
 void send_wheel_event(
     QQuickWindow &window,
-    ScintillaQuickItem &editor,
+    ScintillaQuick_item &editor,
     QPointF local_pos,
     QPoint pixel_delta,
     QPoint angle_delta,
@@ -588,23 +588,23 @@ int main(int argc, char **argv)
     pump_gui(5);
     editor.forceActiveFocus();
 
-    const QString largeDocument = build_large_document(25000);
-    const QString wrappedDocument = build_wrapped_document(4000);
-    const QByteArray insertText("x");
+    const QString large_document   = build_large_document(25000);
+    const QString wrapped_document = build_wrapped_document(4000);
+    const QByteArray insert_text("x");
     const QStringList selected_scenarios = parser.values(scenarioOption);
     const auto should_run_scenario = [&](QStringView name) {
         return selected_scenarios.isEmpty() || selected_scenarios.contains(name.toString());
     };
     const auto ensure_large_document_loaded = [&]() {
         editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
-        editor.setProperty("text", largeDocument);
+        editor.setProperty("text", large_document);
         pump_gui(10);
         editor.send(SCI_SETFIRSTVISIBLELINE, 0);
         pump_gui(4);
     };
     const auto ensure_wrapped_document_loaded = [&]() {
         editor.send(SCI_SETWRAPMODE, SC_WRAP_WORD);
-        editor.setProperty("text", wrappedDocument);
+        editor.setProperty("text", wrapped_document);
         pump_gui(10);
         editor.send(SCI_SETFIRSTVISIBLELINE, 0);
         pump_gui(4);
@@ -613,7 +613,7 @@ int main(int argc, char **argv)
     QJsonArray scenarios;
     if (should_run_scenario(QStringLiteral("load_large_document"))) {
         scenarios.append(measure_scenario(editor, QStringLiteral("load_large_document"), [&]() {
-            editor.setProperty("text", largeDocument);
+            editor.setProperty("text", large_document);
             pump_gui(10);
         }));
     }
@@ -632,7 +632,7 @@ int main(int argc, char **argv)
         scenarios.append(measure_scenario(editor, QStringLiteral("insert_character_2000"), [&]() {
             editor.send(SCI_GOTOPOS, editor.send(SCI_GETTEXTLENGTH));
             for (int i = 0; i < 2000; ++i) {
-                editor.send(SCI_ADDTEXT, 1, reinterpret_cast<sptr_t>(insertText.constData()));
+                editor.send(SCI_ADDTEXT, 1, reinterpret_cast<sptr_t>(insert_text.constData()));
             }
             pump_gui(5);
         }));
@@ -799,7 +799,7 @@ int main(int argc, char **argv)
                     editor.send(SCI_GETLINECOUNT) - 1,
                     editor.send(SCI_GETFIRSTVISIBLELINE) + 5);
                 editor.send(SCI_GOTOPOS, editor.send(SCI_POSITIONFROMLINE, target_line));
-                editor.send(SCI_ADDTEXT, 1, reinterpret_cast<sptr_t>(insertText.constData()));
+                editor.send(SCI_ADDTEXT, 1, reinterpret_cast<sptr_t>(insert_text.constData()));
                 const int next_top_line = static_cast<int>(editor.send(SCI_GETFIRSTVISIBLELINE)) + 3;
                 editor.scrollVertical(next_top_line);
             }));
@@ -865,10 +865,10 @@ int main(int argc, char **argv)
                 expected_zoom += zoom_in ? 1 : -1;
                 editor.send(zoom_in ? SCI_ZOOMIN : SCI_ZOOMOUT);
             },
-            [&](Benchmark_editor &editor, int step) -> std::optional<correctness_issue_t> {
+            [&](Benchmark_editor &editor, int step) -> std::optional<Correctness_issue> {
                 const int actual_zoom = static_cast<int>(editor.send(SCI_GETZOOM));
                 if (actual_zoom != expected_zoom) {
-                    return correctness_issue_t{
+                    return Correctness_issue{
                         step,
                         QStringLiteral("zoom mismatch: expected %1 got %2")
                             .arg(expected_zoom)

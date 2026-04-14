@@ -164,13 +164,13 @@ qreal snap_to_device_pixel(qreal value, qreal dpr)
     return std::round(value * dpr) / dpr;
 }
 
-struct colored_rect
+struct Colored_rect
 {
     QRectF rect;
     QColor color;
 };
 
-struct fold_marker_colors
+struct Fold_marker_colors
 {
     QColor head;
     QColor body;
@@ -178,8 +178,8 @@ struct fold_marker_colors
 };
 
 QRectF make_scintilla_circle_marker_rect(const QRectF &rect);
-QColor marker_fill_color(const marker_primitive &primitive);
-QColor marker_stroke_color(const marker_primitive &primitive);
+QColor marker_fill_color(const Marker_primitive &primitive);
+QColor marker_stroke_color(const Marker_primitive &primitive);
 
 QRectF snapped_underline_rect(const QRectF &rect, QQuickWindow *window)
 {
@@ -211,7 +211,7 @@ QRectF snapped_outline_rect(const QRectF &rect, QQuickWindow *window)
 }
 
 void append_horizontal_pixel_rects(
-    std::vector<colored_rect> &rects,
+    std::vector<Colored_rect> &rects,
     const QRectF &rect,
     const QColor &color,
     QQuickWindow *window)
@@ -238,7 +238,7 @@ void append_horizontal_pixel_rects(
 }
 
 void append_outline_pixel_rects(
-    std::vector<colored_rect> &rects,
+    std::vector<Colored_rect> &rects,
     const QRectF &rect,
     const QColor &color,
     QQuickWindow *window)
@@ -267,7 +267,7 @@ void append_outline_pixel_rects(
 }
 
 void append_corner_mask_rects(
-    std::vector<colored_rect> &rects,
+    std::vector<Colored_rect> &rects,
     const QRectF &rect,
     const QColor &mask_color,
     QQuickWindow *window)
@@ -339,7 +339,7 @@ QRectF represented_blob_body_rect(
 }
 
 void append_line_pixel_rects(
-    std::vector<colored_rect> &rects,
+    std::vector<Colored_rect> &rects,
     const QPointF &from,
     const QPointF &to,
     const QColor &color,
@@ -367,7 +367,7 @@ void append_line_pixel_rects(
 }
 
 void append_raster_image_rects(
-    std::vector<colored_rect> &rects,
+    std::vector<Colored_rect> &rects,
     const QImage &image,
     const QRectF &logical_rect,
     QQuickWindow *window)
@@ -431,7 +431,7 @@ bool is_fold_marker_symbol(int marker_type)
     }
 }
 
-fold_marker_colors fold_marker_colors(const marker_primitive &primitive)
+Fold_marker_colors fold_marker_colors_for(const Marker_primitive &primitive)
 {
     const QColor normal = marker_fill_color(primitive);
     const QColor selected =
@@ -439,7 +439,7 @@ fold_marker_colors fold_marker_colors(const marker_primitive &primitive)
             ? primitive.background_selected
             : normal;
 
-    fold_marker_colors colors{normal, normal, normal};
+    Fold_marker_colors colors{normal, normal, normal};
     switch (primitive.fold_part) {
         case 1:
         case 4:
@@ -461,8 +461,8 @@ fold_marker_colors fold_marker_colors(const marker_primitive &primitive)
 }
 
 bool append_rasterized_fold_marker_rects(
-    std::vector<colored_rect> &rects,
-    const marker_primitive &primitive,
+    std::vector<Colored_rect> &rects,
+    const Marker_primitive &primitive,
     QQuickWindow *window)
 {
     if (!window || !is_fold_marker_symbol(primitive.marker_type)) {
@@ -487,7 +487,7 @@ bool append_rasterized_fold_marker_rects(
     painter.setRenderHint(QPainter::Antialiasing, false);
     painter.translate(-whole_rect.left(), -whole_rect.top());
 
-    const fold_marker_colors colors = fold_marker_colors(primitive);
+    const Fold_marker_colors colors = fold_marker_colors_for(primitive);
     const QRectF symbol_rect        = make_scintilla_circle_marker_rect(whole_rect).normalized();
     const qreal symbol_center_x     = symbol_rect.center().x();
     const qreal symbol_center_y     = symbol_rect.center().y();
@@ -613,8 +613,8 @@ bool append_rasterized_fold_marker_rects(
 }
 
 void append_rasterized_circle_marker_rects(
-    std::vector<colored_rect>& rects,
-    const marker_primitive& primitive,
+    std::vector<Colored_rect>& rects,
+    const Marker_primitive& primitive,
     QQuickWindow* window)
 {
     if (!window) {
@@ -653,8 +653,8 @@ void append_rasterized_circle_marker_rects(
 }
 
 void append_rasterized_tab_arrow_rects(
-    std::vector<colored_rect> &rects,
-    const whitespace_mark_primitive &primitive,
+    std::vector<Colored_rect> &rects,
+    const Whitespace_mark_primitive &primitive,
     QQuickWindow *window)
 {
     if (!window) {
@@ -694,12 +694,12 @@ void append_rasterized_tab_arrow_rects(
         std::max(left_stroke, std::round(rect.right()) - 1.0 - half_width);
     const qreal y_mid         = primitive.mid_y != 0.0 ? primitive.mid_y : std::floor(rect.center().y());
     const qreal y_mid_aligned = y_mid + half_width;
-    const qreal ydiff         = std::floor(rect.height() / 2.0);
-    qreal xhead               = right_stroke - ydiff;
-    qreal head_height         = ydiff;
-    if (xhead <= rect.left()) {
-        head_height  -= rect.left() - xhead;
-        xhead         = rect.left();
+    const qreal y_diff         = std::floor(rect.height() / 2.0);
+    qreal x_head               = right_stroke - y_diff;
+    qreal head_height         = y_diff;
+    if (x_head <= rect.left()) {
+        head_height  -= rect.left() - x_head;
+        x_head         = rect.left();
     }
 
     const QPointF arrow_point(right_stroke, y_mid_aligned);
@@ -711,9 +711,9 @@ void append_rasterized_tab_arrow_rects(
 
     painter.drawPolyline(
         QPolygonF({
-            QPointF(xhead           - origin_left, y_mid_aligned   - head_height - origin_top),
+            QPointF(x_head           - origin_left, y_mid_aligned   - head_height - origin_top),
             QPointF(arrow_point.x() - origin_left, arrow_point.y() - origin_top),
-            QPointF(xhead           - origin_left, y_mid_aligned   + head_height - origin_top)
+            QPointF(x_head           - origin_left, y_mid_aligned   + head_height - origin_top)
         }));
     painter.end();
 
@@ -804,7 +804,7 @@ std::vector<QPointF> make_circle_outline_as_lines(const QRectF &rect, int segmen
     return lines;
 }
 
-QColor marker_fill_color(const marker_primitive &primitive)
+QColor marker_fill_color(const Marker_primitive &primitive)
 {
     if (primitive.background.isValid() && primitive.background.alpha() > 0) {
         return primitive.background;
@@ -812,7 +812,7 @@ QColor marker_fill_color(const marker_primitive &primitive)
     return primitive.foreground;
 }
 
-QColor marker_stroke_color(const marker_primitive &primitive)
+QColor marker_stroke_color(const Marker_primitive &primitive)
 {
     if (primitive.foreground.isValid() && primitive.foreground.alpha() > 0) {
         return primitive.foreground;
@@ -821,7 +821,7 @@ QColor marker_stroke_color(const marker_primitive &primitive)
 }
 
 // fold_part values: 0=undefined, 1=head, 2=body, 3=tail, 4=headWithTail
-QColor fold_connector_color(const marker_primitive &primitive)
+QColor fold_connector_color(const Marker_primitive &primitive)
 {
     // Use selected-background for active fold highlight, fall back to foreground
     if (primitive.fold_part > 0 &&
@@ -864,7 +864,7 @@ std::vector<QPointF> make_fold_connector_points(const QRectF &rect, int fold_par
     return points;
 }
 
-std::vector<QPointF> make_marker_connector_points(const marker_primitive &primitive)
+std::vector<QPointF> make_marker_connector_points(const Marker_primitive &primitive)
 {
     const QRectF rect = primitive.rect;
     switch (primitive.marker_type) {
@@ -1041,8 +1041,8 @@ std::vector<QPointF> make_indicator_squiggle_triangles(
 }
 
 void append_indicator_squiggle_rects(
-    std::vector<colored_rect> &rects,
-    const indicator_primitive &primitive,
+    std::vector<Colored_rect> &rects,
+    const Indicator_primitive &primitive,
     QQuickWindow *window)
 {
     const QRectF &rect         = primitive.rect;
@@ -1121,8 +1121,8 @@ std::vector<QPointF> make_indicator_box_triangles(
 }
 
 void append_indicator_box_rects(
-    std::vector<colored_rect>& rects,
-    const indicator_primitive& primitive,
+    std::vector<Colored_rect>& rects,
+    const Indicator_primitive& primitive,
     QQuickWindow* window)
 {
     const qreal dpr            = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
@@ -1358,7 +1358,7 @@ class Scene_graph_frame_text_node final : public QSGNode
 public:
     void update_from_visual_line(
         QQuickWindow *window,
-        const visual_line_frame &visual_line,
+        const Visual_line_frame &visual_line,
         const QRectF &viewport)
     {
         SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_visual_line");
@@ -1404,7 +1404,7 @@ public:
             set_translation(QPointF(0.0, 0.0));
         }
 
-        for (const text_run &run : visual_line.text_runs) {
+        for (const Text_run &run : visual_line.text_runs) {
             if (run.text.isEmpty() || run.represented_as_blob) {
                 continue;
             }
@@ -1419,11 +1419,11 @@ public:
 
                 QTextOption option;
                 option.setWrapMode(QTextOption::NoWrap);
-                if (run.direction == text_direction::right_to_left) {
+                if (run.direction == Text_direction::right_to_left) {
                     option.setTextDirection(Qt::RightToLeft);
                 }
                 else
-                if (run.direction == text_direction::mixed) {
+                if (run.direction == Text_direction::mixed) {
                     option.setTextDirection(Qt::LayoutDirectionAuto);
                 }
                 else {
@@ -1447,8 +1447,8 @@ public:
                 layout->beginLayout();
                 QTextLine line = layout->createLine();
                 if (line.isValid()) {
-                    if (run.direction == text_direction::right_to_left ||
-                        run.direction == text_direction::mixed) {
+                    if (run.direction == Text_direction::right_to_left ||
+                        run.direction == Text_direction::mixed) {
                         line.setLineWidth(std::max<qreal>(1.0, run.width));
                     }
                     else {
@@ -1484,13 +1484,13 @@ public:
         m_cached_viewport = viewport;
     }
 
-    const visual_line_key &cached_key() const { return m_cached_key; }
+    const Visual_line_key &cached_key() const { return m_cached_key; }
     bool has_valid_key() const { return m_has_cached_key; }
     void clear_cached_key() { m_has_cached_key = false; }
 
     void update_from_margin_text(
         QQuickWindow *window,
-        const margin_text_primitive &margin,
+        const Margin_text_primitive &margin,
         const QRectF &viewport)
     {
         SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_margin_text");
@@ -1501,7 +1501,7 @@ public:
 
         ensure_nodes(window);
 
-        const visual_line_key margin_key{margin.document_line, margin.subline_index};
+        const Visual_line_key margin_key{margin.document_line, margin.subline_index};
         const bool same_key = m_has_cached_key &&
             m_cached_key == margin_key;
 
@@ -1616,7 +1616,7 @@ public:
         m_transform_node->setMatrix(matrix);
     }
 
-    bool margin_layouts_match(const margin_text_primitive &margin) const
+    bool margin_layouts_match(const Margin_text_primitive &margin) const
     {
         return margin.text == m_cached_margin_text &&
                margin.font == m_cached_margin_font &&
@@ -1625,7 +1625,7 @@ public:
                 (!margin.text.isEmpty() && m_layouts.size() == 1));
     }
 
-    bool margin_position_matches(const margin_text_primitive &margin, const QRectF &viewport) const
+    bool margin_position_matches(const Margin_text_primitive &margin, const QRectF &viewport) const
     {
         const QRectF clip_rect =
             (margin.clip_rect.isValid() && !margin.clip_rect.isEmpty())
@@ -1637,17 +1637,17 @@ public:
                m_layout_positions[0] + m_translation == margin.position;
     }
 
-    bool layouts_match_content(const visual_line_frame &vl) const
+    bool layouts_match_content(const Visual_line_frame &vl) const
     {
         size_t cached_idx = 0;
-        for (const text_run &run : vl.text_runs) {
+        for (const Text_run &run : vl.text_runs) {
             if (run.text.isEmpty() || run.represented_as_blob) {
                 continue;
             }
             if (cached_idx >= m_cached_runs.size()) {
                 return false;
             }
-            const text_run &cached_run = m_cached_runs[cached_idx];
+            const Text_run &cached_run = m_cached_runs[cached_idx];
             if (cached_run.text != run.text ||
                 cached_run.font != run.font ||
                 cached_run.foreground != run.foreground ||
@@ -1669,13 +1669,13 @@ public:
         return cached_idx == m_cached_runs.size();
     }
 
-    bool positions_match(const visual_line_frame &vl, const QRectF &viewport) const
+    bool positions_match(const Visual_line_frame &vl, const QRectF &viewport) const
     {
         if (m_cached_viewport != viewport) {
             return false;
         }
         size_t idx = 0;
-        for (const text_run &run : vl.text_runs) {
+        for (const Text_run &run : vl.text_runs) {
             if (run.text.isEmpty() || run.represented_as_blob) {
                 continue;
             }
@@ -1690,12 +1690,12 @@ public:
         return idx == m_layout_positions.size();
     }
 
-    bool uniform_translation_delta(const visual_line_frame &vl, QPointF &delta) const
+    bool uniform_translation_delta(const Visual_line_frame &vl, QPointF &delta) const
     {
         delta           = QPointF(0.0, 0.0);
         bool have_delta = false;
         size_t idx      = 0;
-        for (const text_run &run : vl.text_runs) {
+        for (const Text_run &run : vl.text_runs) {
             if (run.text.isEmpty() || run.represented_as_blob) {
                 continue;
             }
@@ -1716,7 +1716,7 @@ public:
         return idx == m_layout_positions.size();
     }
 
-    bool uniform_translation_delta(const margin_text_primitive &margin, QPointF &delta) const
+    bool uniform_translation_delta(const Margin_text_primitive &margin, QPointF &delta) const
     {
         if (m_layout_positions.size() != 1) {
             return false;
@@ -1729,9 +1729,9 @@ public:
     QSGTextNode *m_text_node           = nullptr;
     QSGTransformNode *m_transform_node = nullptr;
     std::vector<std::unique_ptr<QTextLayout>> m_layouts;
-    std::vector<text_run> m_cached_runs;
+    std::vector<Text_run> m_cached_runs;
     std::vector<QPointF> m_layout_positions;
-    visual_line_key m_cached_key;
+    Visual_line_key m_cached_key;
     bool m_has_cached_key = false;
     QRectF m_cached_viewport;
     QRectF m_cached_clip_rect;
@@ -1850,7 +1850,7 @@ void reorder_child_nodes(QSGNode *parent, const std::vector<NodeT *> &nodes)
     }
 }
 
-uint64_t pack_visual_line_key(const visual_line_key &key)
+uint64_t pack_visual_line_key(const Visual_line_key &key)
 {
     return (static_cast<uint64_t>(static_cast<uint32_t>(key.document_line)) << 32) |
             static_cast<uint64_t>(static_cast<uint32_t>(key.subline_index));
@@ -1860,7 +1860,7 @@ void sync_text_nodes_by_key(
     QQuickWindow *window,
     QSGNode *parent,
     std::vector<Scene_graph_frame_text_node *> &nodes,
-    const std::vector<visual_line_frame> &visual_lines,
+    const std::vector<Visual_line_frame> &visual_lines,
     const QRectF &viewport)
 {
     if (!window || !parent) {
@@ -1934,7 +1934,7 @@ void sync_margin_text_nodes_by_key(
     QQuickWindow *window,
     QSGNode *parent,
     std::vector<Scene_graph_frame_text_node *> &nodes,
-    const std::vector<margin_text_primitive> &margins,
+    const std::vector<Margin_text_primitive> &margins,
     const QRectF &viewport)
 {
     if (!window || !parent) {
@@ -1955,7 +1955,7 @@ void sync_margin_text_nodes_by_key(
     std::vector<bool> old_used(nodes.size(), false);
 
     for (size_t i = 0; i < new_count; ++i) {
-        const visual_line_key margin_key{margins[i].document_line, margins[i].subline_index};
+        const Visual_line_key margin_key{margins[i].document_line, margins[i].subline_index};
         const uint64_t key = pack_visual_line_key(margin_key);
         auto it            = key_to_old_index.find(key);
         if (it != key_to_old_index.end() && !old_used[it->second]) {
@@ -2049,17 +2049,17 @@ public:
 
     void update_from_frame(
         QQuickWindow *window,
-        const render_snapshot &snapshot,
-        const render_frame &frame)
+        const Render_snapshot &snapshot,
+        const Render_frame &frame)
     {
         SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.update_from_frame");
 
         update_clip_node(m_text_clip_node, frame.text_rect);
 
-        std::vector<colored_rect> representation_blob_fill_rects;
-        std::vector<margin_text_primitive> representation_texts;
-        for (const visual_line_frame &visual_line : frame.visual_lines) {
-            for (const text_run &run : visual_line.text_runs) {
+        std::vector<Colored_rect> representation_blob_fill_rects;
+        std::vector<Margin_text_primitive> representation_texts;
+        for (const Visual_line_frame &visual_line : frame.visual_lines) {
+            for (const Text_run &run : visual_line.text_runs) {
                 if (!run.represented_as_blob) {
                     continue;
                 }
@@ -2083,7 +2083,7 @@ public:
                     blob_body_rect,
                     run.blob_outer,
                     window);
-                margin_text_primitive primitive;
+                Margin_text_primitive primitive;
                 primitive.text          = run.text;
                 primitive.position      = run.position;
                 primitive.baseline_y    = run.position.y();
@@ -2133,11 +2133,11 @@ public:
             });
 
         // Current-line highlight from frame (authoritative capture)
-        std::vector<current_line_primitive> filled_current_lines;
-        std::vector<current_line_primitive> framed_current_lines;
+        std::vector<Current_line_primitive> filled_current_lines;
+        std::vector<Current_line_primitive> framed_current_lines;
         filled_current_lines.reserve(frame.current_line_primitives.size());
         framed_current_lines.reserve(frame.current_line_primitives.size());
-        for (const current_line_primitive &primitive : frame.current_line_primitives) {
+        for (const Current_line_primitive &primitive : frame.current_line_primitives) {
             if (primitive.framed) {
                 framed_current_lines.push_back(primitive);
             }
@@ -2156,8 +2156,8 @@ public:
                 node->setColor(filled_current_lines[i].color);
             });
 
-        std::vector<colored_rect> current_line_frame_rects;
-        for (const current_line_primitive &primitive : framed_current_lines) {
+        std::vector<Colored_rect> current_line_frame_rects;
+        for (const Current_line_primitive &primitive : framed_current_lines) {
             append_outline_pixel_rects(current_line_frame_rects, primitive.rect, primitive.color, window);
         }
         sync_rectangle_nodes(
@@ -2203,13 +2203,13 @@ public:
 
         // Indicator geometry from frame metadata (index-based to avoid copies).
         std::vector<size_t> under_fill_idx, under_geo_idx, over_fill_idx, over_geo_idx;
-        std::vector<colored_rect> under_stroke_rects, over_stroke_rects;
+        std::vector<Colored_rect> under_stroke_rects, over_stroke_rects;
         under_fill_idx.reserve(frame.indicator_primitives.size());
         under_geo_idx.reserve(frame.indicator_primitives.size());
         over_fill_idx.reserve(frame.indicator_primitives.size());
         over_geo_idx.reserve(frame.indicator_primitives.size());
         for (size_t j = 0; j < frame.indicator_primitives.size(); ++j) {
-            const indicator_primitive &primitive = frame.indicator_primitives[j];
+            const Indicator_primitive &primitive = frame.indicator_primitives[j];
             const bool is_rectangle              = primitive.indicator_style == static_cast<int>(IndicatorStyle::Plain);
             const bool uses_stroke_rects =
                 primitive.indicator_style == static_cast<int>(IndicatorStyle::Squiggle) ||
@@ -2263,7 +2263,7 @@ public:
             m_indicator_under_fill_nodes,
             static_cast<qsizetype>(under_fill_idx.size()),
             [&](QSGRectangleNode *node, size_t i) {
-                const indicator_primitive &p = frame.indicator_primitives[under_fill_idx[i]];
+                const Indicator_primitive &p = frame.indicator_primitives[under_fill_idx[i]];
                 node->setRect(p.rect);
                 node->setColor(p.color);
             });
@@ -2284,7 +2284,7 @@ public:
             m_indicator_under_nodes,
             static_cast<qsizetype>(under_geo_idx.size()),
             [&](QSGGeometryNode *&node, size_t i) {
-                const indicator_primitive &primitive = frame.indicator_primitives[under_geo_idx[i]];
+                const Indicator_primitive &primitive = frame.indicator_primitives[under_geo_idx[i]];
                 const QRectF rect                    = primitive.rect;
                 std::vector<QPointF> points;
                 QSGGeometry::DrawingMode mode = QSGGeometry::DrawLines;
@@ -2386,7 +2386,7 @@ public:
             m_indicator_over_fill_nodes,
             static_cast<qsizetype>(over_fill_idx.size()),
             [&](QSGRectangleNode *node, size_t i) {
-                const indicator_primitive& p = frame.indicator_primitives[over_fill_idx[i]];
+                const Indicator_primitive& p = frame.indicator_primitives[over_fill_idx[i]];
                 node->setRect( p.rect);
                 node->setColor(p.color);
             });
@@ -2407,7 +2407,7 @@ public:
             m_indicator_over_nodes,
             static_cast<qsizetype>(over_geo_idx.size()),
             [&](QSGGeometryNode *&node, size_t i) {
-                const indicator_primitive &primitive = frame.indicator_primitives[over_geo_idx[i]];
+                const Indicator_primitive &primitive = frame.indicator_primitives[over_geo_idx[i]];
                 const QRectF rect                    = primitive.rect;
                 std::vector<QPointF> points;
                 QSGGeometry::DrawingMode mode = QSGGeometry::DrawLines;
@@ -2510,7 +2510,7 @@ public:
             m_marker_connector_nodes,
             static_cast<qsizetype>(frame.marker_primitives.size()),
             [&](QSGGeometryNode *&node, size_t i) {
-                const marker_primitive &primitive = frame.marker_primitives[i];
+                const Marker_primitive &primitive = frame.marker_primitives[i];
                 const std::vector<QPointF> points =
                     (is_software_backend(window) && is_fold_marker_symbol(primitive.marker_type))
                         ? std::vector<QPointF>{}
@@ -2524,9 +2524,9 @@ public:
                     fold_connector_color(primitive));
             });
 
-        std::vector<colored_rect> marker_raster_rects;
+        std::vector<Colored_rect> marker_raster_rects;
         if (is_software_backend(window)) {
-            for (const marker_primitive &primitive : frame.marker_primitives) {
+            for (const Marker_primitive &primitive : frame.marker_primitives) {
                 if (append_rasterized_fold_marker_rects(marker_raster_rects, primitive, window)) {
                     continue;
                 }
@@ -2552,7 +2552,7 @@ public:
             m_marker_nodes,
             static_cast<qsizetype>(frame.marker_primitives.size()),
             [&](QSGGeometryNode *&node, size_t i) {
-                const marker_primitive &primitive = frame.marker_primitives[i];
+                const Marker_primitive &primitive = frame.marker_primitives[i];
                 if (is_software_backend(window) && is_fold_marker_symbol(primitive.marker_type)) {
                     update_geometry_node(
                         window,
@@ -2761,7 +2761,7 @@ public:
             m_marker_outline_nodes,
             static_cast<qsizetype>(frame.marker_primitives.size()),
             [&](QSGGeometryNode *&node, size_t i) {
-                const marker_primitive &primitive = frame.marker_primitives[i];
+                const Marker_primitive &primitive = frame.marker_primitives[i];
                 std::vector<QPointF> points;
 
                 if (!is_software_backend(window) &&
@@ -2799,8 +2799,8 @@ public:
             m_fold_display_text_nodes,
             static_cast<qsizetype>(frame.fold_display_texts.size()),
             [&](Scene_graph_frame_text_node *node, size_t i) {
-                const fold_display_text_primitive &fold = frame.fold_display_texts[i];
-                margin_text_primitive as_margin;
+                const Fold_display_text_primitive &fold = frame.fold_display_texts[i];
+                Margin_text_primitive as_margin;
                 as_margin.text          = fold.text;
                 as_margin.position      = fold.position;
                 as_margin.baseline_y    = fold.baseline_y;
@@ -2819,7 +2819,7 @@ public:
                 boxed_fold_idx.push_back(j);
             }
         }
-        std::vector<colored_rect> fold_display_box_rects;
+        std::vector<Colored_rect> fold_display_box_rects;
         for (size_t i = 0; i < boxed_fold_idx.size(); ++i) {
             const auto &fold = frame.fold_display_texts[boxed_fold_idx[i]];
             append_outline_pixel_rects(
@@ -2860,8 +2860,8 @@ public:
             m_eol_annotation_nodes,
             static_cast<qsizetype>(frame.eol_annotations.size()),
             [&](Scene_graph_frame_text_node *node, size_t i) {
-                const eol_annotation_primitive &eol = frame.eol_annotations[i];
-                margin_text_primitive as_margin;
+                const Eol_annotation_primitive &eol = frame.eol_annotations[i];
+                Margin_text_primitive as_margin;
                 as_margin.text          = eol.text;
                 as_margin.position      = eol.position;
                 as_margin.baseline_y    = eol.baseline_y;
@@ -2880,7 +2880,7 @@ public:
                 boxed_eol_idx.push_back(j);
             }
         }
-        std::vector<colored_rect> eol_annotation_box_rects;
+        std::vector<Colored_rect> eol_annotation_box_rects;
         for (size_t i = 0; i < boxed_eol_idx.size(); ++i) {
             const auto &eol = frame.eol_annotations[boxed_eol_idx[i]];
             append_outline_pixel_rects(
@@ -2916,8 +2916,8 @@ public:
             m_annotation_nodes,
             static_cast<qsizetype>(frame.annotations.size()),
             [&](Scene_graph_frame_text_node *node, size_t i) {
-                const annotation_primitive &annot = frame.annotations[i];
-                margin_text_primitive as_margin;
+                const Annotation_primitive &annot = frame.annotations[i];
+                Margin_text_primitive as_margin;
                 as_margin.text          = annot.text;
                 as_margin.position      = annot.position;
                 as_margin.baseline_y    = annot.baseline_y;
@@ -2936,7 +2936,7 @@ public:
                 boxed_annot_idx.push_back(j);
             }
         }
-        std::vector<colored_rect> annotation_box_rects;
+        std::vector<Colored_rect> annotation_box_rects;
         for (size_t i = 0; i < boxed_annot_idx.size(); ++i) {
             const auto &annot = frame.annotations[boxed_annot_idx[i]];
             append_outline_pixel_rects(annotation_box_rects, annot.rect, annot.foreground, window);
@@ -2956,7 +2956,7 @@ public:
         ws_dot_idx.reserve(frame.whitespace_marks.size());
         ws_tab_idx.reserve(frame.whitespace_marks.size());
         for (size_t j = 0; j < frame.whitespace_marks.size(); ++j) {
-            if (frame.whitespace_marks[j].kind == whitespace_mark_kind::space_dot) {
+            if (frame.whitespace_marks[j].kind == Whitespace_mark_kind_t::space_dot) {
                 ws_dot_idx.push_back(j);
             }
             else {
@@ -2975,7 +2975,7 @@ public:
                 node->setColor(ws.color);
             });
 
-        std::vector<colored_rect> whitespace_tab_rects;
+        std::vector<Colored_rect> whitespace_tab_rects;
         for (size_t i = 0; i < ws_tab_idx.size(); ++i) {
             append_rasterized_tab_arrow_rects(
                 whitespace_tab_rects,
@@ -2993,8 +2993,8 @@ public:
             });
 
         // Decoration underlines (hotspot + style underlines as rectangles)
-        std::vector<colored_rect> decoration_underline_rects;
-        for (const decoration_underline_primitive &underline : frame.decoration_underlines) {
+        std::vector<Colored_rect> decoration_underline_rects;
+        for (const Decoration_underline_primitive &underline : frame.decoration_underlines) {
             append_horizontal_pixel_rects(
                 decoration_underline_rects,
                 underline.rect,
@@ -3025,7 +3025,7 @@ public:
         const auto snap_to_device_pixel = [dpr](qreal value) {
             return std::round(value * dpr) / dpr;
         };
-        for (const indent_guide_primitive &guide : frame.indent_guides) {
+        for (const Indent_guide_primitive &guide : frame.indent_guides) {
             QColor color = guide.color.isValid() ? guide.color
                 : (guide.highlight ? QColor(192, 192, 192) : QColor(128, 128, 128));
             const int target_alpha = guide.highlight ? 80 : 42;
@@ -3120,11 +3120,11 @@ private:
 
 }
 
-QSGNode *scene_graph_renderer::update(
+QSGNode *Scene_graph_renderer::update(
     QQuickWindow *window,
     QSGNode *old_node,
-    const render_snapshot &snapshot,
-    const render_frame &frame)
+    const Render_snapshot &snapshot,
+    const Render_frame &frame)
 {
     SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.update");
 

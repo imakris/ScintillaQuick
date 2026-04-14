@@ -61,7 +61,7 @@ QString build_wrapped_document(int line_count)
 
 void send_wheel_event(
     QQuickWindow &window,
-    ScintillaQuickItem &editor,
+    ScintillaQuick_item &editor,
     QPointF local_pos,
     QPoint pixel_delta,
     QPoint angle_delta,
@@ -81,16 +81,16 @@ void send_wheel_event(
     QCoreApplication::sendEvent(&editor, &event);
 }
 
-struct comparison_result
+struct Comparison_result
 {
     int differing_pixels = 0;
     double diff_ratio = 0.0;
     QImage diff_image;
 };
 
-comparison_result compare_images(const QImage &actual, const QImage &expected)
+Comparison_result compare_images(const QImage &actual, const QImage &expected)
 {
-    comparison_result result;
+    Comparison_result result;
 
     QImage a = actual.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     QImage e = expected.convertToFormat(QImage::Format_ARGB32_Premultiplied);
@@ -140,7 +140,7 @@ comparison_result compare_images(const QImage &actual, const QImage &expected)
     return result;
 }
 
-struct review_fixture
+struct Review_fixture
 {
     QString name;
     std::function<void(class Fixture_editor &)> setup;
@@ -148,14 +148,14 @@ struct review_fixture
 
 struct Fixture_editor
 {
-    struct Test_editor : ScintillaQuickItem
+    struct Test_editor : ScintillaQuick_item
     {
         std::function<void()> on_paint_node_updated;
 
     protected:
-        QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *updatePaintNodeData) override
+        QSGNode *updatePaintNode(QSGNode *old_node, UpdatePaintNodeData *update_paint_node_data) override
         {
-            QSGNode *node = ScintillaQuickItem::updatePaintNode(oldNode, updatePaintNodeData);
+            QSGNode *node = ScintillaQuick_item::updatePaintNode(old_node, update_paint_node_data);
             if (on_paint_node_updated) {
                 on_paint_node_updated();
             }
@@ -281,7 +281,7 @@ struct Fixture_editor
     QImage capture_reference_image()
     {
         pump();
-        return scintillaquick_validation_access::capture_raster_reference(editor);
+        return ScintillaQuick_validation_access::capture_raster_reference(editor);
     }
 };
 
@@ -355,7 +355,7 @@ bool apply_wheel_step_fixture(
     return true;
 }
 
-review_fixture make_wheel_review_fixture(
+Review_fixture make_wheel_review_fixture(
     const QString &name,
     bool wrapped,
     int steps)
@@ -371,9 +371,9 @@ review_fixture make_wheel_review_fixture(
     };
 }
 
-std::vector<review_fixture> review_fixtures()
+std::vector<Review_fixture> review_fixtures()
 {
-    std::vector<review_fixture> fixtures = {
+    std::vector<Review_fixture> fixtures = {
         {
             QStringLiteral("plain_ascii_short"),
             [](Fixture_editor &fixture) {
@@ -817,7 +817,7 @@ int main(int argc, char **argv)
     };
 
     int generated_count = 0;
-    for (const review_fixture &fixture_def : review_fixtures()) {
+    for (const Review_fixture &fixture_def : review_fixtures()) {
         if (!should_run_fixture(fixture_def.name)) {
             continue;
         }
@@ -848,7 +848,7 @@ int main(int argc, char **argv)
             return 1;
         }
 
-        const comparison_result comparison = compare_images(quick, reference);
+        const Comparison_result comparison = compare_images(quick, reference);
         const QString fixture_dir = QDir(output_dir).filePath(fixture_def.name);
 
         if (!write_image(QDir(fixture_dir).filePath(QStringLiteral("scintilla_reference.png")), reference) ||

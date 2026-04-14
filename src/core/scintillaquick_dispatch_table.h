@@ -3,7 +3,7 @@
 //
 // ScintillaQuick dispatch table for scene-graph update requests.
 //
-// Extracted from ScintillaQuickItem.cpp so that the table can be unit
+// Extracted from ScintillaQuick_item.cpp so that the table can be unit
 // tested directly without spinning up a Qt Quick window.
 //
 // The key correctness property the tests guard is:
@@ -23,7 +23,7 @@
 
 namespace Scintilla::Internal {
 
-struct scene_graph_update_request_info
+struct scene_graph_update_request_info_t
 {
     bool needed               = false;
     bool static_content_dirty = false;
@@ -35,7 +35,7 @@ struct scene_graph_update_request_info
 // as non-visual. Messages listed here take the fast path and skip
 // scene-graph resync.
 //
-// CRITICAL invariant: every SCI_* message that ScintillaQuickItem or its
+// CRITICAL invariant: every SCI_* message that ScintillaQuick_item or its
 // helper getters call INTERNALLY via `send()` must appear in this list
 // if it is a read-only query. If it does not, the conservative default
 // in `scene_graph_update_request()` will trigger a full resync, which
@@ -44,13 +44,13 @@ struct scene_graph_update_request_info
 //
 // The "internal callers" we must cover today are:
 //
-//   * ScintillaQuickItem::syncQuickViewProperties()
-//   * ScintillaQuickItem::getCharHeight() / getCharWidth()
-//   * ScintillaQuickItem::getVisibleLines() / getVisibleColumns()
-//   * ScintillaQuickItem::getFirstVisibleColumn() / getFirstVisibleLine()
-//   * ScintillaQuickItem::getTotalLines() / getTotalColumns()
-//   * ScintillaQuickItem::getText() / getReadonly()
-//   * style_attributes_for() (helper in ScintillaQuickItem.cpp)
+//   * ScintillaQuick_item::syncQuickViewProperties()
+//   * ScintillaQuick_item::getCharHeight() / getCharWidth()
+//   * ScintillaQuick_item::getVisibleLines() / getVisibleColumns()
+//   * ScintillaQuick_item::getFirstVisibleColumn() / getFirstVisibleLine()
+//   * ScintillaQuick_item::getTotalLines() / getTotalColumns()
+//   * ScintillaQuick_item::getText() / getReadonly()
+//   * style_attributes_for() (helper in ScintillaQuick_item.cpp)
 //   * ProcessScintillaContextMenu() and IME query helpers
 //
 // Public callers also routinely use `send()` for getter-style queries
@@ -59,9 +59,9 @@ struct scene_graph_update_request_info
 // rebuilds just because they are not on the small internal hot-path
 // allow-list; they are semantically queries and do not change what is
 // rendered.
-inline bool scene_graph_message_is_known_getter(unsigned int iMessage)
+inline bool scene_graph_message_is_known_getter(unsigned int i_message)
 {
-    switch (iMessage) {
+    switch (i_message) {
         case SCI_GETLENGTH:
         case SCI_GETCHARAT:
         case SCI_GETCURRENTPOS:
@@ -268,13 +268,13 @@ inline bool scene_graph_message_is_known_getter(unsigned int iMessage)
     }
 }
 
-inline bool scene_graph_message_is_known_read_only(unsigned int iMessage)
+inline bool scene_graph_message_is_known_read_only(unsigned int i_message)
 {
-    if (scene_graph_message_is_known_getter(iMessage)) {
+    if (scene_graph_message_is_known_getter(i_message)) {
         return true;
     }
 
-    switch (iMessage) {
+    switch (i_message) {
         // Non-GET query helpers with no visual side effects.
         case SCI_CANREDO:
         case SCI_CANPASTE:
@@ -321,9 +321,9 @@ inline bool scene_graph_message_is_known_read_only(unsigned int iMessage)
     }
 }
 
-inline scene_graph_update_request_info scene_graph_update_request(unsigned int iMessage)
+inline scene_graph_update_request_info_t scene_graph_update_request(unsigned int i_message)
 {
-    switch (iMessage) {
+    switch (i_message) {
         case SCI_SETXOFFSET:
             return {true, true, false, false};
 
@@ -400,7 +400,7 @@ inline scene_graph_update_request_info scene_graph_update_request(unsigned int i
     }
 
     // Fast path for the read-only messages the library itself calls frequently.
-    if (scene_graph_message_is_known_read_only(iMessage)) {
+    if (scene_graph_message_is_known_read_only(i_message)) {
         return {};
     }
 
@@ -411,9 +411,9 @@ inline scene_graph_update_request_info scene_graph_update_request(unsigned int i
     return {true, true, true, false};
 }
 
-inline bool tracked_scroll_width_should_reset(unsigned int iMessage)
+inline bool tracked_scroll_width_should_reset(unsigned int i_message)
 {
-    switch (iMessage) {
+    switch (i_message) {
         case SCI_SETTEXT:
         case SCI_CLEARALL:
         case SCI_STYLECLEARALL:

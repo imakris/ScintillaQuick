@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Ioannis Makris
 // Licensed under the BSD 2-Clause License, see LICENSE file for details.
 //
-// @file ScintillaQuickCore.cpp - Qt specific subclass of ScintillaBase
+// @file ScintillaQuick_core.cpp - Qt specific subclass of ScintillaBase
 
 #include "ScintillaQuickCore.h"
 #include "scintillaquick_hierarchical_profiler.h"
@@ -43,24 +43,24 @@ QRectF rect_from_capture(double left, double top, double right, double bottom)
     return QRectF(QPointF(left, top), QPointF(right, bottom)).normalized();
 }
 
-text_direction direction_from_capture(Capture_text_direction direction)
+Text_direction direction_from_capture(Capture_text_direction direction)
 {
     switch (direction) {
         case Capture_text_direction::left_to_right:
-            return text_direction::left_to_right;
+            return Text_direction::left_to_right;
         case Capture_text_direction::right_to_left:
-            return text_direction::right_to_left;
+            return Text_direction::right_to_left;
         case Capture_text_direction::mixed:
-            return text_direction::mixed;
+            return Text_direction::mixed;
     }
 
-    return text_direction::left_to_right;
+    return Text_direction::left_to_right;
 }
 
-class capture_frame_builder final : public Render_collector
+class Capture_frame_builder final : public Render_collector
 {
 public:
-    capture_frame_builder(captured_frame &frame, bool capture_static_content)
+    Capture_frame_builder(Captured_frame &frame, bool capture_static_content)
     :
         m_frame(frame),
         m_capture_static_content(capture_static_content)
@@ -74,7 +74,7 @@ public:
 
     void begin_visual_line(const Captured_visual_line &line) override
     {
-        capture_visual_line visual_line;
+        Capture_visual_line visual_line;
         visual_line.document_line = line.document_line;
         visual_line.subline_index = line.subline_index;
         visual_line.visual_order  = line.visual_order;
@@ -93,39 +93,39 @@ public:
             return;
         }
 
-        capture_text_run text_run;
-        text_run.text                = run.utf8_text;
-        text_run.foreground          = QColorFromColourRGBA(ColourRGBA(static_cast<int>(run.foreground_rgba)));
-        text_run.x                   = run.x;
-        text_run.width               = run.width;
-        text_run.top                 = run.top;
-        text_run.bottom              = run.bottom;
-        text_run.blob_text_left      = run.blob_text_left;
-        text_run.blob_text_top       = run.blob_text_top;
-        text_run.blob_text_right     = run.blob_text_right;
-        text_run.blob_text_bottom    = run.blob_text_bottom;
-        text_run.blob_outer_left     = run.blob_outer_left;
-        text_run.blob_outer_top      = run.blob_outer_top;
-        text_run.blob_outer_right    = run.blob_outer_right;
-        text_run.blob_outer_bottom   = run.blob_outer_bottom;
-        text_run.blob_inner_left     = run.blob_inner_left;
-        text_run.blob_inner_top      = run.blob_inner_top;
-        text_run.blob_inner_right    = run.blob_inner_right;
-        text_run.blob_inner_bottom   = run.blob_inner_bottom;
-        text_run.baseline_y          = run.baseline_y;
-        text_run.style_id            = run.style_id;
-        text_run.blob_outer          = QColorFromColourRGBA(ColourRGBA(static_cast<int>(run.blob_outer_rgba)));
-        text_run.blob_inner          = QColorFromColourRGBA(ColourRGBA(static_cast<int>(run.blob_inner_rgba)));
-        text_run.direction           = direction_from_capture(run.direction);
-        text_run.is_represented_text = run.is_represented_text;
-        text_run.represented_as_blob = run.represented_as_blob;
+        Capture_text_run Text_run;
+        Text_run.text                = run.utf8_text;
+        Text_run.foreground          = QColorFromColourRGBA(ColourRGBA(static_cast<int>(run.foreground_rgba)));
+        Text_run.x                   = run.x;
+        Text_run.width               = run.width;
+        Text_run.top                 = run.top;
+        Text_run.bottom              = run.bottom;
+        Text_run.blob_text_left      = run.blob_text_left;
+        Text_run.blob_text_top       = run.blob_text_top;
+        Text_run.blob_text_right     = run.blob_text_right;
+        Text_run.blob_text_bottom    = run.blob_text_bottom;
+        Text_run.blob_outer_left     = run.blob_outer_left;
+        Text_run.blob_outer_top      = run.blob_outer_top;
+        Text_run.blob_outer_right    = run.blob_outer_right;
+        Text_run.blob_outer_bottom   = run.blob_outer_bottom;
+        Text_run.blob_inner_left     = run.blob_inner_left;
+        Text_run.blob_inner_top      = run.blob_inner_top;
+        Text_run.blob_inner_right    = run.blob_inner_right;
+        Text_run.blob_inner_bottom   = run.blob_inner_bottom;
+        Text_run.baseline_y          = run.baseline_y;
+        Text_run.style_id            = run.style_id;
+        Text_run.blob_outer          = QColorFromColourRGBA(ColourRGBA(static_cast<int>(run.blob_outer_rgba)));
+        Text_run.blob_inner          = QColorFromColourRGBA(ColourRGBA(static_cast<int>(run.blob_inner_rgba)));
+        Text_run.direction           = direction_from_capture(run.direction);
+        Text_run.is_represented_text = run.is_represented_text;
+        Text_run.represented_as_blob = run.represented_as_blob;
 
-        m_current_visual_line->text_runs.push_back(std::move(text_run));
+        m_current_visual_line->text_runs.push_back(std::move(Text_run));
     }
 
     void add_selection_rect(const Captured_selection_rect &rect) override
     {
-        capture_selection_primitive selection;
+        Capture_selection_primitive selection;
         selection.left    = rect.left;
         selection.top     = rect.top;
         selection.right   = rect.right;
@@ -137,7 +137,7 @@ public:
 
     void add_caret_rect(const Captured_caret_rect &rect) override
     {
-        capture_caret_primitive caret;
+        Capture_caret_primitive caret;
         caret.left    = rect.left;
         caret.top     = rect.top;
         caret.right   = rect.right;
@@ -149,7 +149,7 @@ public:
 
     void add_indicator_primitive(const Captured_indicator &indicator) override
     {
-        capture_indicator_primitive primitive;
+        Capture_indicator_primitive primitive;
         primitive.left             = indicator.left;
         primitive.top              = indicator.top;
         primitive.right            = indicator.right;
@@ -173,7 +173,7 @@ public:
 
     void add_current_line_highlight(const Captured_current_line_highlight &highlight) override
     {
-        capture_current_line_primitive primitive;
+        Capture_current_line_primitive primitive;
         primitive.left   = highlight.left;
         primitive.top    = highlight.top;
         primitive.right  = highlight.right;
@@ -185,7 +185,7 @@ public:
 
     void add_marker_symbol(const Captured_marker_symbol &marker) override
     {
-        capture_marker_primitive primitive;
+        Capture_marker_primitive primitive;
         primitive.left               = marker.left;
         primitive.top                = marker.top;
         primitive.right              = marker.right;
@@ -202,7 +202,7 @@ public:
 
     void add_margin_text(const Captured_margin_text &text) override
     {
-        capture_margin_text_primitive primitive;
+        Capture_margin_text_primitive primitive;
         primitive.text          = text.utf8_text;
         primitive.x             = text.x;
         primitive.y             = text.y;
@@ -219,7 +219,7 @@ public:
 
     void add_fold_display_text(const Captured_fold_display_text &text) override
     {
-        capture_fold_display_text primitive;
+        Capture_fold_display_text primitive;
         primitive.text          = text.utf8_text;
         primitive.left          = text.left;
         primitive.top           = text.top;
@@ -236,7 +236,7 @@ public:
 
     void add_eol_annotation(const Captured_eol_annotation &annotation) override
     {
-        capture_eol_annotation primitive;
+        Capture_eol_annotation primitive;
         primitive.text          = annotation.utf8_text;
         primitive.left          = annotation.left;
         primitive.top           = annotation.top;
@@ -254,7 +254,7 @@ public:
 
     void add_annotation(const Captured_annotation &annotation) override
     {
-        capture_annotation primitive;
+        Capture_annotation primitive;
         primitive.text            = annotation.utf8_text;
         primitive.left            = annotation.left;
         primitive.top             = annotation.top;
@@ -273,7 +273,7 @@ public:
 
     void add_whitespace_mark(const Captured_whitespace_mark &mark) override
     {
-        capture_whitespace_mark primitive;
+        Capture_whitespace_mark primitive;
         primitive.left   = mark.left;
         primitive.top    = mark.top;
         primitive.right  = mark.right;
@@ -281,28 +281,28 @@ public:
         primitive.mid_y  = mark.mid_y;
         primitive.rgba   = mark.rgba;
         primitive.kind   = (mark.kind == Whitespace_mark_kind::tab_arrow)
-            ? whitespace_mark_kind::tab_arrow
-            : whitespace_mark_kind::space_dot;
+            ? Whitespace_mark_kind_t::tab_arrow
+            : Whitespace_mark_kind_t::space_dot;
         m_frame.whitespace_marks.push_back(std::move(primitive));
     }
 
     void add_decoration_underline(const Captured_decoration_underline &underline) override
     {
-        capture_decoration_underline primitive;
+        Capture_decoration_underline primitive;
         primitive.left   = underline.left;
         primitive.top    = underline.top;
         primitive.right  = underline.right;
         primitive.bottom = underline.bottom;
         primitive.rgba   = underline.rgba;
         primitive.kind   = (underline.kind == Decoration_kind::hotspot)
-            ? decoration_kind::hotspot
-            : decoration_kind::style_underline;
+            ? Decoration_kind_t::hotspot
+            : Decoration_kind_t::style_underline;
         m_frame.decoration_underlines.push_back(std::move(primitive));
     }
 
     void add_indent_guide(const Captured_indent_guide &guide) override
     {
-        capture_indent_guide primitive;
+        Capture_indent_guide primitive;
         primitive.x         = guide.x;
         primitive.top       = guide.top;
         primitive.bottom    = guide.bottom;
@@ -317,14 +317,14 @@ public:
     }
 
 private:
-    captured_frame &m_frame;
+    Captured_frame &m_frame;
     bool m_capture_static_content              = true;
-    capture_visual_line *m_current_visual_line = nullptr;
+    Capture_visual_line *m_current_visual_line = nullptr;
 };
 
 }
 
-ScintillaQuickCore::ScintillaQuickCore(::ScintillaQuickItem *parent)
+ScintillaQuick_core::ScintillaQuick_core(::ScintillaQuick_item *parent)
 : QObject(parent), m_owner(parent), m_v_max(0),  m_h_max(0), m_v_page(0), m_h_page(0),
  m_have_mouse_capture(false), m_drag_was_dropped(false),
  m_rectangular_selection_modifier(SCMOD_ALT),
@@ -344,17 +344,17 @@ ScintillaQuickCore::ScintillaQuickCore(::ScintillaQuickItem *parent)
     std::fill(timers, std::end(timers), 0);
 }
 
-void ScintillaQuickCore::UpdateInfos(int winId)
+void ScintillaQuick_core::UpdateInfos(int winId)
 {
     SetCtrlID(winId);
 }
 
-void ScintillaQuickCore::ensure_visible_range_styled(bool scrolling)
+void ScintillaQuick_core::ensure_visible_range_styled(bool scrolling)
 {
     StyleAreaBounded(GetClientDrawingRectangle(), scrolling);
 }
 
-void ScintillaQuickCore::selectCurrentWord()
+void ScintillaQuick_core::selectCurrentWord()
 {
     auto pos       = CurrentPosition();
     const auto max = pdoc->Length();
@@ -376,35 +376,35 @@ void ScintillaQuickCore::selectCurrentWord()
         pos--;
     }
 
-    auto startPos = pos;
-    while (startPos > 0 && std::isalnum(static_cast<unsigned char>(pdoc->CharAt(startPos - 1)))) {
-        startPos--;
+    auto start_pos = pos;
+    while (start_pos > 0 && std::isalnum(static_cast<unsigned char>(pdoc->CharAt(start_pos - 1)))) {
+        start_pos--;
     }
 
-    auto endPos = pos + 1;
-    while (endPos < max && std::isalnum(static_cast<unsigned char>(pdoc->CharAt(endPos)))) {
-        endPos++;
+    auto end_pos = pos + 1;
+    while (end_pos < max && std::isalnum(static_cast<unsigned char>(pdoc->CharAt(end_pos)))) {
+        end_pos++;
     }
 
-    if (startPos == endPos) {
+    if (start_pos == end_pos) {
         return;
     }
 
-    SetSelection(startPos, endPos);
+    SetSelection(start_pos, end_pos);
 
     emit cursorPositionChanged();
 }
 
-struct ScintillaQuickCore::style_attributes
+struct ScintillaQuick_core::Style_attributes
 {
     QColor foreground;
     QColor background;
     QFont font;
 };
 
-ScintillaQuickCore::style_attributes ScintillaQuickCore::style_attributes_for(int style) const
+ScintillaQuick_core::Style_attributes ScintillaQuick_core::style_attributes_for(int style) const
 {
-    style_attributes attributes;
+    Style_attributes attributes;
     const int bounded_style      = std::clamp(style, 0, STYLE_MAX);
     const Style &scintilla_style = vs.styles[static_cast<size_t>(bounded_style)];
     const Style &default_style   = vs.styles[StyleDefault];
@@ -436,15 +436,15 @@ ScintillaQuickCore::style_attributes ScintillaQuickCore::style_attributes_for(in
     return attributes;
 }
 
-render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame &capture_frame) const
+Render_frame ScintillaQuick_core::render_frame_from_capture(const Captured_frame &capture_frame) const
 {
     SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.render_frame_from_capture");
 
-    render_frame frame;
-    std::array<std::optional<style_attributes>, STYLE_MAX + 1> style_cache;
-    const auto attributes_for = [&](int style) -> const style_attributes & {
+    Render_frame frame;
+    std::array<std::optional<Style_attributes>, STYLE_MAX + 1> Style_cache;
+    const auto attributes_for = [&](int style) -> const Style_attributes & {
         const int bounded_style                 = std::clamp(style, 0, STYLE_MAX);
-        std::optional<style_attributes> &cached = style_cache[bounded_style];
+        std::optional<Style_attributes> &cached = Style_cache[bounded_style];
         if (!cached.has_value()) {
             cached = style_attributes_for(bounded_style);
         }
@@ -463,8 +463,8 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
         capture_frame.margin_height);
 
     frame.visual_lines.reserve(capture_frame.visual_lines.size());
-    for (const capture_visual_line &capture_line : capture_frame.visual_lines) {
-        visual_line_frame visual_line;
+    for (const Capture_visual_line &capture_line : capture_frame.visual_lines) {
+        Visual_line_frame visual_line;
         visual_line.key.document_line = capture_line.document_line;
         visual_line.key.subline_index = capture_line.subline_index;
         visual_line.visual_order      = capture_line.visual_order;
@@ -477,10 +477,10 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
             capture_line.bottom);
 
         visual_line.text_runs.reserve(capture_line.text_runs.size());
-        for (const capture_text_run &capture_run : capture_line.text_runs) {
-            const style_attributes &attributes = attributes_for(capture_run.style_id);
+        for (const Capture_text_run &capture_run : capture_line.text_runs) {
+            const Style_attributes &attributes = attributes_for(capture_run.style_id);
 
-            text_run run;
+            Text_run run;
             run.text = QString::fromUtf8(
                 capture_run.text.data(),
                 static_cast<int>(capture_run.text.size()));
@@ -518,8 +518,8 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.selection_primitives.reserve(capture_frame.selection_primitives.size());
-    for (const capture_selection_primitive &capture_selection : capture_frame.selection_primitives) {
-        selection_primitive selection;
+    for (const Capture_selection_primitive &capture_selection : capture_frame.selection_primitives) {
+        Selection_primitive selection;
         selection.rect = rect_from_capture(
             capture_selection.left,
             capture_selection.top,
@@ -531,8 +531,8 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.indicator_primitives.reserve(capture_frame.indicator_primitives.size());
-    for (const capture_indicator_primitive &capture_indicator : capture_frame.indicator_primitives) {
-        indicator_primitive indicator;
+    for (const Capture_indicator_primitive &capture_indicator : capture_frame.indicator_primitives) {
+        Indicator_primitive indicator;
         indicator.rect = rect_from_capture(
             capture_indicator.left,
             capture_indicator.top,
@@ -560,8 +560,8 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.current_line_primitives.reserve(capture_frame.current_line_primitives.size());
-    for (const capture_current_line_primitive &capture_cl : capture_frame.current_line_primitives) {
-        current_line_primitive cl;
+    for (const Capture_current_line_primitive &capture_cl : capture_frame.current_line_primitives) {
+        Current_line_primitive cl;
         cl.rect = rect_from_capture(
             capture_cl.left,
             capture_cl.top,
@@ -573,8 +573,8 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.marker_primitives.reserve(capture_frame.marker_primitives.size());
-    for (const capture_marker_primitive &capture_marker : capture_frame.marker_primitives) {
-        marker_primitive marker;
+    for (const Capture_marker_primitive &capture_marker : capture_frame.marker_primitives) {
+        Marker_primitive marker;
         marker.rect = rect_from_capture(
             capture_marker.left,
             capture_marker.top,
@@ -591,8 +591,8 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.caret_primitives.reserve(capture_frame.caret_primitives.size());
-    for (const capture_caret_primitive &capture_caret : capture_frame.caret_primitives) {
-        caret_primitive caret;
+    for (const Capture_caret_primitive &capture_caret : capture_frame.caret_primitives) {
+        Caret_primitive caret;
         caret.rect = rect_from_capture(
             capture_caret.left,
             capture_caret.top,
@@ -604,10 +604,10 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.margin_text_primitives.reserve(capture_frame.margin_text_primitives.size());
-    for (const capture_margin_text_primitive &capture_margin_text : capture_frame.margin_text_primitives) {
-        const style_attributes &attributes = attributes_for(capture_margin_text.style_id);
+    for (const Capture_margin_text_primitive &capture_margin_text : capture_frame.margin_text_primitives) {
+        const Style_attributes &attributes = attributes_for(capture_margin_text.style_id);
 
-        margin_text_primitive margin_text;
+        Margin_text_primitive margin_text;
         margin_text.text = QString::fromUtf8(
             capture_margin_text.text.data(),
             static_cast<int>(capture_margin_text.text.size()));
@@ -627,10 +627,10 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.fold_display_texts.reserve(capture_frame.fold_display_texts.size());
-    for (const capture_fold_display_text &capture_fold : capture_frame.fold_display_texts) {
-        const style_attributes &attributes = attributes_for(capture_fold.style_id);
+    for (const Capture_fold_display_text &capture_fold : capture_frame.fold_display_texts) {
+        const Style_attributes &attributes = attributes_for(capture_fold.style_id);
 
-        fold_display_text_primitive fold;
+        Fold_display_text_primitive fold;
         fold.text = QString::fromUtf8(
             capture_fold.text.data(),
             static_cast<int>(capture_fold.text.size()));
@@ -649,10 +649,10 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.eol_annotations.reserve(capture_frame.eol_annotations.size());
-    for (const capture_eol_annotation &capture_eol : capture_frame.eol_annotations) {
-        const style_attributes &attributes = attributes_for(capture_eol.style_id);
+    for (const Capture_eol_annotation &capture_eol : capture_frame.eol_annotations) {
+        const Style_attributes &attributes = attributes_for(capture_eol.style_id);
 
-        eol_annotation_primitive eol;
+        Eol_annotation_primitive eol;
         eol.text = QString::fromUtf8(
             capture_eol.text.data(),
             static_cast<int>(capture_eol.text.size()));
@@ -671,10 +671,10 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.annotations.reserve(capture_frame.annotations.size());
-    for (const capture_annotation &capture_annot : capture_frame.annotations) {
-        const style_attributes &attributes = attributes_for(capture_annot.style_id);
+    for (const Capture_annotation &capture_annot : capture_frame.annotations) {
+        const Style_attributes &attributes = attributes_for(capture_annot.style_id);
 
-        annotation_primitive annot;
+        Annotation_primitive annot;
         annot.text = QString::fromUtf8(
             capture_annot.text.data(),
             static_cast<int>(capture_annot.text.size()));
@@ -694,8 +694,8 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.whitespace_marks.reserve(capture_frame.whitespace_marks.size());
-    for (const capture_whitespace_mark &capture_ws : capture_frame.whitespace_marks) {
-        whitespace_mark_primitive ws;
+    for (const Capture_whitespace_mark &capture_ws : capture_frame.whitespace_marks) {
+        Whitespace_mark_primitive ws;
         ws.rect = rect_from_capture(
             capture_ws.left, capture_ws.top,
             capture_ws.right, capture_ws.bottom);
@@ -706,8 +706,8 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.decoration_underlines.reserve(capture_frame.decoration_underlines.size());
-    for (const capture_decoration_underline &capture_ul : capture_frame.decoration_underlines) {
-        decoration_underline_primitive ul;
+    for (const Capture_decoration_underline &capture_ul : capture_frame.decoration_underlines) {
+        Decoration_underline_primitive ul;
         ul.rect = rect_from_capture(
             capture_ul.left, capture_ul.top,
             capture_ul.right, capture_ul.bottom);
@@ -717,8 +717,8 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     }
 
     frame.indent_guides.reserve(capture_frame.indent_guides.size());
-    for (const capture_indent_guide &capture_ig : capture_frame.indent_guides) {
-        indent_guide_primitive ig;
+    for (const Capture_indent_guide &capture_ig : capture_frame.indent_guides) {
+        Indent_guide_primitive ig;
         ig.x         = capture_ig.x;
         ig.top       = capture_ig.top;
         ig.bottom    = capture_ig.bottom;
@@ -730,7 +730,7 @@ render_frame ScintillaQuickCore::render_frame_from_capture(const captured_frame 
     return frame;
 }
 
-captured_frame ScintillaQuickCore::capture_current_frame(
+Captured_frame ScintillaQuick_core::capture_current_frame(
     bool static_content_dirty,
     bool ensure_styled,
     bool scrolling,
@@ -738,7 +738,7 @@ captured_frame ScintillaQuickCore::capture_current_frame(
 {
     SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame");
 
-    captured_frame frame;
+    Captured_frame frame;
 
     if (!m_owner) {
         return frame;
@@ -782,11 +782,11 @@ captured_frame ScintillaQuickCore::capture_current_frame(
     QPainter painter(&capture_surface);
     AutoSurface surface(this, &painter);
     surface->SetMode(CurrentSurfaceMode());
-    if (auto *surface_impl = dynamic_cast<SurfaceImpl *>(static_cast<Surface *>(surface))) {
+    if (auto *surface_impl = dynamic_cast<Surface_impl *>(static_cast<Surface *>(surface))) {
         surface_impl->SetCaptureOnly(true);
     }
 
-    capture_frame_builder collector(frame, static_content_dirty);
+    Capture_frame_builder collector(frame, static_content_dirty);
     PRectangle capture_rect = client_rect;
     if (capture_buffer_lines > 0 && vs.lineHeight > 0) {
         capture_rect.top -= static_cast<XYPOSITION>(capture_buffer_lines * vs.lineHeight);
@@ -820,8 +820,8 @@ captured_frame ScintillaQuickCore::capture_current_frame(
     return frame;
 }
 
-render_frame ScintillaQuickCore::current_render_frame(
-    const captured_frame *capture_frame,
+Render_frame ScintillaQuick_core::current_render_frame(
+    const Captured_frame *capture_frame,
     bool static_content_dirty,
     bool ensure_styled,
     bool scrolling,
@@ -833,22 +833,22 @@ render_frame ScintillaQuickCore::current_render_frame(
         return render_frame_from_capture(*capture_frame);
     }
 
-    captured_frame captured = capture_current_frame(static_content_dirty, ensure_styled, scrolling, extra_capture_lines);
+    Captured_frame captured = capture_current_frame(static_content_dirty, ensure_styled, scrolling, extra_capture_lines);
     return render_frame_from_capture(captured);
 }
 
-ScintillaQuickCore::~ScintillaQuickCore()
+ScintillaQuick_core::~ScintillaQuick_core()
 {
     // Belt-and-braces: prepare_for_owner_destruction() is the correct
-    // path and runs from ~ScintillaQuickItem() before the derived
+    // path and runs from ~ScintillaQuick_item() before the derived
     // subobject dies. If, for some reason, that path was skipped (for
-    // instance, a direct user-managed ScintillaQuickCore deletion),
+    // instance, a direct user-managed ScintillaQuick_core deletion),
     // still try to clean up here.
     CancelTimers();
     ChangeIdle(false);
 }
 
-void ScintillaQuickCore::prepare_for_owner_destruction()
+void ScintillaQuick_core::prepare_for_owner_destruction()
 {
     // Break the clipboard connection first so a pending SelectionChanged
     // delivery cannot land between here and the final teardown.
@@ -865,10 +865,10 @@ void ScintillaQuickCore::prepare_for_owner_destruction()
     m_owner = nullptr;
 }
 
-void ScintillaQuickCore::execCommand(QAction *action)
+void ScintillaQuick_core::execCommand(QAction *action)
 {
-    const int commandNum = action->data().toInt();
-    Command(commandNum);
+    const int command_num = action->data().toInt();
+    Command(command_num);
 }
 
 #if defined(Q_OS_WIN)
@@ -884,7 +884,7 @@ static const QString sScintillaRecMimeType("text/x-scintilla.utf16-plain-text.re
 static const QString sMimeRectangularMarker("text/x-rectangular-marker");
 #endif
 
-void ScintillaQuickCore::Init()
+void ScintillaQuick_core::Init()
 {
     m_rectangular_selection_modifier = SCMOD_ALT;
 
@@ -892,65 +892,65 @@ void ScintillaQuickCore::Init()
         this, SLOT(SelectionChanged()));
 }
 
-void ScintillaQuickCore::Finalise()
+void ScintillaQuick_core::Finalise()
 {
     CancelTimers();
     ScintillaBase::Finalise();
 }
 
-void ScintillaQuickCore::SelectionChanged()
+void ScintillaQuick_core::SelectionChanged()
 {
-    bool nowPrimary = QGuiApplication::clipboard()->ownsSelection();
-    if (nowPrimary != primarySelection) {
-        primarySelection = nowPrimary;
+    bool now_primary = QGuiApplication::clipboard()->ownsSelection();
+    if (now_primary != primarySelection) {
+        primarySelection = now_primary;
         Redraw();
     }
 }
 
-bool ScintillaQuickCore::DragThreshold(Point ptStart, Point ptNow)
+bool ScintillaQuick_core::DragThreshold(Point pt_start, Point pt_now)
 {
-    int xMove = std::abs(ptStart.x - ptNow.x);
-    int yMove = std::abs(ptStart.y - ptNow.y);
-    return (xMove > QGuiApplication::styleHints()->startDragDistance()) ||
-        (yMove > QGuiApplication::styleHints()->startDragDistance());
+    int x_move = std::abs(pt_start.x - pt_now.x);
+    int y_move = std::abs(pt_start.y - pt_now.y);
+    return (x_move > QGuiApplication::styleHints()->startDragDistance()) ||
+        (y_move > QGuiApplication::styleHints()->startDragDistance());
 }
 
-static QString string_from_selected_text(const SelectionText &selectedText)
+static QString string_from_selected_text(const SelectionText &selected_text)
 {
-    Q_UNUSED(selectedText.characterSet);
-    return QString::fromUtf8(selectedText.Data(), static_cast<int>(selectedText.Length()));
+    Q_UNUSED(selected_text.characterSet);
+    return QString::fromUtf8(selected_text.Data(), static_cast<int>(selected_text.Length()));
 }
 
-static void add_rectangular_to_mime(QMimeData *mimeData, [[maybe_unused]] const QString &su)
+static void add_rectangular_to_mime(QMimeData *mime_data, [[maybe_unused]] const QString &su)
 {
     Q_UNUSED(su);
 #if defined(Q_OS_WIN)
     // Add an empty marker
-    mimeData->setData(sMSDEVColumnSelect, QByteArray());
+    mime_data->setData(sMSDEVColumnSelect, QByteArray());
 #elif defined(Q_OS_MAC)
     // macOS gets marker + data to work with other implementations.
     // Don't understand how this works but it does - the
     // clipboard format is supposed to be UTF-16, not UTF-8.
-    mimeData->setData(sScintillaRecMimeType, su.toUtf8());
+    mime_data->setData(sScintillaRecMimeType, su.toUtf8());
 #else
     // Linux
     // Add an empty marker
-    mimeData->setData(sMimeRectangularMarker, QByteArray());
+    mime_data->setData(sMimeRectangularMarker, QByteArray());
 #endif
 }
 
-static void add_line_cut_copy_to_mime([[maybe_unused]] QMimeData *mimeData)
+static void add_line_cut_copy_to_mime([[maybe_unused]] QMimeData *mime_data)
 {
-    Q_UNUSED(mimeData);
+    Q_UNUSED(mime_data);
 #if defined(Q_OS_WIN)
     // Add an empty marker
-    mimeData->setData(sVSEditorLineCutCopy, QByteArray());
+    mime_data->setData(sVSEditorLineCutCopy, QByteArray());
 #endif
 }
 
-static bool is_rectangular_in_mime(const QMimeData *mimeData)
+static bool is_rectangular_in_mime(const QMimeData *mime_data)
 {
-    QStringList formats = mimeData->formats();
+    QStringList formats = mime_data->formats();
     for (int i = 0; i < formats.size(); ++i) {
 #if defined(Q_OS_WIN)
         // Windows rectangular markers
@@ -972,9 +972,9 @@ static bool is_rectangular_in_mime(const QMimeData *mimeData)
     return false;
 }
 
-static bool is_line_cut_copy_in_mime(const QMimeData *mimeData)
+static bool is_line_cut_copy_in_mime(const QMimeData *mime_data)
 {
-    QStringList formats = mimeData->formats();
+    QStringList formats = mime_data->formats();
     for (int i = 0; i < formats.size(); ++i) {
 #if defined(Q_OS_WIN)
         // Visual Studio Line Cut/Copy markers
@@ -989,30 +989,30 @@ static bool is_line_cut_copy_in_mime(const QMimeData *mimeData)
     return false;
 }
 
-bool ScintillaQuickCore::ValidCodePage(int codePage) const
+bool ScintillaQuick_core::ValidCodePage(int code_page) const
 {
-    return codePage == SC_CP_UTF8;
+    return code_page == SC_CP_UTF8;
 }
 
-std::string ScintillaQuickCore::UTF8FromEncoded(std::string_view encoded) const {
+std::string ScintillaQuick_core::UTF8FromEncoded(std::string_view encoded) const {
     return std::string(encoded);
 }
 
-std::string ScintillaQuickCore::EncodedFromUTF8(std::string_view utf8) const {
+std::string ScintillaQuick_core::EncodedFromUTF8(std::string_view utf8) const {
     return std::string(utf8);
 }
 
-void ScintillaQuickCore::SetVerticalScrollPos()
+void ScintillaQuick_core::SetVerticalScrollPos()
 {
     emit verticalScrolled(topLine);
 }
 
-void ScintillaQuickCore::SetHorizontalScrollPos()
+void ScintillaQuick_core::SetHorizontalScrollPos()
 {
     emit horizontalScrolled(xOffset);
 }
 
-void ScintillaQuickCore::reset_tracked_scroll_width_to_viewport()
+void ScintillaQuick_core::reset_tracked_scroll_width_to_viewport()
 {
     const int viewport_width = std::max(1, static_cast<int>(GetTextRectangle().Width()));
     WndProc(Message::SetScrollWidth, static_cast<uptr_t>(viewport_width), 0);
@@ -1022,24 +1022,24 @@ void ScintillaQuickCore::reset_tracked_scroll_width_to_viewport()
     }
 }
 
-bool ScintillaQuickCore::ModifyScrollBars(Sci::Line nMax, Sci::Line nPage)
+bool ScintillaQuick_core::ModifyScrollBars(Sci::Line nMax, Sci::Line nPage)
 {
     bool modified = false;
 
-    int vNewPage = nPage;
-    int vNewMax  = nMax - vNewPage + 1;
-    if (m_v_max != vNewMax || m_v_page != vNewPage) {
-        m_v_max  = vNewMax;
-        m_v_page = vNewPage;
+    int v_new_page = nPage;
+    int v_new_max  = nMax - v_new_page + 1;
+    if (m_v_max != v_new_max || m_v_page != v_new_page) {
+        m_v_max  = v_new_max;
+        m_v_page = v_new_page;
         modified = true;
         emit verticalRangeChanged(m_v_max, m_v_page);
     }
 
-    int hNewPage = GetTextRectangle().Width();
-    int hNewMax  = (scrollWidth > hNewPage) ? scrollWidth - hNewPage : 0;
-    if (m_h_max != hNewMax || m_h_page != hNewPage) {
-        m_h_max  = hNewMax;
-        m_h_page = hNewPage;
+    int h_new_page = GetTextRectangle().Width();
+    int h_new_max  = (scrollWidth > h_new_page) ? scrollWidth - h_new_page : 0;
+    if (m_h_max != h_new_max || m_h_page != h_new_page) {
+        m_h_max  = h_new_max;
+        m_h_page = h_new_page;
         modified = true;
         emit horizontalRangeChanged(m_h_max, m_h_page);
     }
@@ -1047,81 +1047,81 @@ bool ScintillaQuickCore::ModifyScrollBars(Sci::Line nMax, Sci::Line nPage)
     return modified;
 }
 
-void ScintillaQuickCore::CopyToModeClipboard(const SelectionText &selectedText, QClipboard::Mode clipboardMode_)
+void ScintillaQuick_core::CopyToModeClipboard(const SelectionText &selected_text, QClipboard::Mode clipboard_mode)
 {
     QClipboard *clipboard = QGuiApplication::clipboard();
-    QString su            = string_from_selected_text(selectedText);
+    QString su            = string_from_selected_text(selected_text);
 
     // Owned by this function until the final hand-off to
     // QClipboard::setMimeData (which takes ownership of the raw
-    // pointer). If any of the helper calls below throws — unlikely
+    // pointer). If any of the helper calls below throws - unlikely
     // with pure Qt data types, but reachable through the
-    // `aboutToCopy` signal, which QML/C++ client code may connect to —
+    // `aboutToCopy` signal, which QML/C++ client code may connect to -
     // the unique_ptr will free the mime data instead of leaking it.
-    std::unique_ptr<QMimeData> mimeData = std::make_unique<QMimeData>();
-    mimeData->setText(su);
-    if (selectedText.rectangular) {
-        add_rectangular_to_mime(mimeData.get(), su);
+    std::unique_ptr<QMimeData> mime_data = std::make_unique<QMimeData>();
+    mime_data->setText(su);
+    if (selected_text.rectangular) {
+        add_rectangular_to_mime(mime_data.get(), su);
     }
 
-    if (selectedText.lineCopy) {
-        add_line_cut_copy_to_mime(mimeData.get());
+    if (selected_text.lineCopy) {
+        add_line_cut_copy_to_mime(mime_data.get());
     }
 
     // Allow client code to add additional data (e.g rich text).
-    emit aboutToCopy(mimeData.get());
+    emit aboutToCopy(mime_data.get());
 
-    clipboard->setMimeData(mimeData.release(), clipboardMode_);
+    clipboard->setMimeData(mime_data.release(), clipboard_mode);
 }
 
-void ScintillaQuickCore::Copy()
+void ScintillaQuick_core::Copy()
 {
     if (!sel.Empty()) {
-        SelectionText st;
-        CopySelectionRange(&st);
-        CopyToClipboard(st);
+        SelectionText sel_text;
+        CopySelectionRange(&sel_text);
+        CopyToClipboard(sel_text);
     }
 }
 
-void ScintillaQuickCore::CopyToClipboard(const SelectionText &selectedText)
+void ScintillaQuick_core::CopyToClipboard(const SelectionText &selected_text)
 {
-    CopyToModeClipboard(selectedText, QClipboard::Clipboard);
+    CopyToModeClipboard(selected_text, QClipboard::Clipboard);
 }
 
-void ScintillaQuickCore::PasteFromMode(QClipboard::Mode clipboardMode_)
+void ScintillaQuick_core::PasteFromMode(QClipboard::Mode clipboard_mode)
 {
-    QClipboard *clipboard     = QGuiApplication::clipboard();
-    const QMimeData *mimeData = clipboard->mimeData(clipboardMode_);
-    bool isRectangular        = is_rectangular_in_mime(mimeData);
-    bool isLine               = SelectionEmpty() && is_line_cut_copy_in_mime(mimeData);
-    QString text              = clipboard->text(clipboardMode_);
-    QByteArray utext          = BytesForDocument(text);
+    QClipboard *clipboard      = QGuiApplication::clipboard();
+    const QMimeData *mime_data = clipboard->mimeData(clipboard_mode);
+    bool is_rectangular        = is_rectangular_in_mime(mime_data);
+    bool is_line               = SelectionEmpty() && is_line_cut_copy_in_mime(mime_data);
+    QString text               = clipboard->text(clipboard_mode);
+    QByteArray utext           = BytesForDocument(text);
     std::string dest(utext.constData(), utext.length());
-    SelectionText selText;
-    selText.Copy(dest, pdoc->dbcsCodePage, CharacterSetOfDocument(), isRectangular, false);
+    SelectionText sel_text;
+    sel_text.Copy(dest, pdoc->dbcsCodePage, CharacterSetOfDocument(), is_rectangular, false);
 
     UndoGroup ug(pdoc);
     ClearSelection(multiPasteMode == MultiPaste::Each);
-    InsertPasteShape(selText.Data(), selText.Length(),
-        isRectangular ? PasteShape::rectangular : (isLine ? PasteShape::line : PasteShape::stream));
+    InsertPasteShape(sel_text.Data(), sel_text.Length(),
+        is_rectangular ? PasteShape::rectangular : (is_line ? PasteShape::line : PasteShape::stream));
     EnsureCaretVisible();
 }
 
-void ScintillaQuickCore::Paste()
+void ScintillaQuick_core::Paste()
 {
     PasteFromMode(QClipboard::Clipboard);
 }
 
-void ScintillaQuickCore::ClaimSelection()
+void ScintillaQuick_core::ClaimSelection()
 {
     if (QGuiApplication::clipboard()->supportsSelection()) {
         // X Windows has a 'primary selection' as well as the clipboard.
         // Whenever the user selects some text, we become the primary selection
         if (!sel.Empty()) {
             primarySelection = true;
-            SelectionText st;
-            CopySelectionRange(&st);
-            CopyToModeClipboard(st, QClipboard::Selection);
+            SelectionText sel_text;
+            CopySelectionRange(&sel_text);
+            CopyToModeClipboard(sel_text, QClipboard::Selection);
         }
         else {
             primarySelection = false;
@@ -1129,7 +1129,7 @@ void ScintillaQuickCore::ClaimSelection()
     }
 }
 
-void ScintillaQuickCore::NotifyChange()
+void ScintillaQuick_core::NotifyChange()
 {
     emit notifyChange();
     emit command(
@@ -1137,7 +1137,7 @@ void ScintillaQuickCore::NotifyChange()
         reinterpret_cast<sptr_t>(wMain.GetID()));
 }
 
-void ScintillaQuickCore::NotifyFocus(bool focus)
+void ScintillaQuick_core::NotifyFocus(bool focus)
 {
     if (commandEvents) {
         emit command(
@@ -1150,14 +1150,14 @@ void ScintillaQuickCore::NotifyFocus(bool focus)
     Editor::NotifyFocus(focus);
 }
 
-void ScintillaQuickCore::NotifyParent(NotificationData scn)
+void ScintillaQuick_core::NotifyParent(NotificationData scn)
 {
     scn.nmhdr.hwndFrom = wMain.GetID();
     scn.nmhdr.idFrom   = GetCtrlID();
     emit notifyParent(scn);
 }
 
-void ScintillaQuickCore::NotifyURIDropped(const char *uri)
+void ScintillaQuick_core::NotifyURIDropped(const char *uri)
 {
     NotificationData scn = {};
     scn.nmhdr.code       = Notification::URIDropped;
@@ -1166,12 +1166,12 @@ void ScintillaQuickCore::NotifyURIDropped(const char *uri)
     NotifyParent(scn);
 }
 
-bool ScintillaQuickCore::FineTickerRunning(TickReason reason)
+bool ScintillaQuick_core::FineTickerRunning(TickReason reason)
 {
     return timers[static_cast<size_t>(reason)] != 0;
 }
 
-void ScintillaQuickCore::FineTickerStart(TickReason reason, int millis, int /* tolerance */)
+void ScintillaQuick_core::FineTickerStart(TickReason reason, int millis, int /* tolerance */)
 {
     FineTickerCancel(reason);
     timers[static_cast<size_t>(reason)] = startTimer(millis);
@@ -1179,7 +1179,7 @@ void ScintillaQuickCore::FineTickerStart(TickReason reason, int millis, int /* t
 
 // CancelTimers cleans up all fine-ticker timers and is non-virtual to avoid warnings when
 // called during destruction.
-void ScintillaQuickCore::CancelTimers()
+void ScintillaQuick_core::CancelTimers()
 {
     for (size_t tr = static_cast<size_t>(TickReason::caret); tr <= static_cast<size_t>(TickReason::dwell); tr++) {
         if (timers[tr]) {
@@ -1189,16 +1189,16 @@ void ScintillaQuickCore::CancelTimers()
     }
 }
 
-void ScintillaQuickCore::FineTickerCancel(TickReason reason)
+void ScintillaQuick_core::FineTickerCancel(TickReason reason)
 {
-    const size_t reasonIndex = static_cast<size_t>(reason);
-    if (timers[reasonIndex]) {
-        killTimer(timers[reasonIndex]);
-        timers[reasonIndex] = 0;
+    const size_t reason_index = static_cast<size_t>(reason);
+    if (timers[reason_index]) {
+        killTimer(timers[reason_index]);
+        timers[reason_index] = 0;
     }
 }
 
-void ScintillaQuickCore::onIdle()
+void ScintillaQuick_core::onIdle()
 {
     // Guard against onIdle() being invoked after
     // prepare_for_owner_destruction() has nulled m_owner but before
@@ -1206,13 +1206,13 @@ void ScintillaQuickCore::onIdle()
     if (!m_owner) {
         return;
     }
-    const bool continueIdling = Idle();
-    if (!continueIdling) {
+    const bool continue_idling = Idle();
+    if (!continue_idling) {
         SetIdle(false);
     }
 }
 
-bool ScintillaQuickCore::ChangeIdle(bool on)
+bool ScintillaQuick_core::ChangeIdle(bool on)
 {
     if (on) {
         // Start idler, if it's not running.
@@ -1229,7 +1229,7 @@ bool ScintillaQuickCore::ChangeIdle(bool on)
             QTimer *timer = new QTimer(this);
             m_idle_timer.reset(timer);
             connect(timer, &QTimer::timeout,
-                this, &ScintillaQuickCore::onIdle);
+                this, &ScintillaQuick_core::onIdle);
             timer->start(0);
             idler.idlerID = timer;
         }
@@ -1254,44 +1254,44 @@ bool ScintillaQuickCore::ChangeIdle(bool on)
     return true;
 }
 
-bool ScintillaQuickCore::SetIdle(bool on)
+bool ScintillaQuick_core::SetIdle(bool on)
 {
     return ChangeIdle(on);
 }
 
-CharacterSet ScintillaQuickCore::CharacterSetOfDocument() const
+CharacterSet ScintillaQuick_core::CharacterSetOfDocument() const
 {
     return vs.styles[STYLE_DEFAULT].characterSet;
 }
 
-QString ScintillaQuickCore::StringFromDocument(const char *s) const
+QString ScintillaQuick_core::StringFromDocument(const char *s) const
 {
     return QString::fromUtf8(s);
 }
 
-QByteArray ScintillaQuickCore::BytesForDocument(const QString &text) const
+QByteArray ScintillaQuick_core::BytesForDocument(const QString &text) const
 {
     return text.toUtf8();
 }
 
-std::unique_ptr<CaseFolder> ScintillaQuickCore::CaseFolderForEncoding()
+std::unique_ptr<CaseFolder> ScintillaQuick_core::CaseFolderForEncoding()
 {
     return std::make_unique<CaseFolderUnicode>();
 }
 
-std::string ScintillaQuickCore::CaseMapString(const std::string &s, CaseMapping caseMapping)
+std::string ScintillaQuick_core::CaseMapString(const std::string &s, CaseMapping caseMapping)
 {
     if (s.empty() || (caseMapping == CaseMapping::same))
         return s;
 
-    std::string retMapped(s.length() * maxExpansionCaseConversion, 0);
-    const size_t lenMapped = CaseConvertString(&retMapped[0], retMapped.length(), s.c_str(), s.length(),
+    std::string ret_mapped(s.length() * maxExpansionCaseConversion, 0);
+    const size_t len_mapped = CaseConvertString(&ret_mapped[0], ret_mapped.length(), s.c_str(), s.length(),
         (caseMapping == CaseMapping::upper) ? CaseConversion::upper : CaseConversion::lower);
-    retMapped.resize(lenMapped);
-    return retMapped;
+    ret_mapped.resize(len_mapped);
+    return ret_mapped;
 }
 
-void ScintillaQuickCore::SetMouseCapture(bool on)
+void ScintillaQuick_core::SetMouseCapture(bool on)
 {
     // This is handled automatically by Qt
     if (mouseDownCaptures) {
@@ -1299,12 +1299,12 @@ void ScintillaQuickCore::SetMouseCapture(bool on)
     }
 }
 
-bool ScintillaQuickCore::HaveMouseCapture()
+bool ScintillaQuick_core::HaveMouseCapture()
 {
     return m_have_mouse_capture;
 }
 
-void ScintillaQuickCore::StartDrag()
+void ScintillaQuick_core::StartDrag()
 {
     inDragDrop      = DragDrop::dragging;
     dropWentOutside = true;
@@ -1312,18 +1312,18 @@ void ScintillaQuickCore::StartDrag()
         // Build the mime data under unique_ptr ownership so an
         // exception thrown from string_from_selected_text/setText or
         // from the rectangular-marker helper does not leak it.
-        std::unique_ptr<QMimeData> mimeData = std::make_unique<QMimeData>();
-        const QString sText                 = string_from_selected_text(drag);
-        mimeData->setText(sText);
+        std::unique_ptr<QMimeData> mime_data = std::make_unique<QMimeData>();
+        const QString s_text = string_from_selected_text(drag);
+        mime_data->setText(s_text);
         if (drag.rectangular) {
-            add_rectangular_to_mime(mimeData.get(), sText);
+            add_rectangular_to_mime(mime_data.get(), s_text);
         }
 
         // QDrag is parented to the owning QQuickItem so Qt's object
         // tree handles the worst-case cleanup if anything below
         // throws. A stack-allocated QDrag is the shape the Qt docs
         // recommend, but the previous code had explicit
-        // "not freed — crashes on Linux" behaviour indicating an
+        // "not freed - crashes on Linux" behaviour indicating an
         // async platform-side reference issue; using deleteLater()
         // schedules deletion after the current event-loop tick so
         // any platform drag helpers have safely finished before the
@@ -1331,15 +1331,15 @@ void ScintillaQuickCore::StartDrag()
         // released raw pointer; `exec()` is synchronous and returns
         // once the drop has been processed.
         QPointer<QDrag> dragon = new QDrag(m_owner);
-        dragon->setMimeData(mimeData.release());
+        dragon->setMimeData(mime_data.release());
 
-        const Qt::DropAction dropAction = dragon->exec(
+        const Qt::DropAction drop_action = dragon->exec(
             static_cast<Qt::DropActions>(Qt::CopyAction|Qt::MoveAction));
         if (dragon) {
             dragon->deleteLater();
         }
 
-        if ((dropAction == Qt::MoveAction) && dropWentOutside) {
+        if ((drop_action == Qt::MoveAction) && dropWentOutside) {
             // Remove dragged out text
             ClearSelection();
         }
@@ -1348,11 +1348,11 @@ void ScintillaQuickCore::StartDrag()
     SetDragPosition(SelectionPosition(Sci::invalidPosition));
 }
 
-class call_tip_item : public QQuickItem {
+class Call_tip_item : public QQuickItem {
 public:
-    explicit call_tip_item(CallTip *pct_, QQuickItem *parent)
+    explicit Call_tip_item(CallTip *call_tip, QQuickItem *parent)
         : QQuickItem(parent),
-          pct(pct_)
+          pct(call_tip)
     {
         setAcceptedMouseButtons(Qt::NoButton);
         setAcceptHoverEvents(false);
@@ -1361,59 +1361,59 @@ public:
         setZ(1000.0);
     }
 
-    QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override
+    QSGNode *updatePaintNode(QSGNode *old_node, UpdatePaintNodeData *) override
     {
-        QQuickWindow *quickWindow = window();
-        if (!quickWindow || !pct || !pct->inCallTipMode || width() <= 0.0 || height() <= 0.0) {
-            delete oldNode;
+        QQuickWindow *quick_window = window();
+        if (!quick_window || !pct || !pct->inCallTipMode || width() <= 0.0 || height() <= 0.0) {
+            delete old_node;
             return nullptr;
         }
 
-        const QSize imageSize(std::max(1, static_cast<int>(std::ceil(width()))),
+        const QSize image_size(std::max(1, static_cast<int>(std::ceil(width()))),
             std::max(1, static_cast<int>(std::ceil(height()))));
-        QImage image(imageSize, QImage::Format_ARGB32_Premultiplied);
+        QImage image(image_size, QImage::Format_ARGB32_Premultiplied);
         image.fill(Qt::transparent);
 
         QPainter painter(&image);
-        std::unique_ptr<Surface> surfaceWindow = Surface::Allocate(Technology::Default);
-        surfaceWindow->Init(false, &painter);
-        surfaceWindow->SetMode(SurfaceMode(pct->codePage, false));
-        pct->PaintCT(surfaceWindow.get());
+        std::unique_ptr<Surface> surface_window = Surface::Allocate(Technology::Default);
+        surface_window->Init(false, &painter);
+        surface_window->SetMode(SurfaceMode(pct->codePage, false));
+        pct->PaintCT(surface_window.get());
 
-        auto *imageNode = dynamic_cast<QSGImageNode *>(oldNode);
-        if (!imageNode) {
-            delete oldNode;
-            imageNode = quickWindow->createImageNode();
+        auto *image_node = dynamic_cast<QSGImageNode *>(old_node);
+        if (!image_node) {
+            delete old_node;
+            image_node = quick_window->createImageNode();
         }
-        QSGTexture *texture = quickWindow->createTextureFromImage(image);
-        imageNode->setTexture(texture);
-        imageNode->setOwnsTexture(true);
-        imageNode->setRect(QRectF(QPointF(0.0, 0.0), QSizeF(imageSize)));
-        imageNode->setSourceRect(QRectF(QPointF(0.0, 0.0), QSizeF(imageSize)));
-        imageNode->setFiltering(QSGTexture::Linear);
-        return imageNode;
+        QSGTexture *texture = quick_window->createTextureFromImage(image);
+        image_node->setTexture(texture);
+        image_node->setOwnsTexture(true);
+        image_node->setRect(QRectF(QPointF(0.0, 0.0), QSizeF(image_size)));
+        image_node->setSourceRect(QRectF(QPointF(0.0, 0.0), QSizeF(image_size)));
+        image_node->setFiltering(QSGTexture::Linear);
+        return image_node;
     }
 
 private:
     CallTip *pct;
 };
 
-void ScintillaQuickCore::CreateCallTipWindow(PRectangle rc)
+void ScintillaQuick_core::CreateCallTipWindow(PRectangle rc)
 {
 
     if (!ct.wCallTip.Created()) {
-        QQuickItem *parentItem = m_owner->window()
+        QQuickItem *parent_item = m_owner->window()
             ? m_owner->window()->contentItem()
             : static_cast<QQuickItem *>(m_owner);
-        QQuickItem *pCallTip   = new call_tip_item(&ct, parentItem);
-        ct.wCallTip            = pCallTip;
-        pCallTip->setPosition(QPointF(rc.left, rc.top));
-        pCallTip->setSize(QSizeF(rc.Width(), rc.Height()));
-        pCallTip->update();
+        QQuickItem *call_tip_item = new Call_tip_item(&ct, parent_item);
+        ct.wCallTip               = call_tip_item;
+        call_tip_item->setPosition(QPointF(rc.left, rc.top));
+        call_tip_item->setSize(QSizeF(rc.Width(), rc.Height()));
+        call_tip_item->update();
     }
 }
 
-void ScintillaQuickCore::AddToPopUp(const char *label,
+void ScintillaQuick_core::AddToPopUp(const char *label,
                              int cmd,
                              bool enabled)
 {
@@ -1424,13 +1424,13 @@ void ScintillaQuickCore::AddToPopUp(const char *label,
     menu->append(item);
 }
 
-sptr_t ScintillaQuickCore::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam)
+sptr_t ScintillaQuick_core::WndProc(Message i_message, uptr_t w_param, sptr_t l_param)
 {
     try {
-        switch (iMessage) {
+        switch (i_message) {
 
             case Message::SetBidirectional:
-                bidirectional = static_cast<Scintilla::Bidirectional>(wParam);
+                bidirectional = static_cast<Scintilla::Bidirectional>(w_param);
                 InvalidateStyleData();
                 break;
 
@@ -1453,14 +1453,14 @@ sptr_t ScintillaQuickCore::WndProc(Message iMessage, uptr_t wParam, sptr_t lPara
                 return reinterpret_cast<sptr_t>(this);
 
             case Message::SetRectangularSelectionModifier:
-                m_rectangular_selection_modifier = static_cast<int>(wParam);
+                m_rectangular_selection_modifier = static_cast<int>(w_param);
                 break;
 
             case Message::GetRectangularSelectionModifier:
                 return m_rectangular_selection_modifier;
 
             default:
-                return ScintillaBase::WndProc(iMessage, wParam, lParam);
+                return ScintillaBase::WndProc(i_message, w_param, l_param);
         }
     }
     catch (std::bad_alloc &) {
@@ -1472,35 +1472,35 @@ sptr_t ScintillaQuickCore::WndProc(Message iMessage, uptr_t wParam, sptr_t lPara
     return 0;
 }
 
-sptr_t ScintillaQuickCore::DefWndProc(Message, uptr_t, sptr_t)
+sptr_t ScintillaQuick_core::DefWndProc(Message, uptr_t, sptr_t)
 {
     return 0;
 }
 
-sptr_t ScintillaQuickCore::DirectFunction(
-    sptr_t ptr, unsigned int iMessage, uptr_t wParam, sptr_t lParam)
+sptr_t ScintillaQuick_core::DirectFunction(
+    sptr_t ptr, unsigned int i_message, uptr_t w_param, sptr_t l_param)
 {
-    ScintillaQuickCore *sci = reinterpret_cast<ScintillaQuickCore *>(ptr);
-    return sci->WndProc(static_cast<Message>(iMessage), wParam, lParam);
+    ScintillaQuick_core *sci = reinterpret_cast<ScintillaQuick_core *>(ptr);
+    return sci->WndProc(static_cast<Message>(i_message), w_param, l_param);
 }
 
-sptr_t ScintillaQuickCore::DirectStatusFunction(
-    sptr_t ptr, unsigned int iMessage, uptr_t wParam, sptr_t lParam, int *pStatus)
+sptr_t ScintillaQuick_core::DirectStatusFunction(
+    sptr_t ptr, unsigned int i_message, uptr_t w_param, sptr_t l_param, int *p_status)
 {
-    ScintillaQuickCore *sci  = reinterpret_cast<ScintillaQuickCore *>(ptr);
-    const sptr_t returnValue = sci->WndProc(static_cast<Message>(iMessage), wParam, lParam);
-    *pStatus                 = static_cast<int>(sci->errorStatus);
-    return returnValue;
+    ScintillaQuick_core *sci  = reinterpret_cast<ScintillaQuick_core *>(ptr);
+    const sptr_t return_value = sci->WndProc(static_cast<Message>(i_message), w_param, l_param);
+    *p_status                 = static_cast<int>(sci->errorStatus);
+    return return_value;
 }
 
 // Additions to merge in Scientific Toolworks widget structure
 
-void ScintillaQuickCore::PartialPaint(const PRectangle &rect)
+void ScintillaQuick_core::PartialPaint(const PRectangle &rect)
 {
     PartialPaintQml(rect, nullptr);
 }
 
-void ScintillaQuickCore::PartialPaintQml(const PRectangle & rect, QPainter *painter)
+void ScintillaQuick_core::PartialPaintQml(const PRectangle & rect, QPainter *painter)
 {
     m_current_painter = painter;
     rcPaint           = rect;
@@ -1532,45 +1532,45 @@ void ScintillaQuickCore::PartialPaintQml(const PRectangle & rect, QPainter *pain
     m_current_painter = nullptr;
 }
 
-void ScintillaQuickCore::DragEnter(const Point &point)
+void ScintillaQuick_core::DragEnter(const Point &point)
 {
     SetDragPosition(SPositionFromLocation(point, false, false, UserVirtualSpace()));
 }
 
-void ScintillaQuickCore::DragMove(const Point &point)
+void ScintillaQuick_core::DragMove(const Point &point)
 {
     DragEnter(point);
 }
 
-void ScintillaQuickCore::DragLeave()
+void ScintillaQuick_core::DragLeave()
 {
     SetDragPosition(SelectionPosition(Sci::invalidPosition));
 }
 
-void ScintillaQuickCore::Drop(const Point &point, const QMimeData *data, bool move)
+void ScintillaQuick_core::Drop(const Point &point, const QMimeData *data, bool move)
 {
     QString text     = data->text();
     bool rectangular = is_rectangular_in_mime(data);
     QByteArray bytes = BytesForDocument(text);
     int len          = bytes.length();
 
-    SelectionPosition movePos = SPositionFromLocation(point, false, false, UserVirtualSpace());
+    SelectionPosition move_pos = SPositionFromLocation(point, false, false, UserVirtualSpace());
 
-    DropAt(movePos, bytes, len, move, rectangular);
+    DropAt(move_pos, bytes, len, move, rectangular);
 }
 
-void ScintillaQuickCore::DropUrls(const QMimeData *data)
+void ScintillaQuick_core::DropUrls(const QMimeData *data)
 {
     foreach(const QUrl &url, data->urls()) {
         NotifyURIDropped(url.toString().toUtf8().constData());
     }
 }
 
-void ScintillaQuickCore::timerEvent(QTimerEvent *event)
+void ScintillaQuick_core::timerEvent(QTimerEvent *event)
 {
     // If the owning item is already destructing, do not dispatch any
     // ticks. prepare_for_owner_destruction() cancels all timers and
-    // nulls m_owner before the derived ScintillaQuickItem subobject
+    // nulls m_owner before the derived ScintillaQuick_item subobject
     // dies, but a timer event that was already queued before the
     // killTimer() call can still be delivered here.
     if (!m_owner) {
