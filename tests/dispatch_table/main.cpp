@@ -1,3 +1,6 @@
+// Copyright (c) 2026, Ioannis Makris
+// Licensed under the BSD 2-Clause License, see LICENSE file for details.
+
 // Unit tests for the scene-graph update dispatch table
 // (src/core/scintillaquick_dispatch_table.h).
 //

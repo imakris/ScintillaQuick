@@ -1,3 +1,6 @@
+// Copyright (c) 2026, Ioannis Makris
+// Licensed under the BSD 2-Clause License, see LICENSE file for details.
+
 // Smoke coverage for ScintillaQuickItem's message pipeline.
 //
 // These tests do not run a full Qt Quick window — they drive the

@@ -1,3 +1,6 @@
+// Copyright (c) 2026, Ioannis Makris
+// Licensed under the BSD 2-Clause License, see LICENSE file for details.
+
 #include "scintillaquick_scene_graph_renderer.h"
 #include "../core/scintillaquick_hierarchical_profiler.h"
 #include "render_frame.h"

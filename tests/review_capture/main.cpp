@@ -1,3 +1,6 @@
+// Copyright (c) 2026, Ioannis Makris
+// Licensed under the BSD 2-Clause License, see LICENSE file for details.
+
 #include "scintillaquick_validation_access.h"
 
 #include <QCoreApplication>

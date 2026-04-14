@@ -1,5 +1,5 @@
 // Copyright (c) 2026, Ioannis Makris
-// Licensed under the BSD 2-Clause License, see LICENSE.md file for details.
+// Licensed under the BSD 2-Clause License, see LICENSE file for details.
 //
 // @file ScintillaQuickItem.h - Qt Quick item (QQuickItem) that wraps
 // ScintillaQuickCore and drives events, input method handling and

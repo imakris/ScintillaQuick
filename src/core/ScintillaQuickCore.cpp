@@ -1,5 +1,5 @@
 // Copyright (c) 2026, Ioannis Makris
-// Licensed under the BSD 2-Clause License, see LICENSE.md file for details.
+// Licensed under the BSD 2-Clause License, see LICENSE file for details.
 //
 // @file ScintillaQuickCore.cpp - Qt specific subclass of ScintillaBase
 
