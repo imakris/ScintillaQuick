@@ -139,6 +139,26 @@ class Font_and_character_set : public Font {
 public:
     CharacterSet m_character_set = CharacterSet::Ansi;
     std::unique_ptr<QFont> m_font;
+
+    // Lazy per-font advance cache used by the ASCII fast path in
+    // MeasureWidths. For fixed-pitch fonts (the common case in code
+    // editors) every printable-ASCII character has the same advance, so
+    // the single `m_fixed_advance` is enough to compute cumulative
+    // positions with one multiply per character, bypassing both
+    // QTextLayout construction and glyph enumeration. The cache is
+    // populated on the first successful slow-path measurement so the
+    // cached advance matches what shaping produces for that font.
+    //
+    // m_advance_cache_state values:
+    //   0 = uninitialized (take the slow path and try to populate)
+    //   1 = fixed-pitch (fast path uses m_fixed_advance)
+    //   2 = known not fixed-pitch (skip the fast path permanently)
+    //
+    // Access is serialised by the fact that MeasureWidths is only ever
+    // called from the GUI thread.
+    mutable int m_advance_cache_state = 0;
+    mutable double m_fixed_advance = 0.0;
+
     explicit Font_and_character_set(const FontParameters &fp) : m_character_set(fp.characterSet) {
         m_font = std::make_unique<QFont>();
         m_font->setStyleStrategy(choose_strategy(fp.extraFontFlag));
@@ -146,6 +166,70 @@ public:
         m_font->setPointSizeF(fp.size);
         m_font->setBold(static_cast<int>(fp.weight) > 500);
         m_font->setItalic(fp.italic);
+    }
+
+    // Attempts to fill `positions` for printable-ASCII `text` using the
+    // cached fixed-pitch advance. Returns false if the cache is not yet
+    // ready or the font is known not to be fixed-pitch, in which case
+    // the caller must fall through to the slow QTextLayout-based path.
+    bool try_fill_ascii_positions_from_cache(std::string_view text, XYPOSITION *positions) const
+    {
+        if (m_advance_cache_state != 1) {
+            return false;
+        }
+        const double w = m_fixed_advance;
+        for (size_t i = 0; i < text.size(); ++i) {
+            positions[i] = static_cast<XYPOSITION>(static_cast<double>(i + 1) * w);
+        }
+        return true;
+    }
+
+    // Populate the ASCII advance cache from a concrete measurement that
+    // has already been performed through the slow path. If the observed
+    // advances match and QFontInfo agrees the font is fixed-pitch, the
+    // cache switches to the fast path for all subsequent calls. If the
+    // font is known not to be fixed-pitch the state is frozen so we do
+    // not keep re-running the detection.
+    void populate_ascii_cache_from_measurement(std::string_view text, const XYPOSITION *positions) const
+    {
+        if (m_advance_cache_state != 0) {
+            return;
+        }
+        if (text.empty()) {
+            return;
+        }
+
+        // Extract per-character advances and verify they are uniform
+        // across observed printable-ASCII bytes.
+        double first_adv = -1.0;
+        double prev = 0.0;
+        bool uniform = true;
+        for (size_t i = 0; i < text.size(); ++i) {
+            const unsigned char uch = static_cast<unsigned char>(text[i]);
+            if (uch < 0x20 || uch >= 0x7F) {
+                uniform = false;
+                break;
+            }
+            const double cur = positions[i];
+            const double adv = cur - prev;
+            prev = cur;
+            if (first_adv < 0.0) {
+                first_adv = adv;
+            }
+            else
+            if (std::abs(adv - first_adv) > 0.01) {
+                uniform = false;
+                break;
+            }
+        }
+
+        if (uniform && first_adv > 0.0 && QFontInfo(*m_font).fixedPitch()) {
+            m_fixed_advance = first_adv;
+            m_advance_cache_state = 1;
+        }
+        else {
+            m_advance_cache_state = 2;
+        }
     }
 };
 
@@ -691,6 +775,21 @@ void Surface_impl::MeasureWidths(const Font *font,
     SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths");
     if (!font)
         return;
+
+    // Fast path: for printable-ASCII text against a font whose advance
+    // cache is already populated, just sum the cached advances. This
+    // avoids constructing a QTextLayout and enumerating glyph runs for
+    // what is by far the common case (code editing in a fixed-pitch
+    // font). No profile scope here: this path is called tens of
+    // thousands of times per benchmark run and the profiler's mutex
+    // lock would add more overhead than the fast path itself costs.
+    const Font_and_character_set *font_wrapper = as_font_and_character_set(font);
+    const bool ascii_text = is_simple_printable_ascii(text);
+    if (ascii_text && font_wrapper &&
+        font_wrapper->try_fill_ascii_positions_from_cache(text, positions)) {
+        return;
+    }
+
     QString su;
     {
         SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.to_qstring");
@@ -709,6 +808,14 @@ void Surface_impl::MeasureWidths(const Font *font,
         if (is_simple_printable_ascii(text)) {
             SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions.simple_glyph_path");
             if (fill_simple_glyph_positions(tl, text, positions)) {
+                // Opportunistically populate the advance cache so that
+                // subsequent calls on the same font can take the fast
+                // path above. The populated values come from the same
+                // slow path the benchmark previously exercised, so this
+                // is not an independent source of truth.
+                if (font_wrapper) {
+                    font_wrapper->populate_ascii_cache_from_measurement(text, positions);
+                }
                 return;
             }
         }
