@@ -22,24 +22,24 @@ enum class text_direction
 struct capture_text_run
 {
     std::string text;
-    double x = 0.0;
-    double width = 0.0;
-    double top = 0.0;
-    double bottom = 0.0;
-    double blob_text_left = 0.0;
-    double blob_text_top = 0.0;
-    double blob_text_right = 0.0;
-    double blob_text_bottom = 0.0;
-    double blob_outer_left = 0.0;
-    double blob_outer_top = 0.0;
-    double blob_outer_right = 0.0;
+    double x                 = 0.0;
+    double width             = 0.0;
+    double top               = 0.0;
+    double bottom            = 0.0;
+    double blob_text_left    = 0.0;
+    double blob_text_top     = 0.0;
+    double blob_text_right   = 0.0;
+    double blob_text_bottom  = 0.0;
+    double blob_outer_left   = 0.0;
+    double blob_outer_top    = 0.0;
+    double blob_outer_right  = 0.0;
     double blob_outer_bottom = 0.0;
-    double blob_inner_left = 0.0;
-    double blob_inner_top = 0.0;
-    double blob_inner_right = 0.0;
+    double blob_inner_left   = 0.0;
+    double blob_inner_top    = 0.0;
+    double blob_inner_right  = 0.0;
     double blob_inner_bottom = 0.0;
-    double baseline_y = 0.0;
-    int style_id = 0;
+    double baseline_y        = 0.0;
+    int style_id             = 0;
     QColor foreground;
     QColor blob_outer;
     QColor blob_inner;
@@ -52,143 +52,143 @@ struct capture_visual_line
 {
     int document_line = 0;
     int subline_index = 0;
-    int visual_order = 0;
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
+    int visual_order  = 0;
+    double left       = 0.0;
+    double top        = 0.0;
+    double right      = 0.0;
+    double bottom     = 0.0;
     double baseline_y = 0.0;
     std::vector<capture_text_run> text_runs;
 };
 
 struct capture_selection_primitive
 {
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
+    double left        = 0.0;
+    double top         = 0.0;
+    double right       = 0.0;
+    double bottom      = 0.0;
     std::uint32_t rgba = 0;
-    bool is_main = false;
+    bool is_main       = false;
 };
 
 struct capture_caret_primitive
 {
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
+    double left        = 0.0;
+    double top         = 0.0;
+    double right       = 0.0;
+    double bottom      = 0.0;
     std::uint32_t rgba = 0;
-    bool is_main = false;
+    bool is_main       = false;
 };
 
 struct capture_indicator_primitive
 {
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
-    double line_top = 0.0;
-    double line_bottom = 0.0;
-    double character_left = 0.0;
-    double character_top = 0.0;
-    double character_right = 0.0;
+    double left             = 0.0;
+    double top              = 0.0;
+    double right            = 0.0;
+    double bottom           = 0.0;
+    double line_top         = 0.0;
+    double line_bottom      = 0.0;
+    double character_left   = 0.0;
+    double character_top    = 0.0;
+    double character_right  = 0.0;
     double character_bottom = 0.0;
-    double stroke_width = 1.0;
-    int fill_alpha = 30;
-    int outline_alpha = 50;
-    std::uint32_t rgba = 0;
-    int indicator_number = 0;
-    int indicator_style = 0;
-    bool under_text = false;
-    bool is_main = false;
+    double stroke_width     = 1.0;
+    int fill_alpha          = 30;
+    int outline_alpha       = 50;
+    std::uint32_t rgba      = 0;
+    int indicator_number    = 0;
+    int indicator_style     = 0;
+    bool under_text         = false;
+    bool is_main            = false;
 };
 
 struct capture_current_line_primitive
 {
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
+    double left        = 0.0;
+    double top         = 0.0;
+    double right       = 0.0;
+    double bottom      = 0.0;
     std::uint32_t rgba = 0;
-    bool framed = false;
+    bool framed        = false;
 };
 
 struct capture_marker_primitive
 {
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
-    int marker_number = 0;
-    int marker_type = 0;
-    std::uint32_t fore_rgba = 0;
-    std::uint32_t back_rgba = 0;
+    double left                      = 0.0;
+    double top                       = 0.0;
+    double right                     = 0.0;
+    double bottom                    = 0.0;
+    int marker_number                = 0;
+    int marker_type                  = 0;
+    std::uint32_t fore_rgba          = 0;
+    std::uint32_t back_rgba          = 0;
     std::uint32_t back_rgba_selected = 0;
-    int document_line = 0;
+    int document_line                = 0;
     int fold_part = 0; // 0=undefined, 1=head, 2=body, 3=tail, 4=headWithTail
 };
 
 struct capture_margin_text_primitive
 {
     std::string text;
-    double x = 0.0;
-    double y = 0.0;
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
+    double x          = 0.0;
+    double y          = 0.0;
+    double left       = 0.0;
+    double top        = 0.0;
+    double right      = 0.0;
+    double bottom     = 0.0;
     double baseline_y = 0.0;
     int document_line = 0;
     int subline_index = 0;
-    int style_id = 0;
+    int style_id      = 0;
 };
 
 struct capture_fold_display_text
 {
     std::string text;
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
-    double baseline_y = 0.0;
-    int style_id = 0;
+    double left             = 0.0;
+    double top              = 0.0;
+    double right            = 0.0;
+    double bottom           = 0.0;
+    double baseline_y       = 0.0;
+    int style_id            = 0;
     std::uint32_t fore_rgba = 0;
     std::uint32_t back_rgba = 0;
-    int document_line = 0;
-    bool boxed = false;
+    int document_line       = 0;
+    bool boxed              = false;
 };
 
 struct capture_eol_annotation
 {
     std::string text;
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
-    double text_left = 0.0;
-    double baseline_y = 0.0;
-    int style_id = 0;
+    double left             = 0.0;
+    double top              = 0.0;
+    double right            = 0.0;
+    double bottom           = 0.0;
+    double text_left        = 0.0;
+    double baseline_y       = 0.0;
+    int style_id            = 0;
     std::uint32_t fore_rgba = 0;
     std::uint32_t back_rgba = 0;
-    int document_line = 0;
-    int visible_style = 0;
+    int document_line       = 0;
+    int visible_style       = 0;
 };
 
 struct capture_annotation
 {
     std::string text;
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
-    double text_left = 0.0;
-    double baseline_y = 0.0;
-    int style_id = 0;
+    double left             = 0.0;
+    double top              = 0.0;
+    double right            = 0.0;
+    double bottom           = 0.0;
+    double text_left        = 0.0;
+    double baseline_y       = 0.0;
+    int style_id            = 0;
     std::uint32_t fore_rgba = 0;
     std::uint32_t back_rgba = 0;
-    int document_line = 0;
-    int annotation_line = 0;
-    bool boxed = false;
+    int document_line       = 0;
+    int annotation_line     = 0;
+    bool boxed              = false;
 };
 
 enum class whitespace_mark_kind
@@ -199,12 +199,12 @@ enum class whitespace_mark_kind
 
 struct capture_whitespace_mark
 {
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
-    double mid_y = 0.0;
-    std::uint32_t rgba = 0;
+    double left               = 0.0;
+    double top                = 0.0;
+    double right              = 0.0;
+    double bottom             = 0.0;
+    double mid_y              = 0.0;
+    std::uint32_t rgba        = 0;
     whitespace_mark_kind kind = whitespace_mark_kind::space_dot;
 };
 
@@ -216,35 +216,35 @@ enum class decoration_kind
 
 struct capture_decoration_underline
 {
-    double left = 0.0;
-    double top = 0.0;
-    double right = 0.0;
-    double bottom = 0.0;
-    std::uint32_t rgba = 0;
+    double left          = 0.0;
+    double top           = 0.0;
+    double right         = 0.0;
+    double bottom        = 0.0;
+    std::uint32_t rgba   = 0;
     decoration_kind kind = decoration_kind::style_underline;
 };
 
 struct capture_indent_guide
 {
-    double x = 0.0;
-    double top = 0.0;
-    double bottom = 0.0;
+    double x           = 0.0;
+    double top         = 0.0;
+    double bottom      = 0.0;
     std::uint32_t rgba = 0;
-    bool highlight = false;
+    bool highlight     = false;
 };
 
 struct captured_frame
 {
-    double viewport_width = 0.0;
+    double viewport_width  = 0.0;
     double viewport_height = 0.0;
-    double text_left = 0.0;
-    double text_top = 0.0;
-    double text_width = 0.0;
-    double text_height = 0.0;
-    double margin_left = 0.0;
-    double margin_top = 0.0;
-    double margin_width = 0.0;
-    double margin_height = 0.0;
+    double text_left       = 0.0;
+    double text_top        = 0.0;
+    double text_width      = 0.0;
+    double text_height     = 0.0;
+    double margin_left     = 0.0;
+    double margin_top      = 0.0;
+    double margin_width    = 0.0;
+    double margin_height   = 0.0;
     std::vector<capture_visual_line> visual_lines;
     std::vector<capture_selection_primitive> selection_primitives;
     std::vector<capture_caret_primitive> caret_primitives;
@@ -279,8 +279,8 @@ struct text_run
 {
     QString text;
     QPointF position;
-    qreal width = 0.0;
-    qreal top = 0.0;
+    qreal width  = 0.0;
+    qreal top    = 0.0;
     qreal bottom = 0.0;
     QRectF blob_text_clip_rect;
     QRectF blob_outer_rect;
@@ -289,7 +289,7 @@ struct text_run
     QColor blob_outer;
     QColor blob_inner;
     QFont font;
-    int style_id = 0;
+    int style_id             = 0;
     text_direction direction = text_direction::left_to_right;
     bool is_represented_text = false;
     bool represented_as_blob = false;
@@ -325,13 +325,13 @@ struct indicator_primitive
     QRectF line_rect;
     QRectF character_rect;
     QColor color;
-    qreal stroke_width = 1.0;
-    int fill_alpha = 30;
-    int outline_alpha = 50;
+    qreal stroke_width   = 1.0;
+    int fill_alpha       = 30;
+    int outline_alpha    = 50;
     int indicator_number = 0;
-    int indicator_style = 0;
-    bool under_text = false;
-    bool is_main = false;
+    int indicator_style  = 0;
+    bool under_text      = false;
+    bool is_main         = false;
 };
 
 struct current_line_primitive
@@ -345,12 +345,12 @@ struct marker_primitive
 {
     QRectF rect;
     int marker_number = 0;
-    int marker_type = 0;
+    int marker_type   = 0;
     QColor foreground;
     QColor background;
     QColor background_selected;
     int document_line = 0;
-    int fold_part = 0;
+    int fold_part     = 0;
 };
 
 struct margin_text_primitive
@@ -363,7 +363,7 @@ struct margin_text_primitive
     QRectF clip_rect;
     int document_line = 0;
     int subline_index = 0;
-    int style_id = 0;
+    int style_id      = 0;
 };
 
 struct fold_display_text_primitive
@@ -376,8 +376,8 @@ struct fold_display_text_primitive
     QColor background;
     QFont font;
     int document_line = 0;
-    int style_id = 0;
-    bool boxed = false;
+    int style_id      = 0;
+    bool boxed        = false;
 };
 
 struct eol_annotation_primitive
@@ -390,7 +390,7 @@ struct eol_annotation_primitive
     QColor background;
     QFont font;
     int document_line = 0;
-    int style_id = 0;
+    int style_id      = 0;
     int visible_style = 0;
 };
 
@@ -403,10 +403,10 @@ struct annotation_primitive
     QColor foreground;
     QColor background;
     QFont font;
-    int document_line = 0;
+    int document_line   = 0;
     int annotation_line = 0;
-    int style_id = 0;
-    bool boxed = false;
+    int style_id        = 0;
+    bool boxed          = false;
 };
 
 struct whitespace_mark_primitive
@@ -426,8 +426,8 @@ struct decoration_underline_primitive
 
 struct indent_guide_primitive
 {
-    qreal x = 0.0;
-    qreal top = 0.0;
+    qreal x      = 0.0;
+    qreal top    = 0.0;
     qreal bottom = 0.0;
     QColor color;
     bool highlight = false;

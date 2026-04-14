@@ -81,8 +81,8 @@ struct displayed_row_for_test
 {
     int document_line = 0;
     int subline_index = 0;
-    double top = 0.0;
-    double bottom = 0.0;
+    double top        = 0.0;
+    double bottom     = 0.0;
     QString text;
 };
 
@@ -156,8 +156,8 @@ public:
 	Q_INVOKABLE bool profilingActive() const;
 	void request_scene_graph_update(
 		bool static_content_dirty = false,
-		bool needs_style_sync = false,
-		bool scrolling = false);
+		bool needs_style_sync     = false,
+		bool scrolling            = false);
 
 public slots:
 	// Scroll events coming from GUI to be sent to Scintilla.
@@ -290,12 +290,12 @@ private:
 	void setReadonly(bool value);
 
 	void cursorChangedUpdateMarker();
-    void syncCaretBlinkTimer(bool resetPhase = false);
+	void syncCaretBlinkTimer(bool resetPhase = false);
 	void updateQuickView(Scintilla::Update updated);
 	void build_render_snapshot();
 	std::vector<Scintilla::Internal::displayed_row_for_test> displayed_rows_for_test() const;
 	const Scintilla::Internal::render_frame &rendered_frame_for_test() const;
-    void reset_tracked_scroll_width();
+	void reset_tracked_scroll_width();
 
 	bool m_updates_enabled;
 	int m_logical_width;
@@ -306,13 +306,13 @@ private:
 	// `syncQuickViewProperties()` can avoid spurious property-change
 	// notifications when nothing has actually changed between two
 	// consecutive sync passes. Name reflects the role.
-	int m_last_emitted_char_height = -1;
-	int m_last_emitted_char_width = -1;
-	int m_last_emitted_total_lines = -1;
-	int m_last_emitted_total_columns = -1;
-	int m_last_emitted_visible_lines = -1;
-	int m_last_emitted_visible_columns = -1;
-	int m_last_emitted_first_visible_line = -1;
+	int m_last_emitted_char_height          = -1;
+	int m_last_emitted_char_width           = -1;
+	int m_last_emitted_total_lines          = -1;
+	int m_last_emitted_total_columns        = -1;
+	int m_last_emitted_visible_lines        = -1;
+	int m_last_emitted_visible_columns      = -1;
+	int m_last_emitted_first_visible_line   = -1;
 	int m_last_emitted_first_visible_column = -1;
 	QFont m_font;
 	Qt::InputMethodHints m_input_method_hints;
@@ -325,23 +325,23 @@ private:
 	Scintilla::Position m_preedit_pos;
 	std::unique_ptr<render_data> m_render_data;
 	std::unique_ptr<profiling_state> m_profiling_state;
-    QTimer m_caret_blink_timer;
-    bool m_caret_blink_visible = true;
-    // Re-entry guard for `send()`'s dispatch -> `syncQuickViewProperties()`
-    // path. `syncQuickViewProperties()` itself issues SCI_* queries
-    // through `send()` to read the geometry cache (SCI_TEXTHEIGHT /
-    // SCI_LINESONSCREEN / ...). If a query message is not in the
-    // `scene_graph_message_is_known_read_only()` allow-list, the
-    // dispatch's conservative "unknown -> full resync" default would
-    // call `syncQuickViewProperties()` again, causing unbounded
-    // recursion and a stack overflow. The allow-list in the dispatch
-    // table is the primary defence; this flag is a defence-in-depth so
-    // that a future missed entry degrades into "no resync for that one
-    // nested call" instead of a crash.
-    //
-    // Declared mutable because `send()` is const (see the long comment
-    // at the top of `send()` for why).
-    mutable bool m_in_sync_quick_view_properties = false;
+	QTimer m_caret_blink_timer;
+	bool m_caret_blink_visible = true;
+	// Re-entry guard for `send()`'s dispatch -> `syncQuickViewProperties()`
+	// path. `syncQuickViewProperties()` itself issues SCI_* queries
+	// through `send()` to read the geometry cache (SCI_TEXTHEIGHT /
+	// SCI_LINESONSCREEN / ...). If a query message is not in the
+	// `scene_graph_message_is_known_read_only()` allow-list, the
+	// dispatch's conservative "unknown -> full resync" default would
+	// call `syncQuickViewProperties()` again, causing unbounded
+	// recursion and a stack overflow. The allow-list in the dispatch
+	// table is the primary defence; this flag is a defence-in-depth so
+	// that a future missed entry degrades into "no resync for that one
+	// nested call" instead of a crash.
+	//
+	// Declared mutable because `send()` is const (see the long comment
+	// at the top of `send()` for why).
+	mutable bool m_in_sync_quick_view_properties = false;
 
 	static bool IsHangul(const QChar qchar);
 	void MoveImeCarets(Scintilla::Position offset);

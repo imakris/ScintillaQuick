@@ -89,10 +89,10 @@ inline Point PointFromQPointF(QPointF qp)
 class SurfaceImpl : public Surface {
 private:
 	QPaintDevice *device = nullptr;
-	QPainter *painter = nullptr;
-	bool deviceOwned = false;
-	bool painterOwned = false;
-    bool capture_only = false;
+	QPainter *painter    = nullptr;
+	bool deviceOwned     = false;
+	bool painterOwned    = false;
+	bool capture_only    = false;
 	SurfaceMode mode;
 
 	void Clear();
@@ -102,7 +102,7 @@ public:
 	SurfaceImpl(int width, int height, SurfaceMode mode_);
 	virtual ~SurfaceImpl();
 
-    void Init(bool signatureFlag, Scintilla::Internal::PainterID pid) override;
+	void Init(bool signatureFlag, Scintilla::Internal::PainterID pid) override;
 	void Init(WindowID wid) override;
 	void Init(SurfaceID sid, WindowID wid) override;
 	std::unique_ptr<Surface> AllocatePixMap(int width, int height) override;
@@ -173,7 +173,7 @@ public:
 	QPaintDevice *GetPaintDevice();
 	void SetPainter(QPainter *painter);
 	QPainter *GetPainter();
-    void SetCaptureOnly(bool value);
+	void SetCaptureOnly(bool value);
 };
 
 }

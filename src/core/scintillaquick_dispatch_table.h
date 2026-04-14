@@ -22,10 +22,10 @@ namespace Scintilla::Internal {
 
 struct scene_graph_update_request_info
 {
-    bool needed = false;
+    bool needed               = false;
     bool static_content_dirty = false;
-    bool needs_style_sync = false;
-    bool scrolling = false;
+    bool needs_style_sync     = false;
+    bool scrolling            = false;
 };
 
 // Known read-only / query-like Scintilla messages that are safe to treat

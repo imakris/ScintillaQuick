@@ -86,8 +86,8 @@ void update_geometry_node(
     }
     static_cast<void>(parent);
 
-    const bool visible = !points.empty() && color.isValid() && (color.alpha() > 0);
-    const QColor materialColor = visible ? color : QColor(0, 0, 0, 0);
+    const bool visible                      = !points.empty() && color.isValid() && (color.alpha() > 0);
+    const QColor materialColor              = visible ? color : QColor(0, 0, 0, 0);
     const QSGGeometry::DrawingMode drawMode = visible ? mode : QSGGeometry::DrawLines;
     const std::vector<QPointF> hiddenPoints = {
         QPointF(0.0, 0.0),
@@ -187,11 +187,11 @@ QRectF snapped_underline_rect(const QRectF &rect, QQuickWindow *window)
         return rect;
     }
 
-    const qreal dpr = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
+    const qreal dpr    = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
     const qreal height = physical_pixel_size(window);
-    const qreal top = snap_to_device_pixel(rect.top(), dpr);
-    const qreal left = std::floor(rect.left() * dpr) / dpr;
-    const qreal right = std::ceil(rect.right() * dpr) / dpr;
+    const qreal top    = snap_to_device_pixel(rect.top(), dpr);
+    const qreal left   = std::floor(rect.left() * dpr) / dpr;
+    const qreal right  = std::ceil(rect.right() * dpr) / dpr;
     return QRectF(left, top, std::max<qreal>(0.0, right - left), height);
 }
 
@@ -201,12 +201,12 @@ QRectF snapped_outline_rect(const QRectF &rect, QQuickWindow *window)
         return rect.normalized();
     }
 
-    const qreal dpr = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
+    const qreal dpr         = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
     const QRectF normalized = rect.normalized();
-    const qreal left = std::floor(normalized.left() * dpr) / dpr;
-    const qreal top = std::floor(normalized.top() * dpr) / dpr;
-    const qreal right = std::ceil(normalized.right() * dpr) / dpr;
-    const qreal bottom = std::ceil(normalized.bottom() * dpr) / dpr;
+    const qreal left        = std::floor(normalized.left() * dpr) / dpr;
+    const qreal top         = std::floor(normalized.top() * dpr) / dpr;
+    const qreal right       = std::ceil(normalized.right() * dpr) / dpr;
+    const qreal bottom      = std::ceil(normalized.bottom() * dpr) / dpr;
     return QRectF(left, top, std::max<qreal>(0.0, right - left), std::max<qreal>(0.0, bottom - top));
 }
 
@@ -216,9 +216,9 @@ void append_horizontal_pixel_rects(
     const QColor &color,
     QQuickWindow *window)
 {
-    const qreal dpr = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
+    const qreal dpr            = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
     const qreal physical_pixel = physical_pixel_size(window);
-    const QRectF snapped = snapped_underline_rect(rect, window);
+    const QRectF snapped       = snapped_underline_rect(rect, window);
     if (!snapped.isValid() || snapped.isEmpty()) {
         return;
     }
@@ -253,12 +253,12 @@ void append_outline_pixel_rects(
     }
 
     const qreal thickness = physical_pixel_size(window);
-    const qreal left = snapped.left();
-    const qreal top = snapped.top();
-    const qreal right = snapped.right();
-    const qreal bottom = snapped.bottom();
-    const qreal width = std::max<qreal>(thickness, right - left);
-    const qreal height = std::max<qreal>(thickness, bottom - top);
+    const qreal left      = snapped.left();
+    const qreal top       = snapped.top();
+    const qreal right     = snapped.right();
+    const qreal bottom    = snapped.bottom();
+    const qreal width     = std::max<qreal>(thickness, right - left);
+    const qreal height    = std::max<qreal>(thickness, bottom - top);
 
     rects.push_back({QRectF(left, top, width, thickness), color});
     rects.push_back({QRectF(left, std::max<qreal>(top, bottom - thickness), width, thickness), color});
@@ -326,9 +326,9 @@ void append_line_pixel_rects(
     }
 
     const qreal thickness = physical_pixel_size(window);
-    const qreal dpr = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
-    const qreal dx = to.x() - from.x();
-    const qreal dy = to.y() - from.y();
+    const qreal dpr       = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
+    const qreal dx        = to.x() - from.x();
+    const qreal dy        = to.y() - from.y();
     const int steps = std::max(
         1,
         static_cast<int>(std::ceil(std::max(std::abs(dx), std::abs(dy)) * dpr)));
@@ -352,9 +352,9 @@ void append_raster_image_rects(
         return;
     }
 
-    const qreal dpr = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
-    const qreal pixel = physical_pixel_size(window);
-    const int width_px = image.width();
+    const qreal dpr     = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
+    const qreal pixel   = physical_pixel_size(window);
+    const int width_px  = image.width();
     const int height_px = image.height();
 
     rects.reserve(rects.size() + static_cast<size_t>(width_px * height_px / 2));
@@ -450,9 +450,9 @@ bool append_rasterized_fold_marker_rects(
         return true;
     }
 
-    const qreal dpr = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
-    const qreal pixel = physical_pixel_size(window);
-    const int width_px = std::max(1, static_cast<int>(std::round(whole_rect.width() * dpr)));
+    const qreal dpr     = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
+    const qreal pixel   = physical_pixel_size(window);
+    const int width_px  = std::max(1, static_cast<int>(std::round(whole_rect.width() * dpr)));
     const int height_px = std::max(1, static_cast<int>(std::round(whole_rect.height() * dpr)));
 
     QImage image(width_px, height_px, QImage::Format_ARGB32_Premultiplied);
@@ -464,18 +464,18 @@ bool append_rasterized_fold_marker_rects(
     painter.translate(-whole_rect.left(), -whole_rect.top());
 
     const fold_marker_colors colors = fold_marker_colors(primitive);
-    const QRectF symbol_rect = make_scintilla_circle_marker_rect(whole_rect).normalized();
-    const qreal symbol_center_x = symbol_rect.center().x();
-    const qreal symbol_center_y = symbol_rect.center().y();
-    const qreal line_left = std::floor(symbol_center_x - pixel / 2.0);
+    const QRectF symbol_rect        = make_scintilla_circle_marker_rect(whole_rect).normalized();
+    const qreal symbol_center_x     = symbol_rect.center().x();
+    const qreal symbol_center_y     = symbol_rect.center().y();
+    const qreal line_left           = std::floor(symbol_center_x - pixel / 2.0);
     const QRectF vertical_line(line_left, whole_rect.top(), pixel, whole_rect.height());
     const QRectF right_stick(
         line_left + pixel,
         symbol_center_y,
         std::max<qreal>(0.0, whole_rect.right() - (line_left + pixel) - pixel),
         pixel);
-    const qreal connector_center_x = snap_to_device_pixel(whole_rect.center().x(), dpr);
-    const qreal connector_center_y = snap_to_device_pixel(whole_rect.center().y(), dpr);
+    const qreal connector_center_x  = snap_to_device_pixel(whole_rect.center().x(), dpr);
+    const qreal connector_center_y  = snap_to_device_pixel(whole_rect.center().y(), dpr);
     const qreal connector_line_left = std::floor(connector_center_x - pixel / 2.0);
     const QRectF connector_vertical_line(
         connector_line_left,
@@ -522,9 +522,9 @@ bool append_rasterized_fold_marker_rects(
         fill_rect(QRectF(box_rect.left(), box_rect.top(), pixel, box_rect.height()), colors.head);
         fill_rect(QRectF(box_rect.right() - pixel, box_rect.top(), pixel, box_rect.height()), right_edge);
 
-        const QRectF inner = box_rect.adjusted(pixel + pixel, pixel + pixel, -(pixel + pixel), -(pixel + pixel));
+        const QRectF inner    = box_rect.adjusted(pixel + pixel, pixel + pixel, -(pixel + pixel), -(pixel + pixel));
         const qreal arm_width = std::max<qreal>(pixel, (inner.width() - pixel) / 2.0);
-        const qreal mid_y = inner.top() + arm_width;
+        const qreal mid_y     = inner.top() + arm_width;
         fill_rect(QRectF(inner.left(), mid_y, inner.width(), pixel), colors.tail);
         if (plus) {
             const qreal mid_x = inner.left() + arm_width;
@@ -600,9 +600,9 @@ void append_rasterized_circle_marker_rects(
         return;
     }
 
-    const qreal dpr = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
-    const qreal pixel = physical_pixel_size(window);
-    const int width_px = std::max(1, static_cast<int>(std::round(circle_rect.width() * dpr)));
+    const qreal dpr     = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
+    const qreal pixel   = physical_pixel_size(window);
+    const int width_px  = std::max(1, static_cast<int>(std::round(circle_rect.width() * dpr)));
     const int height_px = std::max(1, static_cast<int>(std::round(circle_rect.height() * dpr)));
 
     QImage image(width_px, height_px, QImage::Format_ARGB32_Premultiplied);
@@ -640,9 +640,9 @@ void append_rasterized_tab_arrow_rects(
         return;
     }
 
-    const qreal dpr = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
-    const qreal pixel = physical_pixel_size(window);
-    const int width_px = std::max(1, static_cast<int>(std::round(rect.width() * dpr)));
+    const qreal dpr     = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
+    const qreal pixel   = physical_pixel_size(window);
+    const int width_px  = std::max(1, static_cast<int>(std::round(rect.width() * dpr)));
     const int height_px = std::max(1, static_cast<int>(std::round(rect.height() * dpr)));
 
     QImage image(width_px, height_px, QImage::Format_ARGB32_Premultiplied);
@@ -658,22 +658,22 @@ void append_rasterized_tab_arrow_rects(
     painter.setPen(pen);
     painter.setBrush(Qt::NoBrush);
 
-    const qreal half_width = pixel / 2.0;
+    const qreal half_width  = pixel / 2.0;
     const qreal origin_left = snap_to_device_pixel(rect.left(), dpr);
-    const qreal origin_top = snap_to_device_pixel(rect.top(), dpr);
+    const qreal origin_top  = snap_to_device_pixel(rect.top(), dpr);
 
     const qreal left_stroke =
         std::round(std::min(rect.left() + 2.0, rect.right() - 1.0)) + half_width;
     const qreal right_stroke =
         std::max(left_stroke, std::round(rect.right()) - 1.0 - half_width);
-    const qreal y_mid = primitive.mid_y != 0.0 ? primitive.mid_y : std::floor(rect.center().y());
+    const qreal y_mid         = primitive.mid_y != 0.0 ? primitive.mid_y : std::floor(rect.center().y());
     const qreal y_mid_aligned = y_mid + half_width;
-    const qreal ydiff = std::floor(rect.height() / 2.0);
-    qreal xhead = right_stroke - ydiff;
-    qreal head_height = ydiff;
+    const qreal ydiff         = std::floor(rect.height() / 2.0);
+    qreal xhead               = right_stroke - ydiff;
+    qreal head_height         = ydiff;
     if (xhead <= rect.left()) {
         head_height -= rect.left() - xhead;
-        xhead = rect.left();
+        xhead         = rect.left();
     }
 
     const QPointF arrow_point(right_stroke, y_mid_aligned);
@@ -766,8 +766,8 @@ std::vector<QPointF> make_circle_outline_as_lines(const QRectF &rect, int segmen
     std::vector<QPointF> lines;
     lines.reserve(static_cast<size_t>(segments) * 2);
     const QPointF center = rect.center();
-    const qreal rx = rect.width() / 2.0;
-    const qreal ry = rect.height() / 2.0;
+    const qreal rx       = rect.width() / 2.0;
+    const qreal ry       = rect.height() / 2.0;
     for (int i = 0; i < segments; ++i) {
         const qreal a0 = (static_cast<qreal>(i) / static_cast<qreal>(segments)) * 6.28318530717958647692;
         const qreal a1 = (static_cast<qreal>(i + 1) / static_cast<qreal>(segments)) * 6.28318530717958647692;
@@ -885,7 +885,7 @@ std::vector<QPointF> make_rounded_rect_outline_points(const QRectF &rect)
 
 QRectF make_scintilla_circle_marker_rect(const QRectF &rect)
 {
-    const qreal min_dim = std::min(rect.width(), rect.height() - 2.0) - 1.0;
+    const qreal min_dim  = std::min(rect.width(), rect.height() - 2.0) - 1.0;
     const qreal center_x = std::floor(rect.center().x());
     const qreal center_y = std::floor(rect.center().y());
     const qreal half_dim = std::floor(min_dim / 2.0);
@@ -901,8 +901,8 @@ std::vector<QPointF> make_circle_fill_triangles(const QRectF &rect, int segments
     std::vector<QPointF> points;
     points.reserve(static_cast<size_t>(segments) * 3);
     const QPointF center = rect.center();
-    const qreal rx = rect.width() / 2.0;
-    const qreal ry = rect.height() / 2.0;
+    const qreal rx       = rect.width() / 2.0;
+    const qreal ry       = rect.height() / 2.0;
     for (int i = 0; i < segments; ++i) {
         const qreal a0 = (static_cast<qreal>(i) / static_cast<qreal>(segments)) * 6.28318530717958647692;
         const qreal a1 = (static_cast<qreal>(i + 1) / static_cast<qreal>(segments)) * 6.28318530717958647692;
@@ -939,10 +939,10 @@ void append_rect_triangles(
 std::vector<QPointF> make_squiggle_points(const QRectF &rect, bool low)
 {
     std::vector<QPointF> points;
-    const qreal baseline = low ? (rect.top() + rect.height() * 0.7) : (rect.top() + rect.height() * 0.5);
+    const qreal baseline  = low ? (rect.top() + rect.height() * 0.7) : (rect.top() + rect.height() * 0.5);
     const qreal amplitude = std::max<qreal>(1.0, rect.height() * (low ? 0.16 : 0.24));
-    const qreal step = std::max<qreal>(2.0, rect.width() / 8.0);
-    bool up = true;
+    const qreal step      = std::max<qreal>(2.0, rect.width() / 8.0);
+    bool up               = true;
     for (qreal x = rect.left(); x <= rect.right(); x += step) {
         const qreal y = baseline + (up ? -amplitude : amplitude);
         points.emplace_back(x, y);
@@ -959,7 +959,7 @@ std::vector<QPointF> make_indicator_squiggle_triangles(
     bool low,
     QQuickWindow *window)
 {
-    const qreal dpr = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
+    const qreal dpr            = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
     const qreal physical_pixel = physical_pixel_size(window);
     const QRectF aligned(
         std::floor(rect.left() * dpr) / dpr,
@@ -972,7 +972,7 @@ std::vector<QPointF> make_indicator_squiggle_triangles(
     }
 
     const int width_pixels = std::max(1, static_cast<int>(std::ceil(aligned.width() * dpr)));
-    const int row_limit = std::max(1, static_cast<int>(std::ceil(aligned.height() * dpr)));
+    const int row_limit    = std::max(1, static_cast<int>(std::ceil(aligned.height() * dpr)));
     std::vector<QPointF> triangles;
     triangles.reserve(static_cast<size_t>(width_pixels) * 6);
 
@@ -1013,10 +1013,10 @@ void append_indicator_squiggle_rects(
     const indicator_primitive &primitive,
     QQuickWindow *window)
 {
-    const QRectF &rect = primitive.rect;
-    const QColor &color = primitive.color;
-    const bool low = primitive.indicator_style == static_cast<int>(IndicatorStyle::SquiggleLow);
-    const qreal dpr = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
+    const QRectF &rect         = primitive.rect;
+    const QColor &color        = primitive.color;
+    const bool low             = primitive.indicator_style == static_cast<int>(IndicatorStyle::SquiggleLow);
+    const qreal dpr            = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
     const qreal physical_pixel = physical_pixel_size(window);
     const QRectF aligned(
         std::floor(rect.left() * dpr) / dpr,
@@ -1029,7 +1029,7 @@ void append_indicator_squiggle_rects(
     }
 
     const int width_pixels = std::max(1, static_cast<int>(std::ceil(aligned.width() * dpr)));
-    const int row_limit = std::max(1, static_cast<int>(std::ceil(aligned.height() * dpr)));
+    const int row_limit    = std::max(1, static_cast<int>(std::ceil(aligned.height() * dpr)));
     rects.reserve(rects.size() + static_cast<size_t>(width_pixels));
 
     for (int pixel = 0; pixel < width_pixels; ++pixel) {
@@ -1059,7 +1059,7 @@ std::vector<QPointF> make_indicator_box_triangles(
     const QRectF &rect,
     QQuickWindow *window)
 {
-    const qreal dpr = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
+    const qreal dpr            = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
     const qreal physical_pixel = physical_pixel_size(window);
     const QRectF aligned(
         std::floor(rect.left() * dpr) / dpr,
@@ -1092,10 +1092,10 @@ void append_indicator_box_rects(
     const indicator_primitive &primitive,
     QQuickWindow *window)
 {
-    const qreal dpr = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
+    const qreal dpr            = window ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio()) : 1.0;
     const qreal physical_pixel = physical_pixel_size(window);
-    const QRectF &rect = primitive.rect;
-    QRectF line_rect = primitive.line_rect;
+    const QRectF &rect         = primitive.rect;
+    QRectF line_rect           = primitive.line_rect;
     if (!line_rect.isValid() || line_rect.isEmpty()) {
         line_rect = rect;
     }
@@ -1112,7 +1112,7 @@ void append_indicator_box_rects(
     QColor stroke_color = primitive.color;
     stroke_color.setAlpha(std::clamp(primitive.outline_alpha, 0, 255));
     const qreal stroke_width = std::max(physical_pixel, std::round(std::max<qreal>(1.0, primitive.stroke_width) * dpr) / dpr);
-    QRectF box = aligned;
+    QRectF box               = aligned;
     box.setTop(box.top() + stroke_width);
     box.setBottom(snap_to_device_pixel(rect.center().y(), dpr) + physical_pixel);
     if (!box.isValid() || box.isEmpty()) {
@@ -1120,7 +1120,7 @@ void append_indicator_box_rects(
     }
 
     rects.reserve(rects.size() + 4);
-    const qreal horizontal_left = box.left() + stroke_width;
+    const qreal horizontal_left  = box.left() + stroke_width;
     const qreal horizontal_width = std::max<qreal>(0.0, box.width() - stroke_width * 2.0);
     rects.push_back({QRectF(horizontal_left, box.top(), horizontal_width, stroke_width), stroke_color});
     rects.push_back({QRectF(horizontal_left, box.bottom() - stroke_width, horizontal_width, stroke_width), stroke_color});
@@ -1142,8 +1142,8 @@ std::vector<QPointF> make_dashed_points(const QRectF &rect, qreal y, qreal dash_
 std::vector<QPointF> make_plus_points(const QRectF &rect)
 {
     const QPointF center = rect.center();
-    const qreal arm_x = std::max<qreal>(1.0, rect.width() / 3.5);
-    const qreal arm_y = std::max<qreal>(1.0, rect.height() / 3.5);
+    const qreal arm_x    = std::max<qreal>(1.0, rect.width() / 3.5);
+    const qreal arm_y    = std::max<qreal>(1.0, rect.height() / 3.5);
     return {
         QPointF(center.x() - arm_x, center.y()),
         QPointF(center.x() + arm_x, center.y()),
@@ -1167,14 +1167,14 @@ std::vector<QPointF> make_diagonal_points(const QRectF &rect)
 std::vector<QPointF> make_tt_points(const QRectF &rect)
 {
     std::vector<QPointF> points;
-    const qreal pitch = std::max<qreal>(5.0, rect.width() / 4.0);
-    const qreal top = rect.top() + rect.height() * 0.35;
-    const qreal stem_top = top + 1.0;
+    const qreal pitch       = std::max<qreal>(5.0, rect.width() / 4.0);
+    const qreal top         = rect.top() + rect.height() * 0.35;
+    const qreal stem_top    = top + 1.0;
     const qreal stem_bottom = rect.bottom() - 1.0;
     for (qreal x = rect.left(); x < rect.right(); x += pitch) {
-        const qreal bar_left = x;
+        const qreal bar_left  = x;
         const qreal bar_right = std::min(rect.right(), x + pitch * 0.65);
-        const qreal stem_x = std::min(rect.right(), x + pitch * 0.45);
+        const qreal stem_x    = std::min(rect.right(), x + pitch * 0.45);
         points.emplace_back(bar_left, top);
         points.emplace_back(bar_right, top);
         points.emplace_back(stem_x, stem_top);
@@ -1187,7 +1187,7 @@ std::vector<QPointF> make_dotted_box_points(const QRectF &rect)
 {
     std::vector<QPointF> points;
     const qreal dash = std::max<qreal>(2.0, rect.width() / 8.0);
-    const qreal gap = dash;
+    const qreal gap  = dash;
     for (qreal x = rect.left(); x < rect.right(); x += dash + gap) {
         const qreal end_x = std::min(rect.right(), x + dash);
         points.emplace_back(x, rect.top());
@@ -1208,7 +1208,7 @@ std::vector<QPointF> make_dotted_box_points(const QRectF &rect)
 std::vector<QPointF> make_marker_bar_points(const QRectF &rect)
 {
     const qreal bar_width = std::max<qreal>(2.0, rect.width() / 3.0);
-    const qreal left = rect.center().x() - bar_width / 2.0;
+    const qreal left      = rect.center().x() - bar_width / 2.0;
     const QRectF barRect(left, rect.top(), bar_width, rect.height());
     const QPointF center = barRect.center();
     return {
@@ -1236,8 +1236,8 @@ std::vector<QPointF> make_filled_rect_points(const QRectF &rect)
 
 std::vector<QPointF> make_arrow_points(const QRectF &rect, bool down)
 {
-    const QPointF center = rect.center();
-    const qreal half_width = std::max<qreal>(1.0, rect.width() / 3.0);
+    const QPointF center    = rect.center();
+    const qreal half_width  = std::max<qreal>(1.0, rect.width() / 3.0);
     const qreal half_height = std::max<qreal>(1.0, rect.height() / 3.0);
     if (down) {
         return {
@@ -1256,7 +1256,7 @@ std::vector<QPointF> make_arrow_points(const QRectF &rect, bool down)
 std::vector<QPointF> make_bookmark_points(const QRectF &rect, bool vertical)
 {
     const QPointF center = rect.center();
-    const qreal inset = std::max<qreal>(1.0, rect.width() / 6.0);
+    const qreal inset    = std::max<qreal>(1.0, rect.width() / 6.0);
     if (vertical) {
         return {
             QPointF(center.x() - inset, rect.top()),
@@ -1279,8 +1279,8 @@ std::vector<QPointF> make_bookmark_points(const QRectF &rect, bool vertical)
 
 std::vector<QPointF> make_short_arrow_points(const QRectF &rect)
 {
-    const QPointF center = rect.center();
-    const qreal half_width = std::max<qreal>(1.0, rect.width() / 4.0);
+    const QPointF center    = rect.center();
+    const qreal half_width  = std::max<qreal>(1.0, rect.width() / 4.0);
     const qreal half_height = std::max<qreal>(1.0, rect.height() / 4.0);
     return {
         QPointF(center.x(), rect.bottom() - half_height),
@@ -1297,9 +1297,9 @@ std::vector<QPointF> make_dotdotdot_points(const QRectF &rect)
 {
     std::vector<QPointF> points;
     const qreal center_y = rect.center().y();
-    const qreal radius = std::max<qreal>(1.0, std::min(rect.width(), rect.height()) / 8.0);
-    const qreal spacing = radius * 3.0;
-    const qreal start_x = rect.center().x() - spacing;
+    const qreal radius   = std::max<qreal>(1.0, std::min(rect.width(), rect.height()) / 8.0);
+    const qreal spacing  = radius * 3.0;
+    const qreal start_x  = rect.center().x() - spacing;
     for (int i = 0; i < 3; ++i) {
         const qreal x = start_x + spacing * static_cast<qreal>(i);
         points.emplace_back(x - radius, center_y);
@@ -1400,7 +1400,7 @@ public:
                 format.setFont(run.font);
 
                 QTextLayout::FormatRange range;
-                range.start = 0;
+                range.start  = 0;
                 range.length = run.text.length();
                 range.format = format;
                 layout->setFormats({range});
@@ -1442,8 +1442,8 @@ public:
             }
         }
 
-        m_cached_key = visual_line.key;
-        m_has_cached_key = true;
+        m_cached_key      = visual_line.key;
+        m_has_cached_key  = true;
         m_cached_viewport = viewport;
     }
 
@@ -1478,7 +1478,7 @@ public:
                 m_text_node->setViewport(viewport);
                 update_clip_node(m_clip_node, m_cached_clip_rect.translated(delta));
                 set_translation(delta);
-                m_cached_viewport = viewport;
+                m_cached_viewport  = viewport;
                 m_cached_clip_rect = m_cached_clip_rect.translated(delta);
                 return;
             }
@@ -1499,12 +1499,12 @@ public:
 
         if (margin.text.isEmpty()) {
             m_cached_margin_text.clear();
-            m_cached_margin_font = margin.font;
+            m_cached_margin_font       = margin.font;
             m_cached_margin_foreground = margin.foreground;
-            m_cached_clip_rect = clip_rect;
-            m_cached_key = margin_key;
-            m_has_cached_key = true;
-            m_cached_viewport = viewport;
+            m_cached_clip_rect         = clip_rect;
+            m_cached_key               = margin_key;
+            m_has_cached_key           = true;
+            m_cached_viewport          = viewport;
             return;
         }
 
@@ -1519,20 +1519,20 @@ public:
         format.setFont(margin.font);
 
         QTextLayout::FormatRange range;
-        range.start = 0;
+        range.start  = 0;
         range.length = margin.text.length();
         range.format = format;
         layout->setFormats({range});
 
         qreal line_ascent = 0.0;
-        qreal line_left = 0.0;
+        qreal line_left   = 0.0;
         layout->beginLayout();
         QTextLine line = layout->createLine();
         if (line.isValid()) {
             line.setLineWidth(1000000.0);
             line.setPosition(QPointF(0.0, 0.0));
             line_ascent = line.ascent();
-            line_left = line.naturalTextRect().left();
+            line_left   = line.naturalTextRect().left();
         }
         layout->endLayout();
 
@@ -1542,13 +1542,13 @@ public:
         m_text_node->addTextLayout(pos, layout.get());
         m_layouts.push_back(std::move(layout));
         m_layout_positions.push_back(pos);
-        m_cached_margin_text = margin.text;
-        m_cached_margin_font = margin.font;
+        m_cached_margin_text       = margin.text;
+        m_cached_margin_font       = margin.font;
         m_cached_margin_foreground = margin.foreground;
-        m_cached_clip_rect = clip_rect;
+        m_cached_clip_rect         = clip_rect;
 
-        m_cached_key = margin_key;
-        m_has_cached_key = true;
+        m_cached_key      = margin_key;
+        m_has_cached_key  = true;
         m_cached_viewport = viewport;
     }
 
@@ -1655,9 +1655,9 @@ public:
 
     bool uniform_translation_delta(const visual_line_frame &vl, QPointF &delta) const
     {
-        delta = QPointF(0.0, 0.0);
+        delta           = QPointF(0.0, 0.0);
         bool have_delta = false;
-        size_t idx = 0;
+        size_t idx      = 0;
         for (const text_run &run : vl.text_runs) {
             if (run.text.isEmpty() || run.represented_as_blob) {
                 continue;
@@ -1667,7 +1667,7 @@ public:
             }
             const QPointF current_delta = run.position - m_layout_positions[idx];
             if (!have_delta) {
-                delta = current_delta;
+                delta      = current_delta;
                 have_delta = true;
             } else if (current_delta != delta) {
                 return false;
@@ -1686,8 +1686,8 @@ public:
         return true;
     }
 
-    QSGClipNode *m_clip_node = nullptr;
-    QSGTextNode *m_text_node = nullptr;
+    QSGClipNode *m_clip_node           = nullptr;
+    QSGTextNode *m_text_node           = nullptr;
     QSGTransformNode *m_transform_node = nullptr;
     std::vector<std::unique_ptr<QTextLayout>> m_layouts;
     std::vector<text_run> m_cached_runs;
@@ -1843,9 +1843,9 @@ void sync_text_nodes_by_key(
 
     for (size_t i = 0; i < new_count; ++i) {
         const uint64_t key = pack_visual_line_key(visual_lines[i].key);
-        auto it = key_to_old_index.find(key);
+        auto it            = key_to_old_index.find(key);
         if (it != key_to_old_index.end() && !old_used[it->second]) {
-            new_nodes[i] = nodes[it->second];
+            new_nodes[i]         = nodes[it->second];
             old_used[it->second] = true;
         }
     }
@@ -1859,7 +1859,7 @@ void sync_text_nodes_by_key(
             ++unused_cursor;
         }
         if (unused_cursor < nodes.size()) {
-            new_nodes[i] = nodes[unused_cursor];
+            new_nodes[i]            = nodes[unused_cursor];
             old_used[unused_cursor] = true;
             new_nodes[i]->clear_cached_key();
         } else {
@@ -1917,9 +1917,9 @@ void sync_margin_text_nodes_by_key(
     for (size_t i = 0; i < new_count; ++i) {
         const visual_line_key margin_key{margins[i].document_line, margins[i].subline_index};
         const uint64_t key = pack_visual_line_key(margin_key);
-        auto it = key_to_old_index.find(key);
+        auto it            = key_to_old_index.find(key);
         if (it != key_to_old_index.end() && !old_used[it->second]) {
-            new_nodes[i] = nodes[it->second];
+            new_nodes[i]         = nodes[it->second];
             old_used[it->second] = true;
         }
     }
@@ -1933,7 +1933,7 @@ void sync_margin_text_nodes_by_key(
             ++unused_cursor;
         }
         if (unused_cursor < nodes.size()) {
-            new_nodes[i] = nodes[unused_cursor];
+            new_nodes[i]            = nodes[unused_cursor];
             old_used[unused_cursor] = true;
             new_nodes[i]->clear_cached_key();
         } else {
@@ -1969,23 +1969,23 @@ class Scene_graph_root_node final : public QSGNode
 public:
     Scene_graph_root_node()
     {
-        m_background_group = new QSGNode();
-        m_current_line_group = new QSGNode();
-        m_selection_group = new QSGNode();
-        m_gutter_group = new QSGNode();
-        m_marker_group = new QSGNode();
-        m_indicator_under_group = new QSGNode();
-        m_text_clip_node = new QSGClipNode();
-        m_representation_group = new QSGNode();
-        m_representation_text_group = new QSGNode();
-        m_text_group = new QSGNode();
+        m_background_group            = new QSGNode();
+        m_current_line_group          = new QSGNode();
+        m_selection_group             = new QSGNode();
+        m_gutter_group                = new QSGNode();
+        m_marker_group                = new QSGNode();
+        m_indicator_under_group       = new QSGNode();
+        m_text_clip_node              = new QSGClipNode();
+        m_representation_group        = new QSGNode();
+        m_representation_text_group   = new QSGNode();
+        m_text_group                  = new QSGNode();
         m_annotation_background_group = new QSGNode();
-        m_annotation_text_group = new QSGNode();
-        m_whitespace_group = new QSGNode();
-        m_decoration_group = new QSGNode();
-        m_indent_guide_group = new QSGNode();
-        m_indicator_over_group = new QSGNode();
-        m_overlay_group = new QSGNode();
+        m_annotation_text_group       = new QSGNode();
+        m_whitespace_group            = new QSGNode();
+        m_decoration_group            = new QSGNode();
+        m_indent_guide_group          = new QSGNode();
+        m_indicator_over_group        = new QSGNode();
+        m_overlay_group               = new QSGNode();
 
         appendChildNode(m_background_group);
         appendChildNode(m_current_line_group);
@@ -2043,12 +2043,12 @@ public:
                     run.blob_outer,
                     window);
                 margin_text_primitive primitive;
-                primitive.text = run.text;
-                primitive.position = run.position;
-                primitive.baseline_y = run.position.y();
-                primitive.foreground = run.foreground;
-                primitive.font = run.font;
-                primitive.clip_rect = QRectF();
+                primitive.text          = run.text;
+                primitive.position      = run.position;
+                primitive.baseline_y    = run.position.y();
+                primitive.foreground    = run.foreground;
+                primitive.font          = run.font;
+                primitive.clip_rect     = QRectF();
                 primitive.document_line = visual_line.key.document_line;
                 primitive.subline_index = visual_line.key.subline_index * 1000
                     + static_cast<int>(representation_texts.size());
@@ -2168,7 +2168,7 @@ public:
         over_geo_idx.reserve(frame.indicator_primitives.size());
         for (size_t j = 0; j < frame.indicator_primitives.size(); ++j) {
             const indicator_primitive &primitive = frame.indicator_primitives[j];
-            const bool is_rectangle = primitive.indicator_style == static_cast<int>(IndicatorStyle::Plain);
+            const bool is_rectangle              = primitive.indicator_style == static_cast<int>(IndicatorStyle::Plain);
             const bool uses_stroke_rects =
                 primitive.indicator_style == static_cast<int>(IndicatorStyle::Squiggle) ||
                 primitive.indicator_style == static_cast<int>(IndicatorStyle::SquigglePixmap) ||
@@ -2235,7 +2235,7 @@ public:
             static_cast<qsizetype>(under_geo_idx.size()),
             [&](QSGGeometryNode *&node, size_t i) {
                 const indicator_primitive &primitive = frame.indicator_primitives[under_geo_idx[i]];
-                const QRectF rect = primitive.rect;
+                const QRectF rect                    = primitive.rect;
                 std::vector<QPointF> points;
                 QSGGeometry::DrawingMode mode = QSGGeometry::DrawLines;
 
@@ -2247,11 +2247,11 @@ public:
                 case static_cast<int>(IndicatorStyle::Squiggle):
                 case static_cast<int>(IndicatorStyle::SquigglePixmap):
                     points = make_indicator_squiggle_triangles(rect, false, window);
-                    mode = QSGGeometry::DrawTriangles;
+                    mode   = QSGGeometry::DrawTriangles;
                     break;
                 case static_cast<int>(IndicatorStyle::SquiggleLow):
                     points = make_indicator_squiggle_triangles(rect, true, window);
-                    mode = QSGGeometry::DrawTriangles;
+                    mode   = QSGGeometry::DrawTriangles;
                     break;
                 case static_cast<int>(IndicatorStyle::TT):
                     points = make_tt_points(rect);
@@ -2264,19 +2264,19 @@ public:
                     break;
                 case static_cast<int>(IndicatorStyle::Box):
                     points = make_indicator_box_triangles(rect, window);
-                    mode = QSGGeometry::DrawTriangles;
+                    mode   = QSGGeometry::DrawTriangles;
                     break;
                 case static_cast<int>(IndicatorStyle::RoundBox):
                     points = line_strip_to_lines(make_rounded_rect_outline_points(rect.adjusted(0.5, 0.5, -0.5, -0.5)));
-                    mode = QSGGeometry::DrawLines;
+                    mode   = QSGGeometry::DrawLines;
                     break;
                 case static_cast<int>(IndicatorStyle::StraightBox):
                     points = make_rect_outline_as_lines(rect.adjusted(0.0, 0.0, -physical_pixel_size(window), -physical_pixel_size(window)));
-                    mode = QSGGeometry::DrawLines;
+                    mode   = QSGGeometry::DrawLines;
                     break;
                 case static_cast<int>(IndicatorStyle::FullBox):
                     points = make_filled_rect_points(rect);
-                    mode = QSGGeometry::DrawTriangleFan;
+                    mode   = QSGGeometry::DrawTriangleFan;
                     break;
                 case static_cast<int>(IndicatorStyle::Gradient):
                     points = make_dashed_points(rect, rect.top() + 1.0, std::max<qreal>(2.0, rect.width() / 3.0), std::max<qreal>(1.0, rect.width() / 6.0));
@@ -2300,12 +2300,12 @@ public:
                         std::max<qreal>(1.0, rect.width() - 2.0),
                         2.0);
                     points = make_filled_rect_points(strip);
-                    mode = QSGGeometry::DrawTriangleFan;
+                    mode   = QSGGeometry::DrawTriangleFan;
                     break;
                 }
                 case static_cast<int>(IndicatorStyle::CompositionThin): {
                     const qreal y = rect.bottom() - 1.0;
-                    points = make_line_points(rect, y);
+                    points        = make_line_points(rect, y);
                     break;
                 }
                 case static_cast<int>(IndicatorStyle::Point):
@@ -2358,7 +2358,7 @@ public:
             static_cast<qsizetype>(over_geo_idx.size()),
             [&](QSGGeometryNode *&node, size_t i) {
                 const indicator_primitive &primitive = frame.indicator_primitives[over_geo_idx[i]];
-                const QRectF rect = primitive.rect;
+                const QRectF rect                    = primitive.rect;
                 std::vector<QPointF> points;
                 QSGGeometry::DrawingMode mode = QSGGeometry::DrawLines;
 
@@ -2370,11 +2370,11 @@ public:
                 case static_cast<int>(IndicatorStyle::Squiggle):
                 case static_cast<int>(IndicatorStyle::SquigglePixmap):
                     points = make_indicator_squiggle_triangles(rect, false, window);
-                    mode = QSGGeometry::DrawTriangles;
+                    mode   = QSGGeometry::DrawTriangles;
                     break;
                 case static_cast<int>(IndicatorStyle::SquiggleLow):
                     points = make_indicator_squiggle_triangles(rect, true, window);
-                    mode = QSGGeometry::DrawTriangles;
+                    mode   = QSGGeometry::DrawTriangles;
                     break;
                 case static_cast<int>(IndicatorStyle::TT):
                     points = make_tt_points(rect);
@@ -2387,19 +2387,19 @@ public:
                     break;
                 case static_cast<int>(IndicatorStyle::Box):
                     points = make_indicator_box_triangles(rect, window);
-                    mode = QSGGeometry::DrawTriangles;
+                    mode   = QSGGeometry::DrawTriangles;
                     break;
                 case static_cast<int>(IndicatorStyle::RoundBox):
                     points = line_strip_to_lines(make_rounded_rect_outline_points(rect.adjusted(0.5, 0.5, -0.5, -0.5)));
-                    mode = QSGGeometry::DrawLines;
+                    mode   = QSGGeometry::DrawLines;
                     break;
                 case static_cast<int>(IndicatorStyle::StraightBox):
                     points = make_rect_outline_as_lines(rect.adjusted(0.0, 0.0, -physical_pixel_size(window), -physical_pixel_size(window)));
-                    mode = QSGGeometry::DrawLines;
+                    mode   = QSGGeometry::DrawLines;
                     break;
                 case static_cast<int>(IndicatorStyle::FullBox):
                     points = make_filled_rect_points(rect);
-                    mode = QSGGeometry::DrawTriangleFan;
+                    mode   = QSGGeometry::DrawTriangleFan;
                     break;
                 case static_cast<int>(IndicatorStyle::Gradient):
                     points = make_dashed_points(rect, rect.top() + 1.0, std::max<qreal>(2.0, rect.width() / 3.0), std::max<qreal>(1.0, rect.width() / 6.0));
@@ -2423,12 +2423,12 @@ public:
                         std::max<qreal>(1.0, rect.width() - 2.0),
                         2.0);
                     points = make_filled_rect_points(strip);
-                    mode = QSGGeometry::DrawTriangleFan;
+                    mode   = QSGGeometry::DrawTriangleFan;
                     break;
                 }
                 case static_cast<int>(IndicatorStyle::CompositionThin): {
                     const qreal y = rect.bottom() - 1.0;
-                    points = make_line_points(rect, y);
+                    points        = make_line_points(rect, y);
                     break;
                 }
                 case static_cast<int>(IndicatorStyle::Point):
@@ -2526,40 +2526,40 @@ public:
                 case static_cast<int>(MarkerSymbol::Circle):
                     if (!is_software_backend(window)) {
                         points = make_circle_fill_triangles(make_scintilla_circle_marker_rect(rect));
-                        mode = QSGGeometry::DrawTriangles;
+                        mode   = QSGGeometry::DrawTriangles;
                     }
                     break;
                 case static_cast<int>(MarkerSymbol::RoundRect):
                     points = make_rounded_rect_outline_points(rect.adjusted(1.0, 1.0, -1.0, -1.0));
-                    mode = QSGGeometry::DrawLineStrip;
+                    mode   = QSGGeometry::DrawLineStrip;
                     break;
                 case static_cast<int>(MarkerSymbol::Arrow):
                     points = make_arrow_points(rect, false);
-                    mode = QSGGeometry::DrawTriangles;
+                    mode   = QSGGeometry::DrawTriangles;
                     break;
                 case static_cast<int>(MarkerSymbol::ArrowDown):
                     points = make_arrow_points(rect, true);
-                    mode = QSGGeometry::DrawTriangles;
+                    mode   = QSGGeometry::DrawTriangles;
                     break;
                 case static_cast<int>(MarkerSymbol::SmallRect):
                     points = make_filled_rect_points(rect.adjusted(1.0, 2.0, -1.0, -2.0));
                     break;
                 case static_cast<int>(MarkerSymbol::Minus):
                     points = make_line_points(rect, rect.center().y());
-                    mode = QSGGeometry::DrawLines;
+                    mode   = QSGGeometry::DrawLines;
                     break;
                 case static_cast<int>(MarkerSymbol::Plus):
                     points = make_plus_points(rect);
-                    mode = QSGGeometry::DrawLines;
+                    mode   = QSGGeometry::DrawLines;
                     break;
                 case static_cast<int>(MarkerSymbol::DotDotDot):
                     points = make_dotdotdot_points(rect);
-                    mode = QSGGeometry::DrawLines;
+                    mode   = QSGGeometry::DrawLines;
                     break;
                 case static_cast<int>(MarkerSymbol::Arrows): {
                     const qreal center_y = rect.center().y();
-                    const qreal step = std::max<qreal>(3.0, rect.width() / 4.0);
-                    const qreal left = rect.left() + rect.width() * 0.15;
+                    const qreal step     = std::max<qreal>(3.0, rect.width() / 4.0);
+                    const qreal left     = rect.left() + rect.width() * 0.15;
                     for (int arrow = 0; arrow < 3; ++arrow) {
                         const qreal offset = left + static_cast<qreal>(arrow) * step;
                         points.emplace_back(offset, center_y);
@@ -2572,7 +2572,7 @@ public:
                 }
                 case static_cast<int>(MarkerSymbol::ShortArrow):
                     points = make_short_arrow_points(rect);
-                    mode = QSGGeometry::DrawLineStrip;
+                    mode   = QSGGeometry::DrawLineStrip;
                     break;
                 case static_cast<int>(MarkerSymbol::FullRect):
                     points = make_filled_rect_points(rect);
@@ -2595,8 +2595,8 @@ public:
                 case static_cast<int>(MarkerSymbol::BoxPlus):
                 case static_cast<int>(MarkerSymbol::CirclePlus): {
                     // Collapsed fold head (not connected): box/circle with +
-                    const qreal inset = std::max<qreal>(2.0, rect.width() / 4.0);
-                    const QRectF inner = rect.adjusted(inset, inset, -inset, -inset);
+                    const qreal inset    = std::max<qreal>(2.0, rect.width() / 4.0);
+                    const QRectF inner   = rect.adjusted(inset, inset, -inset, -inset);
                     const bool is_circle = (primitive.marker_type == static_cast<int>(MarkerSymbol::CirclePlus));
                     if (is_circle) {
                         points = make_circle_outline_as_lines(inner, 16);
@@ -2604,8 +2604,8 @@ public:
                         points = make_rect_outline_as_lines(inner);
                     }
                     // + cross: horizontal and vertical through center
-                    const qreal cx = inner.center().x();
-                    const qreal cy = inner.center().y();
+                    const qreal cx  = inner.center().x();
+                    const qreal cy  = inner.center().y();
                     const qreal arm = std::max<qreal>(1.0, inner.width() / 4.0);
                     points.insert(points.end(), {
                         QPointF(cx - arm, cy), QPointF(cx + arm, cy),
@@ -2617,8 +2617,8 @@ public:
                 case static_cast<int>(MarkerSymbol::BoxMinus):
                 case static_cast<int>(MarkerSymbol::CircleMinus): {
                     // Expanded fold head (not connected): box/circle with -
-                    const qreal inset = std::max<qreal>(2.0, rect.width() / 4.0);
-                    const QRectF inner = rect.adjusted(inset, inset, -inset, -inset);
+                    const qreal inset    = std::max<qreal>(2.0, rect.width() / 4.0);
+                    const QRectF inner   = rect.adjusted(inset, inset, -inset, -inset);
                     const bool is_circle = (primitive.marker_type == static_cast<int>(MarkerSymbol::CircleMinus));
                     if (is_circle) {
                         points = make_circle_outline_as_lines(inner, 16);
@@ -2626,8 +2626,8 @@ public:
                         points = make_rect_outline_as_lines(inner);
                     }
                     // - horizontal through center
-                    const qreal cx = inner.center().x();
-                    const qreal cy = inner.center().y();
+                    const qreal cx  = inner.center().x();
+                    const qreal cy  = inner.center().y();
                     const qreal arm = std::max<qreal>(1.0, inner.width() / 4.0);
                     points.insert(points.end(), {
                         QPointF(cx - arm, cy), QPointF(cx + arm, cy),
@@ -2637,16 +2637,16 @@ public:
                 }
                 case static_cast<int>(MarkerSymbol::BoxPlusConnected):
                 case static_cast<int>(MarkerSymbol::CirclePlusConnected): {
-                    const qreal inset = std::max<qreal>(2.0, rect.width() / 4.0);
-                    const QRectF inner = rect.adjusted(inset, inset, -inset, -inset);
+                    const qreal inset    = std::max<qreal>(2.0, rect.width() / 4.0);
+                    const QRectF inner   = rect.adjusted(inset, inset, -inset, -inset);
                     const bool is_circle = (primitive.marker_type == static_cast<int>(MarkerSymbol::CirclePlusConnected));
                     const auto symbol_lines = is_circle
                         ? make_circle_outline_as_lines(inner, 16)
                         : make_rect_outline_as_lines(inner);
                     points.insert(points.end(), symbol_lines.begin(), symbol_lines.end());
                     // + cross
-                    const qreal cx = inner.center().x();
-                    const qreal cy = inner.center().y();
+                    const qreal cx  = inner.center().x();
+                    const qreal cy  = inner.center().y();
                     const qreal arm = std::max<qreal>(1.0, inner.width() / 4.0);
                     points.insert(points.end(), {
                         QPointF(cx - arm, cy), QPointF(cx + arm, cy),
@@ -2657,16 +2657,16 @@ public:
                 }
                 case static_cast<int>(MarkerSymbol::BoxMinusConnected):
                 case static_cast<int>(MarkerSymbol::CircleMinusConnected): {
-                    const qreal inset = std::max<qreal>(2.0, rect.width() / 4.0);
-                    const QRectF inner = rect.adjusted(inset, inset, -inset, -inset);
+                    const qreal inset    = std::max<qreal>(2.0, rect.width() / 4.0);
+                    const QRectF inner   = rect.adjusted(inset, inset, -inset, -inset);
                     const bool is_circle = (primitive.marker_type == static_cast<int>(MarkerSymbol::CircleMinusConnected));
                     const auto symbol_lines = is_circle
                         ? make_circle_outline_as_lines(inner, 16)
                         : make_rect_outline_as_lines(inner);
                     points.insert(points.end(), symbol_lines.begin(), symbol_lines.end());
                     // - horizontal
-                    const qreal cx = inner.center().x();
-                    const qreal cy = inner.center().y();
+                    const qreal cx  = inner.center().x();
+                    const qreal cy  = inner.center().y();
                     const qreal arm = std::max<qreal>(1.0, inner.width() / 4.0);
                     points.insert(points.end(), {
                         QPointF(cx - arm, cy), QPointF(cx + arm, cy),
@@ -2679,16 +2679,16 @@ public:
                     break;
                 case static_cast<int>(MarkerSymbol::Bookmark):
                     points = make_bookmark_points(rect, false);
-                    mode = QSGGeometry::DrawLineStrip;
+                    mode   = QSGGeometry::DrawLineStrip;
                     break;
                 case static_cast<int>(MarkerSymbol::VerticalBookmark):
                     points = make_bookmark_points(rect, true);
-                    mode = QSGGeometry::DrawLineStrip;
+                    mode   = QSGGeometry::DrawLineStrip;
                     break;
                 default:
                     if (primitive.marker_type >= static_cast<int>(MarkerSymbol::Character)) {
                         points = make_diamond_points(rect);
-                        mode = QSGGeometry::DrawLineStrip;
+                        mode   = QSGGeometry::DrawLineStrip;
                     } else {
                         points = make_filled_rect_points(rect);
                     }
@@ -2750,14 +2750,14 @@ public:
             [&](Scene_graph_frame_text_node *node, size_t i) {
                 const fold_display_text_primitive &fold = frame.fold_display_texts[i];
                 margin_text_primitive as_margin;
-                as_margin.text = fold.text;
-                as_margin.position = fold.position;
-                as_margin.baseline_y = fold.baseline_y;
-                as_margin.foreground = fold.foreground;
-                as_margin.font = fold.font;
-                as_margin.clip_rect = fold.rect;
+                as_margin.text          = fold.text;
+                as_margin.position      = fold.position;
+                as_margin.baseline_y    = fold.baseline_y;
+                as_margin.foreground    = fold.foreground;
+                as_margin.font          = fold.font;
+                as_margin.clip_rect     = fold.rect;
                 as_margin.document_line = fold.document_line;
-                as_margin.style_id = fold.style_id;
+                as_margin.style_id      = fold.style_id;
                 node->update_from_margin_text(window, as_margin, frame.text_rect);
             });
 
@@ -2811,14 +2811,14 @@ public:
             [&](Scene_graph_frame_text_node *node, size_t i) {
                 const eol_annotation_primitive &eol = frame.eol_annotations[i];
                 margin_text_primitive as_margin;
-                as_margin.text = eol.text;
-                as_margin.position = eol.position;
-                as_margin.baseline_y = eol.baseline_y;
-                as_margin.foreground = eol.foreground;
-                as_margin.font = eol.font;
-                as_margin.clip_rect = eol.rect;
+                as_margin.text          = eol.text;
+                as_margin.position      = eol.position;
+                as_margin.baseline_y    = eol.baseline_y;
+                as_margin.foreground    = eol.foreground;
+                as_margin.font          = eol.font;
+                as_margin.clip_rect     = eol.rect;
                 as_margin.document_line = eol.document_line;
-                as_margin.style_id = eol.style_id;
+                as_margin.style_id      = eol.style_id;
                 node->update_from_margin_text(window, as_margin, frame.text_rect);
             });
 
@@ -2867,14 +2867,14 @@ public:
             [&](Scene_graph_frame_text_node *node, size_t i) {
                 const annotation_primitive &annot = frame.annotations[i];
                 margin_text_primitive as_margin;
-                as_margin.text = annot.text;
-                as_margin.position = annot.position;
-                as_margin.baseline_y = annot.baseline_y;
-                as_margin.foreground = annot.foreground;
-                as_margin.font = annot.font;
-                as_margin.clip_rect = annot.rect;
+                as_margin.text          = annot.text;
+                as_margin.position      = annot.position;
+                as_margin.baseline_y    = annot.baseline_y;
+                as_margin.foreground    = annot.foreground;
+                as_margin.font          = annot.font;
+                as_margin.clip_rect     = annot.rect;
                 as_margin.document_line = annot.document_line;
-                as_margin.style_id = annot.style_id;
+                as_margin.style_id      = annot.style_id;
                 node->update_from_margin_text(window, as_margin, frame.text_rect);
             });
 
@@ -2966,10 +2966,10 @@ public:
             QColor color;
         };
         std::vector<Indent_guide_dot> indent_guide_dots;
-        const qreal dpr = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
+        const qreal dpr            = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
         const qreal physical_pixel = 1.0 / dpr;
-        const qreal dot_size = physical_pixel;
-        const qreal dot_step = physical_pixel * 4.0;
+        const qreal dot_size       = physical_pixel;
+        const qreal dot_step       = physical_pixel * 4.0;
         const auto snap_to_device_pixel = [dpr](qreal value) {
             return std::round(value * dpr) / dpr;
         };
@@ -3011,23 +3011,23 @@ public:
     }
 
 private:
-    QSGNode *m_background_group = nullptr;
-    QSGNode *m_current_line_group = nullptr;
-    QSGNode *m_selection_group = nullptr;
-    QSGNode *m_gutter_group = nullptr;
-    QSGNode *m_marker_group = nullptr;
-    QSGNode *m_indicator_under_group = nullptr;
-    QSGClipNode *m_text_clip_node = nullptr;
-    QSGNode *m_representation_group = nullptr;
-    QSGNode *m_representation_text_group = nullptr;
-    QSGNode *m_text_group = nullptr;
+    QSGNode *m_background_group            = nullptr;
+    QSGNode *m_current_line_group          = nullptr;
+    QSGNode *m_selection_group             = nullptr;
+    QSGNode *m_gutter_group                = nullptr;
+    QSGNode *m_marker_group                = nullptr;
+    QSGNode *m_indicator_under_group       = nullptr;
+    QSGClipNode *m_text_clip_node          = nullptr;
+    QSGNode *m_representation_group        = nullptr;
+    QSGNode *m_representation_text_group   = nullptr;
+    QSGNode *m_text_group                  = nullptr;
     QSGNode *m_annotation_background_group = nullptr;
-    QSGNode *m_annotation_text_group = nullptr;
-    QSGNode *m_whitespace_group = nullptr;
-    QSGNode *m_decoration_group = nullptr;
-    QSGNode *m_indent_guide_group = nullptr;
-    QSGNode *m_indicator_over_group = nullptr;
-    QSGNode *m_overlay_group = nullptr;
+    QSGNode *m_annotation_text_group       = nullptr;
+    QSGNode *m_whitespace_group            = nullptr;
+    QSGNode *m_decoration_group            = nullptr;
+    QSGNode *m_indent_guide_group          = nullptr;
+    QSGNode *m_indicator_over_group        = nullptr;
+    QSGNode *m_overlay_group               = nullptr;
 
     QSGRectangleNode *m_background_node = nullptr;
     std::vector<QSGRectangleNode *> m_gutter_background_nodes;

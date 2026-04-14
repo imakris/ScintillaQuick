@@ -99,10 +99,10 @@ public:
 	void reset_tracked_scroll_width_to_viewport();
 	render_frame current_render_frame(
 		const captured_frame *capture_frame = nullptr,
-		bool static_content_dirty = true,
-		bool ensure_styled = true,
-		bool scrolling = false,
-		int extra_capture_lines = 0);
+		bool static_content_dirty           = true,
+		bool ensure_styled                  = true,
+		bool scrolling                      = false,
+		int extra_capture_lines             = 0);
 
 	// Called from `~ScintillaQuickItem()` before the derived
 	// `ScintillaQuickItem` subobject finishes destructing. Stops all
@@ -118,7 +118,7 @@ public:
 	virtual ~ScintillaQuickCore();
 
 signals:
-    void cursorPositionChanged();
+	void cursorPositionChanged();
 	void horizontalScrolled(int value);
 	void verticalScrolled(int value);
 	void horizontalRangeChanged(int max, int page);
@@ -182,7 +182,7 @@ private:
 
 	void CreateCallTipWindow(PRectangle rc) override;
 	void AddToPopUp(const char *label, int cmd, bool enabled) override;
-public:	
+public:
 	sptr_t WndProc(Scintilla::Message iMessage, uptr_t wParam, sptr_t lParam) override;
 	sptr_t DefWndProc(Scintilla::Message iMessage, uptr_t wParam, sptr_t lParam) override;
 private:
@@ -200,7 +200,7 @@ private:
 protected:
 
 	void PartialPaint(const PRectangle &rect);
-    void PartialPaintQml(const PRectangle & rect, QPainter *painter);
+	void PartialPaintQml(const PRectangle & rect, QPainter *painter);
 
 	void DragEnter(const Point &point);
 	void DragMove(const Point &point);
