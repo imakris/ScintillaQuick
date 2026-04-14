@@ -94,6 +94,103 @@ void test_specific_scroll_dispatch()
     SQ_EXPECT(!set_xoff.scrolling);
 }
 
+// Regression: caret and selection movement commands must be classified
+// as "overlay-only" mutators -- needed=true, but static_content_dirty
+// and needs_style_sync both false -- so that tight caret-stepping loops
+// like `caret_move_right_5000` in the benchmark do not pay a full
+// resync per keystroke. Historically these fell through to the
+// conservative full-resync default, which made every single caret move
+// invoke `syncQuickViewProperties()` and mark the scene graph's static
+// content dirty.
+void test_caret_movement_dispatch_is_overlay_only()
+{
+    const unsigned int caret_moves[] = {
+        SCI_CHARLEFT,
+        SCI_CHARRIGHT,
+        SCI_CHARLEFTEXTEND,
+        SCI_CHARRIGHTEXTEND,
+        SCI_CHARLEFTRECTEXTEND,
+        SCI_CHARRIGHTRECTEXTEND,
+        SCI_LINEUP,
+        SCI_LINEDOWN,
+        SCI_LINEUPEXTEND,
+        SCI_LINEDOWNEXTEND,
+        SCI_LINEUPRECTEXTEND,
+        SCI_LINEDOWNRECTEXTEND,
+        SCI_WORDLEFT,
+        SCI_WORDRIGHT,
+        SCI_WORDLEFTEXTEND,
+        SCI_WORDRIGHTEXTEND,
+        SCI_WORDLEFTEND,
+        SCI_WORDRIGHTEND,
+        SCI_WORDLEFTENDEXTEND,
+        SCI_WORDRIGHTENDEXTEND,
+        SCI_WORDPARTLEFT,
+        SCI_WORDPARTRIGHT,
+        SCI_WORDPARTLEFTEXTEND,
+        SCI_WORDPARTRIGHTEXTEND,
+        SCI_HOME,
+        SCI_HOMEEXTEND,
+        SCI_HOMERECTEXTEND,
+        SCI_HOMEDISPLAY,
+        SCI_HOMEDISPLAYEXTEND,
+        SCI_HOMEWRAP,
+        SCI_HOMEWRAPEXTEND,
+        SCI_VCHOME,
+        SCI_VCHOMEEXTEND,
+        SCI_VCHOMERECTEXTEND,
+        SCI_VCHOMEDISPLAY,
+        SCI_VCHOMEDISPLAYEXTEND,
+        SCI_VCHOMEWRAP,
+        SCI_VCHOMEWRAPEXTEND,
+        SCI_LINEEND,
+        SCI_LINEENDEXTEND,
+        SCI_LINEENDRECTEXTEND,
+        SCI_LINEENDDISPLAY,
+        SCI_LINEENDDISPLAYEXTEND,
+        SCI_LINEENDWRAP,
+        SCI_LINEENDWRAPEXTEND,
+        SCI_DOCUMENTSTART,
+        SCI_DOCUMENTSTARTEXTEND,
+        SCI_DOCUMENTEND,
+        SCI_DOCUMENTENDEXTEND,
+        SCI_PAGEUP,
+        SCI_PAGEDOWN,
+        SCI_PAGEUPEXTEND,
+        SCI_PAGEDOWNEXTEND,
+        SCI_PAGEUPRECTEXTEND,
+        SCI_PAGEDOWNRECTEXTEND,
+        SCI_STUTTEREDPAGEUP,
+        SCI_STUTTEREDPAGEDOWN,
+        SCI_STUTTEREDPAGEUPEXTEND,
+        SCI_STUTTEREDPAGEDOWNEXTEND,
+    };
+
+    for (unsigned int msg : caret_moves) {
+        const scene_graph_update_request_info_t req = scene_graph_update_request(msg);
+        // Must schedule an update -- the caret/selection moved, so the
+        // scene graph still needs a repaint to reposition the caret
+        // and selection overlay.
+        SQ_EXPECT(req.needed);
+        // Must NOT mark static content dirty -- text and styles are
+        // unchanged, so `build_render_snapshot()` should take the
+        // overlay-only capture path.
+        if (req.static_content_dirty) {
+            std::fprintf(
+                stderr,
+                "FAIL: SCI_ caret-move message %u is classified as "
+                "static_content_dirty=true. Caret moves do not change "
+                "text or styles and must take the overlay-only capture "
+                "path so that tight caret-move loops avoid paying a "
+                "full resync per keystroke.\n",
+                msg);
+        }
+        SQ_EXPECT(!req.static_content_dirty);
+        SQ_EXPECT(!req.needs_style_sync);
+        SQ_EXPECT(!req.scrolling);
+    }
+}
+
 void test_known_read_only_messages_take_fast_path()
 {
     // Internal hot-path queries must all return no update request at
@@ -171,6 +268,19 @@ void test_public_query_messages_take_fast_path()
         SCI_CHARPOSITIONFROMPOINT,
         SCI_COUNTCHARACTERS,
         SCI_COUNTCODEUNITS,
+        // Line / position lookups that are not named SCI_GET*. These
+        // must take the fast path: if they fall through to the
+        // conservative default, send() marks the scene graph dirty and
+        // defeats the vertical-scroll reuse fast path in
+        // `build_render_snapshot()`. This is a performance regression
+        // test as much as a correctness one -- the scroll reuse buffer
+        // and its unit test in the embedded benchmark both rely on
+        // these staying on the allow-list.
+        SCI_POSITIONFROMLINE,
+        SCI_LINELENGTH,
+        SCI_VISIBLEFROMDOCLINE,
+        SCI_DOCLINEFROMVISIBLE,
+        SCI_WRAPCOUNT,
     };
 
     for (unsigned int msg : public_queries) {
@@ -389,6 +499,7 @@ int main()
 {
     test_known_mutating_messages_request_update();
     test_specific_scroll_dispatch();
+    test_caret_movement_dispatch_is_overlay_only();
     test_known_read_only_messages_take_fast_path();
     test_public_query_messages_take_fast_path();
     test_sync_quick_view_properties_path_is_recursion_safe();

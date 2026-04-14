@@ -305,6 +305,22 @@ inline bool scene_graph_message_is_known_read_only(unsigned int i_message)
         case SCI_CHARPOSITIONFROMPOINTCLOSE:
         case SCI_COUNTCHARACTERS:
         case SCI_COUNTCODEUNITS:
+        // Line / position lookups. These are pure read-only queries but
+        // are not named SCI_GET*, so they fell through to the conservative
+        // default branch and silently marked the scene graph dirty. That
+        // defeated the vertical-scroll reuse fast path in
+        // `build_render_snapshot()` whenever an application (or a
+        // benchmark verifier) inspected line / position state between
+        // scroll steps: each query set `content_modified_since_last_capture`
+        // and forced the next frame to take a full recapture instead of
+        // the buffer-translate fast path. Classifying them correctly as
+        // read-only is both semantically accurate and unlocks the
+        // scroll-reuse path they were inadvertently disabling.
+        case SCI_POSITIONFROMLINE:
+        case SCI_LINELENGTH:
+        case SCI_VISIBLEFROMDOCLINE:
+        case SCI_DOCLINEFROMVISIBLE:
+        case SCI_WRAPCOUNT:
         // Style queries called from style_attributes_for() so that
         // per-style font / colour sync during
         // `syncQuickViewProperties()` does not recurse.
@@ -338,6 +354,99 @@ inline scene_graph_update_request_info_t scene_graph_update_request(unsigned int
         case SCI_GOTOPOS:
         case SCI_SETCURRENTPOS:
         case SCI_SETANCHOR:
+        // Caret / selection movement commands. These are mutators on the
+        // caret and selection state, so they DO need a scene-graph
+        // update request, but they do NOT modify document text or
+        // styles. Classifying them here (rather than letting them fall
+        // through to the conservative full-resync default) is a
+        // double win:
+        //
+        //   1. `static_content_dirty` stays false, so
+        //      `build_render_snapshot()` takes the overlay-only capture
+        //      path and skips the `capture_current_frame.paint_text`
+        //      work for every visual line.
+        //   2. `needs_style_sync` stays false, so `send()` skips the
+        //      `syncQuickViewProperties()` call that re-queries all
+        //      the exported editor properties and emits any number of
+        //      property-change signals per caret move.
+        //
+        // The tight `caret_move_right_5000` benchmark loop issues
+        // SCI_CHARRIGHT 5000 times; previously each call dropped into
+        // the default branch and paid the full resync cost. With the
+        // classification below, the editor still repaints the caret
+        // and selection exactly as before, but the per-call cost of
+        // each movement collapses from "full resync" to "overlay-only
+        // resync".
+        //
+        // If a caret movement happens to scroll the view (e.g.
+        // CHARRIGHT at end of a long wrapped line jumps to the next
+        // visible line), Scintilla will fire `Notification::UpdateUI`
+        // with the `Update::VScroll` bit set, and
+        // `updateQuickView()` in `notifyParent` will observe the
+        // scroll and follow up with the appropriate scroll-aware
+        // `request_scene_graph_update`. So scroll handling is not
+        // lost; it just moves from the dispatch table to the Update
+        // notification path, which is where Scintilla actually knows
+        // whether a scroll happened.
+        case SCI_LINEDOWN:
+        case SCI_LINEDOWNEXTEND:
+        case SCI_LINEDOWNRECTEXTEND:
+        case SCI_LINEUP:
+        case SCI_LINEUPEXTEND:
+        case SCI_LINEUPRECTEXTEND:
+        case SCI_CHARLEFT:
+        case SCI_CHARLEFTEXTEND:
+        case SCI_CHARLEFTRECTEXTEND:
+        case SCI_CHARRIGHT:
+        case SCI_CHARRIGHTEXTEND:
+        case SCI_CHARRIGHTRECTEXTEND:
+        case SCI_WORDLEFT:
+        case SCI_WORDLEFTEXTEND:
+        case SCI_WORDRIGHT:
+        case SCI_WORDRIGHTEXTEND:
+        case SCI_WORDLEFTEND:
+        case SCI_WORDLEFTENDEXTEND:
+        case SCI_WORDRIGHTEND:
+        case SCI_WORDRIGHTENDEXTEND:
+        case SCI_WORDPARTLEFT:
+        case SCI_WORDPARTLEFTEXTEND:
+        case SCI_WORDPARTRIGHT:
+        case SCI_WORDPARTRIGHTEXTEND:
+        case SCI_HOME:
+        case SCI_HOMEEXTEND:
+        case SCI_HOMERECTEXTEND:
+        case SCI_HOMEDISPLAY:
+        case SCI_HOMEDISPLAYEXTEND:
+        case SCI_HOMEWRAP:
+        case SCI_HOMEWRAPEXTEND:
+        case SCI_VCHOME:
+        case SCI_VCHOMEEXTEND:
+        case SCI_VCHOMERECTEXTEND:
+        case SCI_VCHOMEDISPLAY:
+        case SCI_VCHOMEDISPLAYEXTEND:
+        case SCI_VCHOMEWRAP:
+        case SCI_VCHOMEWRAPEXTEND:
+        case SCI_LINEEND:
+        case SCI_LINEENDEXTEND:
+        case SCI_LINEENDRECTEXTEND:
+        case SCI_LINEENDDISPLAY:
+        case SCI_LINEENDDISPLAYEXTEND:
+        case SCI_LINEENDWRAP:
+        case SCI_LINEENDWRAPEXTEND:
+        case SCI_DOCUMENTSTART:
+        case SCI_DOCUMENTSTARTEXTEND:
+        case SCI_DOCUMENTEND:
+        case SCI_DOCUMENTENDEXTEND:
+        case SCI_PAGEUP:
+        case SCI_PAGEUPEXTEND:
+        case SCI_PAGEUPRECTEXTEND:
+        case SCI_PAGEDOWN:
+        case SCI_PAGEDOWNEXTEND:
+        case SCI_PAGEDOWNRECTEXTEND:
+        case SCI_STUTTEREDPAGEUP:
+        case SCI_STUTTEREDPAGEUPEXTEND:
+        case SCI_STUTTEREDPAGEDOWN:
+        case SCI_STUTTEREDPAGEDOWNEXTEND:
             return {true, false, false, false};
 
         case SCI_SETSELFORE:

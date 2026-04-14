@@ -576,9 +576,35 @@ sptr_t ScintillaQuick_item::send(
     // future missed entry degrades into "no nested resync" rather than
     // a crash.
     if (update_request.needed && !m_in_sync_quick_view_properties) {
-        self->syncQuickViewProperties();
-        if (update_request.static_content_dirty && m_render_data) {
-            m_render_data->content_modified_since_last_capture = true;
+        // `syncQuickViewProperties()` is only needed when the
+        // dispatch result reports that static content, style state
+        // or scroll position might have changed. Pure caret /
+        // selection mutators (SCI_CHARRIGHT, SCI_GOTOPOS,
+        // SCI_SETSEL, ...) leave every single property exposed
+        // through `syncQuickViewProperties` untouched, so calling it
+        // per-message just burns CPU issuing SCI_TEXTHEIGHT /
+        // SCI_GETLINECOUNT / SCI_GETSCROLLWIDTH / SCI_LINESONSCREEN
+        // / SCI_GETFIRSTVISIBLELINE getters and running the
+        // `emit_if_changed` comparison loop to conclude nothing
+        // changed. In `caret_move_right_5000` that is 5000 copies of
+        // a no-op sync per second, which dominated the scenario cost.
+        //
+        // If a caret movement does end up scrolling the view (e.g.
+        // SCI_CHARRIGHT falling off the end of a long line),
+        // Scintilla fires `Notification::UpdateUI` with
+        // `Update::VScroll` set, and `updateQuickView()` synchronously
+        // calls `syncQuickViewProperties()` from the notification
+        // handler, so we do not lose any property change coverage by
+        // skipping the redundant call here.
+        const bool needs_property_sync =
+            update_request.static_content_dirty ||
+            update_request.needs_style_sync ||
+            update_request.scrolling;
+        if (needs_property_sync) {
+            self->syncQuickViewProperties();
+            if (update_request.static_content_dirty && m_render_data) {
+                m_render_data->content_modified_since_last_capture = true;
+            }
         }
         self->request_scene_graph_update(
             update_request.static_content_dirty,
