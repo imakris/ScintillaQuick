@@ -1513,12 +1513,16 @@ public:
             }
             QPointF delta;
             if (uniform_translation_delta(margin, delta)) {
+                const QRectF clip_rect =
+                    (margin.clip_rect.isValid() && !margin.clip_rect.isEmpty())
+                    ? margin.clip_rect
+                    : viewport;
                 m_text_node->setColor(margin.foreground);
                 m_text_node->setViewport(viewport);
-                update_clip_node(m_clip_node, m_cached_clip_rect.translated(delta));
+                update_clip_node(m_clip_node, clip_rect);
                 set_translation(delta);
                 m_cached_viewport  = viewport;
-                m_cached_clip_rect = m_cached_clip_rect.translated(delta);
+                m_cached_clip_rect = clip_rect;
                 return;
             }
         }

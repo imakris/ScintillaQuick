@@ -1047,6 +1047,29 @@ static Fixture_outcome vr_scroll_wheel_bounce_unwrapped()
         false);
 }
 
+static Fixture_outcome vr_scroll_wheel_bounce_margin_numbers_unwrapped()
+{
+    Fixture_editor f;
+    f.editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
+    f.editor.send(SCI_SETMARGINTYPEN, 0, SC_MARGIN_NUMBER);
+    f.editor.send(SCI_SETMARGINWIDTHN, 0, 48);
+    f.set_text(build_large_document(25000));
+    f.editor.send(SCI_SETFIRSTVISIBLELINE, 120);
+    f.pump();
+
+    const QPointF wheel_point(
+        std::max<qreal>(f.editor.width() * 0.5, 32.0),
+        std::max<qreal>(f.editor.height() * 0.5, 32.0));
+
+    return run_scroll_probe_fixture(
+        QStringLiteral("scroll_wheel_bounce_margin_numbers_unwrapped"),
+        f,
+        f.window,
+        wheel_point,
+        48,
+        false);
+}
+
 static Fixture_outcome vr_scroll_wheel_bounce_wrapped()
 {
     Fixture_editor f;
@@ -1267,8 +1290,9 @@ int main(int argc, char **argv)
         // Phase 9: EOL annotation boxed fidelity
         {"eol_annotation_boxed",      vr_eol_annotation_boxed},
         // Scroll-specific regression probes
-        {"scroll_wheel_bounce_unwrapped", vr_scroll_wheel_bounce_unwrapped},
-        {"scroll_wheel_bounce_wrapped",   vr_scroll_wheel_bounce_wrapped},
+        {"scroll_wheel_bounce_unwrapped",                vr_scroll_wheel_bounce_unwrapped},
+        {"scroll_wheel_bounce_margin_numbers_unwrapped", vr_scroll_wheel_bounce_margin_numbers_unwrapped},
+        {"scroll_wheel_bounce_wrapped",                  vr_scroll_wheel_bounce_wrapped},
     };
 
     bool ran_any_fixture = false;
