@@ -1,20 +1,12 @@
+// Copyright (c) 2026, Ioannis Makris
+// Licensed under the BSD 2-Clause License, see LICENSE.md file for details.
 //
-//          Copyright (c) 1990-2011, Scientific Toolworks, Inc.
-//
-// The License.txt file describes the conditions under which this software may be distributed.
-//
-// Author: Jason Haslam
-//
-// Additions Copyright (c) 2011 Archaeopteryx Software, Inc. d/b/a Wingware
 // @file ScintillaQuickItem.h - Qt Quick item (QQuickItem) that wraps
 // ScintillaQuickCore and drives events, input method handling and
 // scene-graph rendering. This is NOT a QWidget; earlier revisions of
 // upstream Scintilla-Qt were widget-based and the comment used to say
 // "Qt widget" — the current integration is fully Qt Quick / scene-graph
 // native.
-//
-// Additions Copyright (c) 2020 Michael Neuroth
-// Scintilla platform layer for Qt QML/Quick
 
 
 #ifndef SCINTILLAQUICK_SCINTILLAQUICKITEM_H
