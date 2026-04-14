@@ -1521,7 +1521,7 @@ void list_box_impl::Create(Window &parent,
                          Point location,
                          int /*lineHeight*/,
                          bool unicode_mode,
-			 Technology)
+                         Technology)
 {
 	m_unicode_mode = unicode_mode;
 	QQuickItem *qparent = window(parent.GetID());
