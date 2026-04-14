@@ -3,10 +3,10 @@
 
 #include <scintillaquick/ScintillaQuickItem.h>
 
-#include <QFont>
 #include <QGuiApplication>
 #include <QQuickWindow>
 
+#include "ScintillaQuickFont.h"
 #include "ScintillaQuickWindowBinding.h"
 #include "Scintilla.h"
 
@@ -28,6 +28,10 @@ QString sampleText() {
 
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
+    QString font_error;
+    if (!scintillaquick::shared::ensure_bundled_test_fonts_loaded(&font_error)) {
+        qFatal("%s", qPrintable(font_error));
+    }
 
     QQuickWindow window;
     window.setTitle(QStringLiteral("ScintillaQuick Minimal Editor"));
@@ -37,7 +41,7 @@ int main(int argc, char **argv) {
     ScintillaQuick_item editor;
     scintillaquick::examples::bindItemToWindow(editor, window);
 
-    editor.setProperty("font", QFont(QStringLiteral("Consolas"), 11));
+    editor.setProperty("font", scintillaquick::shared::deterministic_test_font(11));
     editor.setProperty("text", sampleText());
     editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
     editor.send(SCI_STYLECLEARALL);

@@ -134,6 +134,9 @@ add_library(
     src/core/ScintillaQuickCore.h
     src/platform/scintillaquick_platqt.cpp
     src/platform/scintillaquick_platqt.h
+    src/platform/scintillaquick_fonts.cpp
+    src/platform/scintillaquick_fonts.h
+    src/platform/scintillaquick_fonts.qrc
     src/render/scintillaquick_scene_graph_renderer.cpp
     src/render/scintillaquick_scene_graph_renderer.h
     src/public/ScintillaQuickItem.cpp

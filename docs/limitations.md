@@ -33,11 +33,14 @@ so that consumers can find them without crawling history.
 
 - **Visual regression baselines are Linux-only.** The PNGs under
   `tests/frame_visual_regression/baselines/` were generated on Linux
-  with Qt's software scene graph. Font-rendering differences between
-  FreeType (Linux), ClearType (Windows), and Core Text (macOS) mean
-  the visual tests will fail on Windows and macOS until per-platform
-  baselines are added. The CI workflow skips
-  `scintillaquick_visual_regression_test` on non-Linux hosts.
+  with Qt's software scene graph and the shared test-font helper in
+  `examples/common/ScintillaQuickFont.h`. Font-rendering differences
+  between FreeType (Linux), ClearType (Windows), and Core Text
+  (macOS) mean the visual tests will fail on Windows and macOS until
+  per-platform baselines are added. The helper defaults to `Cousine`
+  and can switch to `Cascadia Code` via `SCINTILLAQUICK_TEST_FONT_FAMILY`.
+  The CI workflow skips `scintillaquick_visual_regression_test` on
+  non-Linux hosts.
 
 - **Windows visual tests require a desktop session.** The
   visual-regression runner uses the `windows` Qt platform plugin on

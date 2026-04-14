@@ -9,6 +9,7 @@
 #include "../core/scintillaquick_hierarchical_profiler.h"
 #include "ScintillaQuickCore.h"
 #include "scintillaquick_dispatch_table.h"
+#include "scintillaquick_fonts.h"
 #include "scintillaquick_platqt.h"
 #include "scintillaquick_scene_graph_renderer.h"
 
@@ -443,7 +444,7 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem *parent)
 , m_input_method_hints(Qt::ImhNone)
 , m_last_touch_press_time(-1)
 #endif
-, m_core(new ScintillaQuick_core(this)), m_preedit_pos(-1), m_render_data(std::make_unique<Render_data>())
+, m_core((ensure_bundled_fonts_loaded(), new ScintillaQuick_core(this))), m_preedit_pos(-1), m_render_data(std::make_unique<Render_data>())
 {
 #ifdef PLAT_QT_QML
     setAcceptedMouseButtons(Qt::AllButtons);

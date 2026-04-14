@@ -22,6 +22,7 @@
 #include <functional>
 
 #include "Scintilla.h"
+#include "ScintillaQuickFont.h"
 
 // This test exercises Scintilla::Internal render data directly, so keeping the
 // internal namespace open here keeps the assertions readable.
@@ -116,7 +117,7 @@ struct Fixture_editor
         editor.setParentItem(window.contentItem());
         editor.setWidth(640);
         editor.setHeight(480);
-        editor.setProperty("font", QFont(QStringLiteral("Consolas"), 11));
+        editor.setProperty("font", scintillaquick::shared::deterministic_test_font(11));
         editor.send(SCI_SETCARETPERIOD, 0);
 
         // Show the window so the software scene graph gets initialised.
@@ -711,9 +712,10 @@ static Fixture_outcome vr_mixed_styles_wrap()
     f.editor.setWidth(200);
     f.editor.send(SCI_SETWRAPMODE, SC_WRAP_WORD);
 
+    const QByteArray font_family = scintillaquick::shared::deterministic_test_font_family_utf8();
     f.editor.send(SCI_STYLESETFONT,
                   STYLE_DEFAULT,
-                  reinterpret_cast<sptr_t>("Consolas"));
+                  reinterpret_cast<sptr_t>(font_family.constData()));
     f.editor.send(SCI_STYLESETSIZE, STYLE_DEFAULT, 11);
     f.editor.send(SCI_STYLECLEARALL);
     f.editor.send(SCI_STYLESETFORE, 1, 0x000000);
@@ -1205,14 +1207,20 @@ int main(int argc, char **argv)
         }
     }
 
+    QString font_error;
+    if (!scintillaquick::shared::ensure_bundled_test_fonts_loaded(&font_error)) {
+        qCritical("%s", qPrintable(font_error));
+        return 1;
+    }
+
     // Verify the test font is available.
     {
-        QFont probe(QStringLiteral("Consolas"), 11);
+        const QString family = scintillaquick::shared::deterministic_test_font_family();
+        QFont probe(family, 11);
         QFontInfo info(probe);
-        if (info.family().compare(QStringLiteral("Consolas"),
-                                  Qt::CaseInsensitive) != 0) {
-            qCritical("FAIL: Consolas font not available (resolved to '%s'). "
-                      "Visual regression baselines require Consolas.",
+        if (info.family().compare(family, Qt::CaseInsensitive) != 0) {
+            qCritical("FAIL: bundled test font not available (resolved to '%s'). "
+                      "Visual regression baselines require the configured bundled font.",
                       qPrintable(info.family()));
             return 1;
         }

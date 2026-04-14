@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "Scintilla.h"
+#include "ScintillaQuickFont.h"
 
 // This test exercises Scintilla::Internal render data directly, so keeping the
 // internal namespace open here keeps the assertions readable.
@@ -43,7 +44,7 @@ struct Fixture_editor
     {
         editor.setWidth(640);
         editor.setHeight(480);
-        editor.setProperty("font", QFont(QStringLiteral("Consolas"), 11));
+        editor.setProperty("font", scintillaquick::shared::deterministic_test_font(11));
         // Make caret visible for capture: give focus and disable blink.
         editor.send(SCI_SETFOCUS, 1);
         editor.send(SCI_SETCARETPERIOD, 0);
@@ -641,9 +642,10 @@ static bool test_mixed_styles_wrap()
     f.editor.send(SCI_SETWRAPMODE, SC_WRAP_WORD);
 
     // Configure distinct styles.
+    const QByteArray font_family = scintillaquick::shared::deterministic_test_font_family_utf8();
     f.editor.send(SCI_STYLESETFONT,
                   STYLE_DEFAULT,
-                  reinterpret_cast<sptr_t>("Consolas"));
+                  reinterpret_cast<sptr_t>(font_family.constData()));
     f.editor.send(SCI_STYLESETSIZE, STYLE_DEFAULT, 11);
     f.editor.send(SCI_STYLECLEARALL);
     f.editor.send(SCI_STYLESETFORE, 1, 0x000000);
@@ -2123,16 +2125,21 @@ int main(int argc, char **argv)
     qputenv("QT_ENABLE_HIGHDPI_SCALING", "0");
 
     QGuiApplication app(argc, argv);
+    QString font_error;
+    if (!scintillaquick::shared::ensure_bundled_test_fonts_loaded(&font_error)) {
+        qCritical("%s", qPrintable(font_error));
+        return 1;
+    }
 
     // Verify the test font is actually available.  Silent substitution
     // would invalidate every width/wrap/overlap assertion.
     {
-        QFont probe(QStringLiteral("Consolas"), 11);
+        const QString family = scintillaquick::shared::deterministic_test_font_family();
+        QFont probe(family, 11);
         QFontInfo info(probe);
-        if (info.family().compare(QStringLiteral("Consolas"),
-                                  Qt::CaseInsensitive) != 0) {
-            qCritical("FAIL: Consolas font not available (resolved to '%s'). "
-                      "Frame validation requires Consolas for deterministic metrics.",
+        if (info.family().compare(family, Qt::CaseInsensitive) != 0) {
+            qCritical("FAIL: bundled test font not available (resolved to '%s'). "
+                      "Frame validation requires the configured bundled font for deterministic metrics.",
                       qPrintable(info.family()));
             return 1;
         }

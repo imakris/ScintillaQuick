@@ -25,6 +25,7 @@
 #include <functional>
 
 #include "Scintilla.h"
+#include "ScintillaQuickFont.h"
 
 // This test exercises Scintilla::Internal render data directly, so keeping the
 // internal namespace open here keeps the assertions readable.
@@ -175,7 +176,7 @@ struct Fixture_editor
         editor.setParentItem(window.contentItem());
         editor.setWidth(window.width());
         editor.setHeight(window.height());
-        editor.setProperty("font", QFont(QStringLiteral("Consolas"), 11));
+        editor.setProperty("font", scintillaquick::shared::deterministic_test_font(11));
         editor.send(SCI_SETCARETPERIOD, 0);
         editor.on_paint_node_updated = [&]() { ++paint_counter; };
 
@@ -399,9 +400,10 @@ std::vector<Review_fixture> review_fixtures()
                 fixture.editor.setHeight(480);
                 fixture.editor.send(SCI_SETWRAPMODE, SC_WRAP_WORD);
 
+                const QByteArray font_family = scintillaquick::shared::deterministic_test_font_family_utf8();
                 fixture.editor.send(SCI_STYLESETFONT,
                                     STYLE_DEFAULT,
-                                    reinterpret_cast<sptr_t>("Consolas"));
+                                    reinterpret_cast<sptr_t>(font_family.constData()));
                 fixture.editor.send(SCI_STYLESETSIZE, STYLE_DEFAULT, 11);
                 fixture.editor.send(SCI_STYLECLEARALL);
                 fixture.editor.send(SCI_STYLESETFORE, 1, 0x000000);
@@ -800,11 +802,18 @@ int main(int argc, char **argv)
     parser.addOption(fixture_option);
     parser.process(app);
 
+    QString font_error;
+    if (!scintillaquick::shared::ensure_bundled_test_fonts_loaded(&font_error)) {
+        qCritical("%s", qPrintable(font_error));
+        return 1;
+    }
+
     {
-        QFont probe(QStringLiteral("Consolas"), 11);
+        const QString family = scintillaquick::shared::deterministic_test_font_family();
+        QFont probe(family, 11);
         QFontInfo info(probe);
-        if (info.family().compare(QStringLiteral("Consolas"), Qt::CaseInsensitive) != 0) {
-            qCritical("FAIL: Consolas font not available (resolved to '%s').",
+        if (info.family().compare(family, Qt::CaseInsensitive) != 0) {
+            qCritical("FAIL: bundled test font not available (resolved to '%s').",
                       qPrintable(info.family()));
             return 1;
         }

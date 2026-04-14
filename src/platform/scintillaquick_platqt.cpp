@@ -11,6 +11,7 @@
 #include <scintillaquick/ScintillaQuickItem.h>
 #include "../core/scintillaquick_hierarchical_profiler.h"
 #include "scintillaquick_platqt.h"
+#include "scintillaquick_fonts.h"
 #include "Scintilla.h"
 #include "XPM.h"
 #include "UniConversion.h"
@@ -1387,7 +1388,16 @@ private:
 
     QFont resolvedFont() const
     {
-        return m_font.family().isEmpty() ? QFontDatabase::systemFont(QFontDatabase::FixedFont) : m_font;
+        if (!m_font.family().isEmpty()) {
+            return m_font;
+        }
+
+        QFont font(bundled_fixed_font_family());
+        if (font.family().compare(bundled_fixed_font_family(), Qt::CaseInsensitive) == 0) {
+            return font;
+        }
+
+        return QFontDatabase::systemFont(QFontDatabase::FixedFont);
     }
 
     int rowHeight() const
@@ -1761,7 +1771,11 @@ const char *Platform::DefaultFont()
 {
     static char fontNameDefault[200] = "";
     if (!fontNameDefault[0]) {
-        QFont font          = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        const QString family = bundled_fixed_font_family();
+        QFont font(family);
+        if (font.family().compare(family, Qt::CaseInsensitive) != 0) {
+            font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        }
         const auto fontName = font.family().toUtf8();
         std::snprintf(fontNameDefault, sizeof(fontNameDefault), "%s", fontName.constData());
     }

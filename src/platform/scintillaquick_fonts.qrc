@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/scintillaquick/fonts">
+        <file alias="CascadiaCode-Regular.ttf">../../fonts/CascadiaCode/CascadiaCode-Regular.ttf</file>
+        <file alias="CascadiaCode-Italic.ttf">../../fonts/CascadiaCode/CascadiaCode-Italic.ttf</file>
+        <file alias="CascadiaCode-Bold.ttf">../../fonts/CascadiaCode/CascadiaCode-Bold.ttf</file>
+        <file alias="CascadiaCode-BoldItalic.ttf">../../fonts/CascadiaCode/CascadiaCode-BoldItalic.ttf</file>
+        <file alias="Cousine-Regular.ttf">../../fonts/Cousine/Cousine-Regular.ttf</file>
+        <file alias="Cousine-Italic.ttf">../../fonts/Cousine/Cousine-Italic.ttf</file>
+        <file alias="Cousine-Bold.ttf">../../fonts/Cousine/Cousine-Bold.ttf</file>
+        <file alias="Cousine-BoldItalic.ttf">../../fonts/Cousine/Cousine-BoldItalic.ttf</file>
+    </qresource>
+</RCC>

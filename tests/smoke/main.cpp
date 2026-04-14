@@ -14,11 +14,11 @@
 
 #include <QCoreApplication>
 #include <QEventLoop>
-#include <QFont>
 #include <QDebug>
 #include <QGuiApplication>
 
 #include "Scintilla.h"
+#include "ScintillaQuickFont.h"
 
 #include <cstdio>
 
@@ -63,7 +63,7 @@ int selection_end(ScintillaQuick_item &editor)
 void test_property_roundtrip(ScintillaQuick_item &editor)
 {
     const QString text = QStringLiteral("smoke test\nsecond line");
-    editor.setProperty("font", QFont(QStringLiteral("Consolas"), 11));
+    editor.setProperty("font", scintillaquick::shared::deterministic_test_font(11));
     editor.setProperty("text", text);
     editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
     pump_events();
@@ -164,6 +164,10 @@ void test_wrap_mode_toggle(ScintillaQuick_item &editor)
 int main(int argc, char **argv)
 {
     QGuiApplication app(argc, argv);
+    QString font_error;
+    if (!scintillaquick::shared::ensure_bundled_test_fonts_loaded(&font_error)) {
+        qFatal("%s", qPrintable(font_error));
+    }
 
     ScintillaQuick_item editor;
     editor.setWidth(640);

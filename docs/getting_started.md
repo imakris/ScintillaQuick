@@ -64,6 +64,10 @@ Typical C++ integration looks like this:
 3. Instantiate `ScintillaQuickItem`.
 4. Attach it to the Qt Quick scene.
 5. Set geometry, font, and initial text.
+   The first-party examples and tests use the shared helper in
+   `examples/common/ScintillaQuickFont.h` to select a bundled fixed-font
+   family. By default it picks `Cascadia Code`, and
+   `SCINTILLAQUICK_FIXED_FONT_FAMILY` can switch it to `Cousine`.
 6. Drive editor behavior with Scintilla messages through `send()`.
 
 See [`examples/minimal_editor/main.cpp`](../examples/minimal_editor/main.cpp)

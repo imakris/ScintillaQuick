@@ -10,7 +10,6 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
-#include <QFont>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -34,6 +33,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "ScintillaQuickFont.h"
 #include "ScintillaQuickWindowBinding.h"
 #include "Scintilla.h"
 
@@ -554,6 +554,10 @@ void send_key_press_event(
 int main(int argc, char **argv)
 {
     QGuiApplication app(argc, argv);
+    QString font_error;
+    if (!scintillaquick::shared::ensure_bundled_test_fonts_loaded(&font_error)) {
+        qFatal("%s", qPrintable(font_error));
+    }
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("ScintillaQuick embedded benchmark"));
@@ -579,7 +583,7 @@ int main(int argc, char **argv)
     editor.on_paint_node_updated = [&]() {
         ++paint_counter;
     };
-    editor.setProperty("font", QFont(QStringLiteral("Consolas"), 11));
+    editor.setProperty("font", scintillaquick::shared::deterministic_test_font(11));
     editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
     editor.send(SCI_STYLECLEARALL);
     editor.send(SCI_SETCARETPERIOD, 0);
