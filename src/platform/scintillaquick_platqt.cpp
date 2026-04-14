@@ -158,6 +158,7 @@ public:
     // called from the GUI thread.
     mutable int m_advance_cache_state = 0;
     mutable double m_fixed_advance = 0.0;
+    mutable const QPaintDevice *m_cached_advance_device = nullptr;
 
     explicit Font_and_character_set(const FontParameters &fp) : m_character_set(fp.characterSet) {
         m_font = std::make_unique<QFont>();
@@ -172,9 +173,12 @@ public:
     // cached fixed-pitch advance. Returns false if the cache is not yet
     // ready or the font is known not to be fixed-pitch, in which case
     // the caller must fall through to the slow QTextLayout-based path.
-    bool try_fill_ascii_positions_from_cache(std::string_view text, XYPOSITION *positions) const
+    bool try_fill_ascii_positions_from_cache(
+        std::string_view text,
+        XYPOSITION *positions,
+        const QPaintDevice *device) const
     {
-        if (m_advance_cache_state != 1) {
+        if (m_advance_cache_state != 1 || m_cached_advance_device != device) {
             return false;
         }
         const double w = m_fixed_advance;
@@ -190,9 +194,15 @@ public:
     // cache switches to the fast path for all subsequent calls. If the
     // font is known not to be fixed-pitch the state is frozen so we do
     // not keep re-running the detection.
-    void populate_ascii_cache_from_measurement(std::string_view text, const XYPOSITION *positions) const
+    void populate_ascii_cache_from_measurement(
+        std::string_view text,
+        const XYPOSITION *positions,
+        const QPaintDevice *device) const
     {
-        if (m_advance_cache_state != 0) {
+        if (m_advance_cache_state == 2) {
+            return;
+        }
+        if (m_advance_cache_state == 1 && m_cached_advance_device == device) {
             return;
         }
         if (text.empty()) {
@@ -224,8 +234,9 @@ public:
         }
 
         if (uniform && first_adv > 0.0 && QFontInfo(*m_font).fixedPitch()) {
-            m_fixed_advance = first_adv;
-            m_advance_cache_state = 1;
+            m_fixed_advance        = first_adv;
+            m_cached_advance_device = device;
+            m_advance_cache_state  = 1;
         }
         else {
             m_advance_cache_state = 2;
@@ -784,9 +795,10 @@ void Surface_impl::MeasureWidths(const Font *font,
     // thousands of times per benchmark run and the profiler's mutex
     // lock would add more overhead than the fast path itself costs.
     const Font_and_character_set *font_wrapper = as_font_and_character_set(font);
+    QPaintDevice *paint_device = GetPaintDevice();
     const bool ascii_text = is_simple_printable_ascii(text);
     if (ascii_text && font_wrapper &&
-        font_wrapper->try_fill_ascii_positions_from_cache(text, positions)) {
+        font_wrapper->try_fill_ascii_positions_from_cache(text, positions, paint_device)) {
         return;
     }
 
@@ -795,7 +807,7 @@ void Surface_impl::MeasureWidths(const Font *font,
         SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.to_qstring");
         su = unicode_from_text(text);
     }
-    QTextLayout tlay(su, *font_pointer(font), GetPaintDevice());
+    QTextLayout tlay(su, *font_pointer(font), paint_device);
     QTextLine tl;
     {
         SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.layout_text");
@@ -814,7 +826,7 @@ void Surface_impl::MeasureWidths(const Font *font,
                 // slow path the benchmark previously exercised, so this
                 // is not an independent source of truth.
                 if (font_wrapper) {
-                    font_wrapper->populate_ascii_cache_from_measurement(text, positions);
+                    font_wrapper->populate_ascii_cache_from_measurement(text, positions, paint_device);
                 }
                 return;
             }

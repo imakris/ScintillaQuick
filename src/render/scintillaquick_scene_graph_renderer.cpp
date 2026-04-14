@@ -1372,10 +1372,11 @@ public:
         const bool same_key = m_has_cached_key &&
             m_cached_key.document_line == visual_line.key.document_line &&
             m_cached_key.subline_index == visual_line.key.subline_index;
+        const bool same_viewport_size = m_cached_viewport.size() == viewport.size();
 
         {
             SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_visual_line.reuse_check");
-            if (same_key && layouts_match_content(visual_line)) {
+            if (same_key && same_viewport_size && layouts_match_content(visual_line)) {
                 if (positions_match(visual_line, viewport)) {
                     return;
                 }
@@ -1504,8 +1505,9 @@ public:
         const Visual_line_key margin_key{margin.document_line, margin.subline_index};
         const bool same_key = m_has_cached_key &&
             m_cached_key == margin_key;
+        const bool same_viewport_size = m_cached_viewport.size() == viewport.size();
 
-        if (same_key && margin_layouts_match(margin)) {
+        if (same_key && same_viewport_size && margin_layouts_match(margin)) {
             if (margin_position_matches(margin, viewport)) {
                 return;
             }
