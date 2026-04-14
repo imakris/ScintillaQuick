@@ -138,12 +138,12 @@ public:
         wheel_event.clear();
         scroll_horizontal.clear();
         scroll_vertical.clear();
-        Hierarchical_profiler.reset();
+        hierarchical_profiler.reset();
     }
 
-    Hierarchical_profiler *hierarchical_profiler_if_active()
+    Scintilla::Internal::Hierarchical_profiler *hierarchical_profiler_if_active()
     {
-        return active.load(std::memory_order_acquire) ? &Hierarchical_profiler : nullptr;
+        return active.load(std::memory_order_acquire) ? &hierarchical_profiler : nullptr;
     }
 
     ScintillaQuick_item *m_owner = nullptr;
@@ -170,7 +170,7 @@ public:
     Profiling_metric wheel_event;
     Profiling_metric scroll_horizontal;
     Profiling_metric scroll_vertical;
-    Hierarchical_profiler Hierarchical_profiler;
+    Scintilla::Internal::Hierarchical_profiler hierarchical_profiler;
 };
 
 namespace {
@@ -693,7 +693,7 @@ void ScintillaQuick_item::stopProfilingSession()
     report.insert("metadata", metadata);
     report.insert("counters", counters);
     report.insert("metrics", metrics);
-    report.insert("scope_tree", m_profiling_state->Hierarchical_profiler.to_json());
+    report.insert("scope_tree", m_profiling_state->hierarchical_profiler.to_json());
 
     const QString report_path = profiling_report_path(m_profiling_state->output_directory);
     QSaveFile file(report_path);
