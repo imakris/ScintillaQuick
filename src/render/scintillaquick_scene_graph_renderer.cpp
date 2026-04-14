@@ -1639,6 +1639,11 @@ public:
 
     bool layouts_match_content(const Visual_line_frame &vl) const
     {
+        // Compare only translation-invariant fields. Viewport-relative
+        // coordinates (top/bottom and the blob rects) change on every
+        // scroll even for otherwise-identical runs, and are handled
+        // separately by `uniform_translation_delta`, so including them
+        // here would make the cache miss on every scroll.
         size_t cached_idx = 0;
         for (const Text_run &run : vl.text_runs) {
             if (run.text.isEmpty() || run.represented_as_blob) {
@@ -1648,20 +1653,14 @@ public:
                 return false;
             }
             const Text_run &cached_run = m_cached_runs[cached_idx];
-            if (cached_run.text != run.text ||
-                cached_run.font != run.font ||
-                cached_run.foreground != run.foreground ||
-                cached_run.blob_outer != run.blob_outer ||
-                cached_run.blob_inner != run.blob_inner ||
-                cached_run.blob_outer_rect != run.blob_outer_rect ||
-                cached_run.blob_inner_rect != run.blob_inner_rect ||
+            if (cached_run.style_id != run.style_id ||
                 cached_run.direction != run.direction ||
-                cached_run.width != run.width ||
-                cached_run.top != run.top ||
-                cached_run.bottom != run.bottom ||
                 cached_run.is_represented_text != run.is_represented_text ||
                 cached_run.represented_as_blob != run.represented_as_blob ||
-                cached_run.style_id != run.style_id) {
+                cached_run.width != run.width ||
+                cached_run.text != run.text ||
+                cached_run.foreground != run.foreground ||
+                cached_run.font != run.font) {
                 return false;
             }
             ++cached_idx;
