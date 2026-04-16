@@ -78,10 +78,24 @@ class QTimerEvent;
 
 class ScintillaQuick_item;
 
+#ifndef SCINTILLAQUICK_EXPORT
+#if defined(SCINTILLAQUICK_STATIC_DEFINE)
+#define SCINTILLAQUICK_EXPORT
+#elif defined(WIN32)
+#ifdef MAKING_LIBRARY
+#define SCINTILLAQUICK_EXPORT __declspec(dllexport)
+#else
+#define SCINTILLAQUICK_EXPORT __declspec(dllimport)
+#endif
+#else
+#define SCINTILLAQUICK_EXPORT
+#endif
+#endif
+
 namespace Scintilla::Internal
 {
 
-class ScintillaQuick_core : public QObject, public ScintillaBase
+class SCINTILLAQUICK_EXPORT ScintillaQuick_core : public QObject, public ScintillaBase
 {
     Q_OBJECT
 
