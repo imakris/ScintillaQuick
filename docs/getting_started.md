@@ -4,7 +4,7 @@
 
 - CMake `3.24+`
 - C++20 compiler
-- Qt `6.5+`
+- Qt `6.7+`
 - Qt modules: `Core`, `Gui`, `Qml`, `Quick`
 
 ## Build The Project

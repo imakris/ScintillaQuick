@@ -18,32 +18,28 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            qt-version: 6.5.3
-            qt-arch: gcc_64
+            qt-version: 6.7.2
+            qt-arch: linux_gcc_64
             build-shared: OFF
+          - os: windows-latest
+            qt-version: 6.7.2
+            qt-arch: win64_msvc2019_64
+            build-shared: OFF
+          - os: windows-latest
+            qt-version: 6.7.2
+            qt-arch: win64_msvc2019_64
+            build-shared: ON
+          - os: macos-latest
+            qt-version: 6.7.2
+            qt-arch: clang_64
+            build-shared: OFF
+          - os: macos-latest
+            qt-version: 6.7.2
+            qt-arch: clang_64
+            build-shared: ON
           - os: ubuntu-latest
             qt-version: 6.7.2
-            qt-arch: gcc_64
-            build-shared: OFF
-          - os: windows-latest
-            qt-version: 6.5.3
-            qt-arch: win64_msvc2019_64
-            build-shared: OFF
-          - os: windows-latest
-            qt-version: 6.5.3
-            qt-arch: win64_msvc2019_64
-            build-shared: ON
-          - os: macos-latest
-            qt-version: 6.5.3
-            qt-arch: clang_64
-            build-shared: OFF
-          - os: macos-latest
-            qt-version: 6.5.3
-            qt-arch: clang_64
-            build-shared: ON
-          - os: ubuntu-latest
-            qt-version: 6.5.3
-            qt-arch: gcc_64
+            qt-arch: linux_gcc_64
             build-shared: ON
 
     runs-on: ${{ matrix.os }}

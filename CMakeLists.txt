@@ -30,12 +30,11 @@ set(CMAKE_AUTORCC ON)
 # CMAKE_AUTOUIC is intentionally NOT enabled: the project contains no .ui
 # files, so running `uic` on every build is pure overhead.
 
-# Qt 6.5 is the oldest LTS line in wide use and covers everything this
-# library relies on (QQuickItem, QSGNode, QSGTextNode, QSGImageNode,
-# updatePaintNode, inputMethodQuery). If you bump the floor, please
-# document the specific API that requires it, and update the variable
-# below so that the generated package config inherits the new floor.
-set(scintillaquick_qt6_minimum_version 6.5)
+# Qt 6.7 is the effective minimum because the renderer and platform layer
+# rely on QSGTextNode. If you bump the floor again, document the specific
+# API that requires it, and update the variable below so that the
+# generated package config inherits the new floor.
+set(scintillaquick_qt6_minimum_version 6.7)
 
 find_package(
     Qt6 ${scintillaquick_qt6_minimum_version} REQUIRED

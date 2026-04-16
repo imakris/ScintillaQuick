@@ -21,7 +21,7 @@ It is intended for applications that want Scintilla behavior inside a real
 Current repository state:
 
 - Version `0.1.0`
-- Qt `6.5+`
+- Qt `6.7+`
 - Static library build
 - C++ integration first
 - Optional QML type registration helper is available
@@ -30,7 +30,7 @@ Current repository state:
 
 - CMake `3.24+`
 - A C++20 compiler
-- Qt `6.5+` with:
+- Qt `6.7+` with:
   - `Core`
   - `Gui`
   - `Qml`
