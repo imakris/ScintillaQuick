@@ -42,6 +42,12 @@ so that consumers can find them without crawling history.
   The CI workflow skips `scintillaquick_visual_regression_test` on
   non-Linux hosts.
 
+- **The benchmark target is built in CI but not executed there.**
+  `scintillaquick_embedded_benchmark` is registered with CTest and
+  compiled by the GitHub Actions matrix, but the CI workflow excludes
+  it from the test run. Treat benchmark results as a local or
+  dedicated-runner concern rather than a normal CI signal.
+
 - **Windows visual tests require a desktop session.** The
   visual-regression runner uses the `windows` Qt platform plugin on
   Windows (the `offscreen` plugin does not cover all of the code paths
@@ -60,9 +66,11 @@ so that consumers can find them without crawling history.
 ## Packaging
 
 - **Static library is the default build.** Shared builds are
-  available via `-DBUILD_SHARED_LIBS=ON` but are not exercised in CI
-  and may need additional `SCINTILLAQUICK_EXPORT` annotations on
-  internal symbols that are currently private to the static build.
+  available via `-DBUILD_SHARED_LIBS=ON` and are exercised in CI, but
+  Windows shared builds in particular are sensitive to DLL export and
+  runtime-path issues because some in-tree tests reach internal
+  symbols and the test executables must be able to locate
+  `ScintillaQuick.dll` at runtime.
 
 - **Installed consumers must use the same Qt major.minor floor as
   the library build.** The floor is defined once at the top of

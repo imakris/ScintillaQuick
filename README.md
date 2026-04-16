@@ -28,11 +28,6 @@ It is intended for applications that want Scintilla behavior inside a real
 
 Current `master` status: all GitHub Actions matrix jobs pass on Qt `6.7.2`.
 
-Known CI gaps:
-
-- 🔴 `scintillaquick_visual_regression_test` is built but not run in GitHub Actions.
-- 🔴 `scintillaquick_embedded_benchmark` is built but not run in GitHub Actions.
-
 Current repository state:
 
 - Version `0.1.0`
