@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Keep this floor in sync with the top-level CMakeLists.txt `find_package`
+# call. Any mismatch silently breaks `find_package(ScintillaQuick CONFIG)`
+# for consumers that have a Qt6 version between the two floors installed.
+find_dependency(Qt6 @scintillaquick_qt6_minimum_version@ REQUIRED COMPONENTS Core Gui Qml Quick)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ScintillaQuickTargets.cmake")
+
+check_required_components(ScintillaQuick)
