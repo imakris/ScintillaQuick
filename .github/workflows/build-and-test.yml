@@ -57,7 +57,6 @@ jobs:
           version: ${{ matrix.qt-version }}
           arch: ${{ matrix.qt-arch }}
           cache: true
-          modules: qtdeclarative
 
       - name: Install offscreen platform dependencies (Linux)
         if: runner.os == 'Linux'
