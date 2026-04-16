@@ -101,7 +101,7 @@ jobs:
           target_link_libraries(consumer_smoke PRIVATE ScintillaQuick::ScintillaQuick)
           EOF
           cat > build/_consumer/consumer.cpp <<'EOF'
-          #include <scintillaquick/ScintillaQuickItem.h>
+          #include <scintillaquick/scintillaquick_item.h>
           int main() { return scintillaquick::version_major >= 0 ? 0 : 1; }
           EOF
           cmake -S build/_consumer -B build/_consumer/_build \
