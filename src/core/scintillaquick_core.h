@@ -7,17 +7,8 @@
 #define SCINTILLAQUICK_CORE_H
 
 #include <cstddef>
-#include <cstdlib>
-#include <cstdint>
-#include <cassert>
-#include <cstring>
-#include <cctype>
-#include <cstdio>
-#include <ctime>
-#include <cmath>
 #include <map>
 #include <memory>
-#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -60,7 +51,6 @@
 #include "EditView.h"
 #include "Editor.h"
 #include "ScintillaBase.h"
-#include "CaseConvert.h"
 #include "render_frame.h"
 
 #include <QObject>

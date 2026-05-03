@@ -29,6 +29,7 @@
 #include <optional>
 #include <utility>
 
+#include "CaseConvert.h"
 #include "RenderCapture.h"
 
 // This translation unit is almost entirely upstream Scintilla interop.
