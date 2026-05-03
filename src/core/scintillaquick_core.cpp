@@ -22,12 +22,14 @@
 #include <QTimer>
 #include <QTimerEvent>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
+#include <optional>
+#include <utility>
 
 #include "RenderCapture.h"
-
-#include <utility>
 
 // This translation unit is almost entirely upstream Scintilla interop.
 // Keeping the upstream namespaces open here avoids overwhelming the file
@@ -44,10 +46,8 @@ QRectF rect_from_capture(double left, double top, double right, double bottom)
     return QRectF(QPointF(left, top), QPointF(right, bottom)).normalized();
 }
 
-// Convert a raw Scintilla capture rgba value (as stored in Captured_*
-// structs) to a QColor. Wraps the recurrent
-// `qcolor_from_rgba(X)` triple used
-// across every capture-to-frame conversion below.
+// Convert a raw Scintilla rgba value (as carried by Captured_* primitives)
+// to a QColor at the capture/render boundary.
 template <typename T>
 QColor qcolor_from_rgba(T rgba)
 {
@@ -64,13 +64,34 @@ Text_direction direction_from_capture(Capture_text_direction direction)
     }
 }
 
-class Capture_frame_builder final : public Render_collector
+Whitespace_mark_kind_t whitespace_kind_from_capture(Whitespace_mark_kind kind)
+{
+    return kind == Whitespace_mark_kind::tab_arrow
+        ? Whitespace_mark_kind_t::tab_arrow
+        : Whitespace_mark_kind_t::space_dot;
+}
+
+Decoration_kind_t decoration_kind_from_capture(Decoration_kind kind)
+{
+    return kind == Decoration_kind::hotspot
+        ? Decoration_kind_t::hotspot
+        : Decoration_kind_t::style_underline;
+}
+
+// Sole consumer of Scintilla's capture callbacks. Builds a Render_frame
+// directly with Qt types and per-style attributes resolved from the core's
+// view-style cache, avoiding an intermediate Captured_frame translation pass.
+class Render_frame_builder final : public Render_collector
 {
 public:
-    Capture_frame_builder(Captured_frame& frame, bool capture_static_content)
+    Render_frame_builder(
+        Render_frame&              frame,
+        bool                       capture_static_content,
+        const ScintillaQuick_core& core)
     :
         m_frame(frame),
-        m_capture_static_content(capture_static_content)
+        m_capture_static_content(capture_static_content),
+        m_core(core)
     {}
 
     bool wants_static_content() const override
@@ -80,15 +101,13 @@ public:
 
     void begin_visual_line(const Captured_visual_line& line) override
     {
-        Capture_visual_line visual_line;
-        visual_line.document_line = line.document_line;
-        visual_line.subline_index = line.subline_index;
-        visual_line.visual_order  = line.visual_order;
-        visual_line.left          = line.left;
-        visual_line.top           = line.top;
-        visual_line.right         = line.right;
-        visual_line.bottom        = line.bottom;
-        visual_line.baseline_y    = line.baseline_y;
+        Visual_line_frame visual_line;
+        visual_line.key.document_line = line.document_line;
+        visual_line.key.subline_index = line.subline_index;
+        visual_line.visual_order      = line.visual_order;
+        visual_line.origin            = QPointF(line.left, line.top);
+        visual_line.baseline_y        = line.baseline_y;
+        visual_line.clip_rect = rect_from_capture(line.left, line.top, line.right, line.bottom);
         m_frame.visual_lines.push_back(std::move(visual_line));
         m_current_visual_line = &m_frame.visual_lines.back();
     }
@@ -98,78 +117,65 @@ public:
         if (!m_current_visual_line) {
             return;
         }
+        const ScintillaQuick_core::Style_attributes& attributes = attributes_for(run.style_id);
 
-        Capture_text_run Text_run;
-        Text_run.text                = run.utf8_text;
-        Text_run.foreground          = qcolor_from_rgba(run.foreground_rgba);
-        Text_run.x                   = run.x;
-        Text_run.width               = run.width;
-        Text_run.top                 = run.top;
-        Text_run.bottom              = run.bottom;
-        Text_run.blob_text_left      = run.blob_text_left;
-        Text_run.blob_text_top       = run.blob_text_top;
-        Text_run.blob_text_right     = run.blob_text_right;
-        Text_run.blob_text_bottom    = run.blob_text_bottom;
-        Text_run.blob_outer_left     = run.blob_outer_left;
-        Text_run.blob_outer_top      = run.blob_outer_top;
-        Text_run.blob_outer_right    = run.blob_outer_right;
-        Text_run.blob_outer_bottom   = run.blob_outer_bottom;
-        Text_run.blob_inner_left     = run.blob_inner_left;
-        Text_run.blob_inner_top      = run.blob_inner_top;
-        Text_run.blob_inner_right    = run.blob_inner_right;
-        Text_run.blob_inner_bottom   = run.blob_inner_bottom;
-        Text_run.baseline_y          = run.baseline_y;
-        Text_run.style_id            = run.style_id;
-        Text_run.blob_outer          = qcolor_from_rgba(run.blob_outer_rgba);
-        Text_run.blob_inner          = qcolor_from_rgba(run.blob_inner_rgba);
-        Text_run.direction           = direction_from_capture(run.direction);
-        Text_run.is_represented_text = run.is_represented_text;
-        Text_run.represented_as_blob = run.represented_as_blob;
+        Text_run text_run;
+        text_run.text = QString::fromUtf8(run.utf8_text.data(), static_cast<int>(run.utf8_text.size()));
+        text_run.position            = QPointF(run.x, run.baseline_y);
+        text_run.width               = run.width;
+        text_run.top                 = run.top;
+        text_run.bottom              = run.bottom;
+        text_run.blob_text_clip_rect = rect_from_capture(
+            run.blob_text_left, run.blob_text_top, run.blob_text_right, run.blob_text_bottom);
+        text_run.blob_outer_rect = rect_from_capture(
+            run.blob_outer_left, run.blob_outer_top, run.blob_outer_right, run.blob_outer_bottom);
+        text_run.blob_inner_rect = rect_from_capture(
+            run.blob_inner_left, run.blob_inner_top, run.blob_inner_right, run.blob_inner_bottom);
+        const QColor captured_fore   = qcolor_from_rgba(run.foreground_rgba);
+        text_run.foreground          = captured_fore.isValid() ? captured_fore : attributes.foreground;
+        text_run.blob_outer          = qcolor_from_rgba(run.blob_outer_rgba);
+        text_run.blob_inner          = qcolor_from_rgba(run.blob_inner_rgba);
+        text_run.font                = attributes.font;
+        text_run.style_id            = run.style_id;
+        text_run.direction           = direction_from_capture(run.direction);
+        text_run.is_represented_text = run.is_represented_text;
+        text_run.represented_as_blob = run.represented_as_blob;
 
-        m_current_visual_line->text_runs.push_back(std::move(Text_run));
+        m_current_visual_line->text_runs.push_back(std::move(text_run));
     }
 
     void add_selection_rect(const Captured_selection_rect& rect) override
     {
-        Capture_selection_primitive selection;
-        selection.left    = rect.left;
-        selection.top     = rect.top;
-        selection.right   = rect.right;
-        selection.bottom  = rect.bottom;
-        selection.rgba    = rect.rgba;
+        Selection_primitive selection;
+        selection.rect    = rect_from_capture(rect.left, rect.top, rect.right, rect.bottom);
+        selection.color   = qcolor_from_rgba(rect.rgba);
         selection.is_main = rect.is_main;
         m_frame.selection_primitives.push_back(std::move(selection));
     }
 
     void add_caret_rect(const Captured_caret_rect& rect) override
     {
-        Capture_caret_primitive caret;
-        caret.left    = rect.left;
-        caret.top     = rect.top;
-        caret.right   = rect.right;
-        caret.bottom  = rect.bottom;
-        caret.rgba    = rect.rgba;
+        Caret_primitive caret;
+        caret.rect    = rect_from_capture(rect.left, rect.top, rect.right, rect.bottom);
+        caret.color   = qcolor_from_rgba(rect.rgba);
         caret.is_main = rect.is_main;
         m_frame.caret_primitives.push_back(std::move(caret));
     }
 
     void add_indicator_primitive(const Captured_indicator& indicator) override
     {
-        Capture_indicator_primitive primitive;
-        primitive.left             = indicator.left;
-        primitive.top              = indicator.top;
-        primitive.right            = indicator.right;
-        primitive.bottom           = indicator.bottom;
-        primitive.line_top         = indicator.line_top;
-        primitive.line_bottom      = indicator.line_bottom;
-        primitive.character_left   = indicator.character_left;
-        primitive.character_top    = indicator.character_top;
-        primitive.character_right  = indicator.character_right;
-        primitive.character_bottom = indicator.character_bottom;
+        Indicator_primitive primitive;
+        primitive.rect = rect_from_capture(
+            indicator.left, indicator.top, indicator.right, indicator.bottom);
+        primitive.line_rect = rect_from_capture(
+            indicator.left, indicator.line_top, indicator.right, indicator.line_bottom);
+        primitive.character_rect = rect_from_capture(
+            indicator.character_left, indicator.character_top,
+            indicator.character_right, indicator.character_bottom);
+        primitive.color            = qcolor_from_rgba(indicator.rgba);
         primitive.stroke_width     = indicator.stroke_width;
         primitive.fill_alpha       = indicator.fill_alpha;
         primitive.outline_alpha    = indicator.outline_alpha;
-        primitive.rgba             = indicator.rgba;
         primitive.indicator_number = indicator.indicator_number;
         primitive.indicator_style  = indicator.indicator_style;
         primitive.under_text       = indicator.under_text;
@@ -179,44 +185,40 @@ public:
 
     void add_current_line_highlight(const Captured_current_line_highlight& highlight) override
     {
-        Capture_current_line_primitive primitive;
-        primitive.left   = highlight.left;
-        primitive.top    = highlight.top;
-        primitive.right  = highlight.right;
-        primitive.bottom = highlight.bottom;
-        primitive.rgba   = highlight.rgba;
+        Current_line_primitive primitive;
+        primitive.rect   = rect_from_capture(
+            highlight.left, highlight.top, highlight.right, highlight.bottom);
+        primitive.color  = qcolor_from_rgba(highlight.rgba);
         primitive.framed = highlight.framed;
         m_frame.current_line_primitives.push_back(std::move(primitive));
     }
 
     void add_marker_symbol(const Captured_marker_symbol& marker) override
     {
-        Capture_marker_primitive primitive;
-        primitive.left               = marker.left;
-        primitive.top                = marker.top;
-        primitive.right              = marker.right;
-        primitive.bottom             = marker.bottom;
-        primitive.marker_number      = marker.marker_number;
-        primitive.marker_type        = marker.marker_type;
-        primitive.fore_rgba          = marker.fore_rgba;
-        primitive.back_rgba          = marker.back_rgba;
-        primitive.back_rgba_selected = marker.back_rgba_selected;
-        primitive.document_line      = marker.document_line;
-        primitive.fold_part          = marker.fold_part;
+        Marker_primitive primitive;
+        primitive.rect = rect_from_capture(
+            marker.left, marker.top, marker.right, marker.bottom);
+        primitive.marker_number       = marker.marker_number;
+        primitive.marker_type         = marker.marker_type;
+        primitive.foreground          = qcolor_from_rgba(marker.fore_rgba);
+        primitive.background          = qcolor_from_rgba(marker.back_rgba);
+        primitive.background_selected = qcolor_from_rgba(marker.back_rgba_selected);
+        primitive.document_line       = marker.document_line;
+        primitive.fold_part           = marker.fold_part;
         m_frame.marker_primitives.push_back(std::move(primitive));
     }
 
     void add_margin_text(const Captured_margin_text& text) override
     {
-        Capture_margin_text_primitive primitive;
-        primitive.text          = text.utf8_text;
-        primitive.x             = text.x;
-        primitive.y             = text.y;
-        primitive.left          = text.left;
-        primitive.top           = text.top;
-        primitive.right         = text.right;
-        primitive.bottom        = text.bottom;
+        const ScintillaQuick_core::Style_attributes& attributes = attributes_for(text.style_id);
+
+        Margin_text_primitive primitive;
+        primitive.text = QString::fromUtf8(text.utf8_text.data(), static_cast<int>(text.utf8_text.size()));
+        primitive.position      = QPointF(text.x, text.top);
         primitive.baseline_y    = text.baseline_y;
+        primitive.clip_rect     = rect_from_capture(text.left, text.top, text.right, text.bottom);
+        primitive.foreground    = attributes.foreground;
+        primitive.font          = attributes.font;
         primitive.document_line = text.document_line;
         primitive.subline_index = text.subline_index;
         primitive.style_id      = text.style_id;
@@ -225,96 +227,89 @@ public:
 
     void add_fold_display_text(const Captured_fold_display_text& text) override
     {
-        Capture_fold_display_text primitive;
-        primitive.text          = text.utf8_text;
-        primitive.left          = text.left;
-        primitive.top           = text.top;
-        primitive.right         = text.right;
-        primitive.bottom        = text.bottom;
+        const ScintillaQuick_core::Style_attributes& attributes = attributes_for(text.style_id);
+
+        Fold_display_text_primitive primitive;
+        primitive.text = QString::fromUtf8(text.utf8_text.data(), static_cast<int>(text.utf8_text.size()));
+        primitive.position      = QPointF(text.left, text.top);
         primitive.baseline_y    = text.baseline_y;
-        primitive.style_id      = text.style_id;
-        primitive.fore_rgba     = text.fore_rgba;
-        primitive.back_rgba     = text.back_rgba;
+        primitive.rect          = rect_from_capture(text.left, text.top, text.right, text.bottom);
+        primitive.foreground    = qcolor_from_rgba(text.fore_rgba);
+        primitive.background    = qcolor_from_rgba(text.back_rgba);
+        primitive.font          = attributes.font;
         primitive.document_line = text.document_line;
+        primitive.style_id      = text.style_id;
         primitive.boxed         = text.boxed;
         m_frame.fold_display_texts.push_back(std::move(primitive));
     }
 
     void add_eol_annotation(const Captured_eol_annotation& annotation) override
     {
-        Capture_eol_annotation primitive;
-        primitive.text          = annotation.utf8_text;
-        primitive.left          = annotation.left;
-        primitive.top           = annotation.top;
-        primitive.right         = annotation.right;
-        primitive.bottom        = annotation.bottom;
-        primitive.text_left     = annotation.text_left;
+        const ScintillaQuick_core::Style_attributes& attributes = attributes_for(annotation.style_id);
+
+        Eol_annotation_primitive primitive;
+        primitive.text = QString::fromUtf8(
+            annotation.utf8_text.data(), static_cast<int>(annotation.utf8_text.size()));
+        primitive.position      = QPointF(annotation.text_left, annotation.top);
         primitive.baseline_y    = annotation.baseline_y;
-        primitive.style_id      = annotation.style_id;
-        primitive.fore_rgba     = annotation.fore_rgba;
-        primitive.back_rgba     = annotation.back_rgba;
+        primitive.rect          = rect_from_capture(
+            annotation.left, annotation.top, annotation.right, annotation.bottom);
+        primitive.foreground    = qcolor_from_rgba(annotation.fore_rgba);
+        primitive.background    = qcolor_from_rgba(annotation.back_rgba);
+        primitive.font          = attributes.font;
         primitive.document_line = annotation.document_line;
+        primitive.style_id      = annotation.style_id;
         primitive.visible_style = annotation.visible_style;
         m_frame.eol_annotations.push_back(std::move(primitive));
     }
 
     void add_annotation(const Captured_annotation& annotation) override
     {
-        Capture_annotation primitive;
-        primitive.text            = annotation.utf8_text;
-        primitive.left            = annotation.left;
-        primitive.top             = annotation.top;
-        primitive.right           = annotation.right;
-        primitive.bottom          = annotation.bottom;
-        primitive.text_left       = annotation.text_left;
+        const ScintillaQuick_core::Style_attributes& attributes = attributes_for(annotation.style_id);
+
+        Annotation_primitive primitive;
+        primitive.text = QString::fromUtf8(
+            annotation.utf8_text.data(), static_cast<int>(annotation.utf8_text.size()));
+        primitive.position        = QPointF(annotation.text_left, annotation.top);
         primitive.baseline_y      = annotation.baseline_y;
-        primitive.style_id        = annotation.style_id;
-        primitive.fore_rgba       = annotation.fore_rgba;
-        primitive.back_rgba       = annotation.back_rgba;
+        primitive.rect            = rect_from_capture(
+            annotation.left, annotation.top, annotation.right, annotation.bottom);
+        primitive.foreground      = qcolor_from_rgba(annotation.fore_rgba);
+        primitive.background      = qcolor_from_rgba(annotation.back_rgba);
+        primitive.font            = attributes.font;
         primitive.document_line   = annotation.document_line;
         primitive.annotation_line = annotation.annotation_line;
+        primitive.style_id        = annotation.style_id;
         primitive.boxed           = annotation.boxed;
         m_frame.annotations.push_back(std::move(primitive));
     }
 
     void add_whitespace_mark(const Captured_whitespace_mark& mark) override
     {
-        Capture_whitespace_mark primitive;
-        primitive.left   = mark.left;
-        primitive.top    = mark.top;
-        primitive.right  = mark.right;
-        primitive.bottom = mark.bottom;
-        primitive.mid_y  = mark.mid_y;
-        primitive.rgba   = mark.rgba;
-        primitive.kind =
-            (mark.kind == Whitespace_mark_kind::tab_arrow)
-                ? Whitespace_mark_kind_t::tab_arrow
-                : Whitespace_mark_kind_t::space_dot;
+        Whitespace_mark_primitive primitive;
+        primitive.rect  = rect_from_capture(mark.left, mark.top, mark.right, mark.bottom);
+        primitive.mid_y = mark.mid_y;
+        primitive.color = qcolor_from_rgba(mark.rgba);
+        primitive.kind  = whitespace_kind_from_capture(mark.kind);
         m_frame.whitespace_marks.push_back(std::move(primitive));
     }
 
     void add_decoration_underline(const Captured_decoration_underline& underline) override
     {
-        Capture_decoration_underline primitive;
-        primitive.left   = underline.left;
-        primitive.top    = underline.top;
-        primitive.right  = underline.right;
-        primitive.bottom = underline.bottom;
-        primitive.rgba   = underline.rgba;
-        primitive.kind =
-            (underline.kind == Decoration_kind::hotspot)
-                ? Decoration_kind_t::hotspot
-                : Decoration_kind_t::style_underline;
+        Decoration_underline_primitive primitive;
+        primitive.rect  = rect_from_capture(underline.left, underline.top, underline.right, underline.bottom);
+        primitive.color = qcolor_from_rgba(underline.rgba);
+        primitive.kind  = decoration_kind_from_capture(underline.kind);
         m_frame.decoration_underlines.push_back(std::move(primitive));
     }
 
     void add_indent_guide(const Captured_indent_guide& guide) override
     {
-        Capture_indent_guide primitive;
+        Indent_guide_primitive primitive;
         primitive.x         = guide.x;
         primitive.top       = guide.top;
         primitive.bottom    = guide.bottom;
-        primitive.rgba      = guide.rgba;
+        primitive.color     = qcolor_from_rgba(guide.rgba);
         primitive.highlight = guide.highlight;
         m_frame.indent_guides.push_back(std::move(primitive));
     }
@@ -325,9 +320,21 @@ public:
     }
 
 private:
-    Captured_frame& m_frame;
+    const ScintillaQuick_core::Style_attributes& attributes_for(int style_id)
+    {
+        const int bounded_style = std::clamp(style_id, 0, STYLE_MAX);
+        std::optional<ScintillaQuick_core::Style_attributes>& cached = m_style_cache[bounded_style];
+        if (!cached.has_value()) {
+            cached = m_core.style_attributes_for(bounded_style);
+        }
+        return *cached;
+    }
+
+    Render_frame& m_frame;
     bool m_capture_static_content = true;
-    Capture_visual_line* m_current_visual_line = nullptr;
+    Visual_line_frame* m_current_visual_line = nullptr;
+    const ScintillaQuick_core& m_core;
+    std::array<std::optional<ScintillaQuick_core::Style_attributes>, STYLE_MAX + 1> m_style_cache;
 };
 
 } // namespace
@@ -411,13 +418,6 @@ void ScintillaQuick_core::selectCurrentWord()
     emit cursorPositionChanged();
 }
 
-struct ScintillaQuick_core::Style_attributes
-{
-    QColor foreground;
-    QColor background;
-    QFont font;
-};
-
 ScintillaQuick_core::Style_attributes ScintillaQuick_core::style_attributes_for(int style) const
 {
     Style_attributes attributes;
@@ -451,299 +451,15 @@ ScintillaQuick_core::Style_attributes ScintillaQuick_core::style_attributes_for(
     return attributes;
 }
 
-Render_frame ScintillaQuick_core::render_frame_from_capture(const Captured_frame& capture_frame) const
-{
-    SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.render_frame_from_capture");
-
-    Render_frame frame;
-    std::array<std::optional<Style_attributes>, STYLE_MAX + 1> Style_cache;
-    const auto attributes_for = [&](int style) -> const Style_attributes& {
-        const int bounded_style                 = std::clamp(style, 0, STYLE_MAX);
-        std::optional<Style_attributes>& cached = Style_cache[bounded_style];
-        if (!cached.has_value()) {
-            cached = style_attributes_for(bounded_style);
-        }
-        return *cached;
-    };
-
-    frame.text_rect = QRectF(
-        capture_frame.text_left,
-        capture_frame.text_top,
-        capture_frame.text_width,
-        capture_frame.text_height);
-    frame.margin_rect = QRectF(
-        capture_frame.margin_left,
-        capture_frame.margin_top,
-        capture_frame.margin_width,
-        capture_frame.margin_height);
-
-    frame.visual_lines.reserve(capture_frame.visual_lines.size());
-    for (const Capture_visual_line& capture_line : capture_frame.visual_lines) {
-        Visual_line_frame visual_line;
-        visual_line.key.document_line = capture_line.document_line;
-        visual_line.key.subline_index = capture_line.subline_index;
-        visual_line.visual_order      = capture_line.visual_order;
-        visual_line.origin            = QPointF(capture_line.left, capture_line.top);
-        visual_line.baseline_y        = capture_line.baseline_y;
-        visual_line.clip_rect = rect_from_capture(
-            capture_line.left,
-            capture_line.top,
-            capture_line.right,
-            capture_line.bottom);
-
-        visual_line.text_runs.reserve(capture_line.text_runs.size());
-        for (const Capture_text_run& capture_run : capture_line.text_runs) {
-            const Style_attributes& attributes = attributes_for(capture_run.style_id);
-
-            Text_run run;
-            run.text     = QString::fromUtf8(capture_run.text.data(), static_cast<int>(capture_run.text.size()));
-            run.position = QPointF(capture_run.x, capture_run.baseline_y);
-            run.width    = capture_run.width;
-            run.top      = capture_run.top;
-            run.bottom   = capture_run.bottom;
-            run.blob_text_clip_rect = rect_from_capture(
-                capture_run.blob_text_left,
-                capture_run.blob_text_top,
-                capture_run.blob_text_right,
-                capture_run.blob_text_bottom);
-            run.blob_outer_rect     = rect_from_capture(
-                capture_run.blob_outer_left,
-                capture_run.blob_outer_top,
-                capture_run.blob_outer_right,
-                capture_run.blob_outer_bottom);
-            run.blob_inner_rect     = rect_from_capture(
-                capture_run.blob_inner_left,
-                capture_run.blob_inner_top,
-                capture_run.blob_inner_right,
-                capture_run.blob_inner_bottom);
-            run.foreground          = capture_run.foreground.isValid()
-                ? capture_run.foreground
-                : attributes.foreground;
-            run.blob_outer          = capture_run.blob_outer;
-            run.blob_inner          = capture_run.blob_inner;
-            run.font                = attributes.font;
-            run.style_id            = capture_run.style_id;
-            run.direction           = capture_run.direction;
-            run.is_represented_text = capture_run.is_represented_text;
-            run.represented_as_blob = capture_run.represented_as_blob;
-            visual_line.text_runs.push_back(std::move(run));
-        }
-
-        frame.visual_lines.push_back(std::move(visual_line));
-    }
-
-    frame.selection_primitives.reserve(capture_frame.selection_primitives.size());
-    for (const Capture_selection_primitive& capture_selection : capture_frame.selection_primitives) {
-        Selection_primitive selection;
-        selection.rect = rect_from_capture(
-            capture_selection.left,
-            capture_selection.top,
-            capture_selection.right,
-            capture_selection.bottom);
-        selection.color   = QColorFromColourRGBA(ColourRGBA(static_cast<int>(capture_selection.rgba)));
-        selection.is_main = capture_selection.is_main;
-        frame.selection_primitives.push_back(std::move(selection));
-    }
-
-    frame.indicator_primitives.reserve(capture_frame.indicator_primitives.size());
-    for (const Capture_indicator_primitive& capture_indicator : capture_frame.indicator_primitives) {
-        Indicator_primitive indicator;
-        indicator.rect = rect_from_capture(
-            capture_indicator.left,
-            capture_indicator.top,
-            capture_indicator.right,
-            capture_indicator.bottom);
-        indicator.line_rect = rect_from_capture(
-            capture_indicator.left,
-            capture_indicator.line_top,
-            capture_indicator.right,
-            capture_indicator.line_bottom);
-        indicator.character_rect = rect_from_capture(
-            capture_indicator.character_left,
-            capture_indicator.character_top,
-            capture_indicator.character_right,
-            capture_indicator.character_bottom);
-        indicator.color            = qcolor_from_rgba(capture_indicator.rgba);
-        indicator.stroke_width     = capture_indicator.stroke_width;
-        indicator.fill_alpha       = capture_indicator.fill_alpha;
-        indicator.outline_alpha    = capture_indicator.outline_alpha;
-        indicator.indicator_number = capture_indicator.indicator_number;
-        indicator.indicator_style  = capture_indicator.indicator_style;
-        indicator.under_text       = capture_indicator.under_text;
-        indicator.is_main          = capture_indicator.is_main;
-        frame.indicator_primitives.push_back(std::move(indicator));
-    }
-
-    frame.current_line_primitives.reserve(capture_frame.current_line_primitives.size());
-    for (const Capture_current_line_primitive& capture_cl : capture_frame.current_line_primitives) {
-        Current_line_primitive cl;
-        cl.rect   = rect_from_capture(capture_cl.left, capture_cl.top, capture_cl.right, capture_cl.bottom);
-        cl.color  = qcolor_from_rgba(capture_cl.rgba);
-        cl.framed = capture_cl.framed;
-        frame.current_line_primitives.push_back(std::move(cl));
-    }
-
-    frame.marker_primitives.reserve(capture_frame.marker_primitives.size());
-    for (const Capture_marker_primitive& capture_marker : capture_frame.marker_primitives) {
-        Marker_primitive marker;
-        marker.rect = rect_from_capture(
-            capture_marker.left,
-            capture_marker.top,
-            capture_marker.right,
-            capture_marker.bottom);
-        marker.marker_number       = capture_marker.marker_number;
-        marker.marker_type         = capture_marker.marker_type;
-        marker.foreground          = qcolor_from_rgba(capture_marker.fore_rgba);
-        marker.background          = qcolor_from_rgba(capture_marker.back_rgba);
-        marker.background_selected = qcolor_from_rgba(capture_marker.back_rgba_selected);
-        marker.document_line       = capture_marker.document_line;
-        marker.fold_part           = capture_marker.fold_part;
-        frame.marker_primitives.push_back(std::move(marker));
-    }
-
-    frame.caret_primitives.reserve(capture_frame.caret_primitives.size());
-    for (const Capture_caret_primitive& capture_caret : capture_frame.caret_primitives) {
-        Caret_primitive caret;
-        caret.rect = rect_from_capture(
-            capture_caret.left,
-            capture_caret.top,
-            capture_caret.right,
-            capture_caret.bottom);
-        caret.color   = qcolor_from_rgba(capture_caret.rgba);
-        caret.is_main = capture_caret.is_main;
-        frame.caret_primitives.push_back(std::move(caret));
-    }
-
-    frame.margin_text_primitives.reserve(capture_frame.margin_text_primitives.size());
-    for (const Capture_margin_text_primitive& capture_margin_text : capture_frame.margin_text_primitives) {
-        const Style_attributes& attributes = attributes_for(capture_margin_text.style_id);
-        const auto& text_bytes = capture_margin_text.text;
-
-        Margin_text_primitive margin_text;
-        margin_text.text       = QString::fromUtf8(text_bytes.data(), static_cast<int>(text_bytes.size()));
-        margin_text.position   = QPointF(capture_margin_text.x, capture_margin_text.top);
-        margin_text.baseline_y = capture_margin_text.baseline_y;
-        margin_text.clip_rect  = rect_from_capture(
-            capture_margin_text.left,
-            capture_margin_text.top,
-            capture_margin_text.right,
-            capture_margin_text.bottom);
-        margin_text.foreground    = attributes.foreground;
-        margin_text.font          = attributes.font;
-        margin_text.document_line = capture_margin_text.document_line;
-        margin_text.subline_index = capture_margin_text.subline_index;
-        margin_text.style_id      = capture_margin_text.style_id;
-        frame.margin_text_primitives.push_back(std::move(margin_text));
-    }
-
-    frame.fold_display_texts.reserve(capture_frame.fold_display_texts.size());
-    for (const Capture_fold_display_text& capture_fold : capture_frame.fold_display_texts) {
-        const Style_attributes& attributes = attributes_for(capture_fold.style_id);
-
-        Fold_display_text_primitive fold;
-        fold.text       = QString::fromUtf8(capture_fold.text.data(), static_cast<int>(capture_fold.text.size()));
-        fold.position   = QPointF(capture_fold.left, capture_fold.top);
-        fold.baseline_y = capture_fold.baseline_y;
-        fold.rect = rect_from_capture(
-            capture_fold.left, capture_fold.top, capture_fold.right, capture_fold.bottom);
-        fold.foreground    = qcolor_from_rgba(capture_fold.fore_rgba);
-        fold.background    = qcolor_from_rgba(capture_fold.back_rgba);
-        fold.font          = attributes.font;
-        fold.document_line = capture_fold.document_line;
-        fold.style_id      = capture_fold.style_id;
-        fold.boxed         = capture_fold.boxed;
-        frame.fold_display_texts.push_back(std::move(fold));
-    }
-
-    frame.eol_annotations.reserve(capture_frame.eol_annotations.size());
-    for (const Capture_eol_annotation& capture_eol : capture_frame.eol_annotations) {
-        const Style_attributes& attributes = attributes_for(capture_eol.style_id);
-        const auto& text_bytes = capture_eol.text;
-
-        Eol_annotation_primitive eol;
-        eol.text          = QString::fromUtf8(text_bytes.data(), static_cast<int>(text_bytes.size()));
-        eol.position      = QPointF(capture_eol.text_left, capture_eol.top);
-        eol.baseline_y    = capture_eol.baseline_y;
-        eol.rect          = rect_from_capture(
-            capture_eol.left,
-            capture_eol.top,
-            capture_eol.right,
-            capture_eol.bottom);
-        eol.foreground    = qcolor_from_rgba(capture_eol.fore_rgba);
-        eol.background    = qcolor_from_rgba(capture_eol.back_rgba);
-        eol.font          = attributes.font;
-        eol.document_line = capture_eol.document_line;
-        eol.style_id      = capture_eol.style_id;
-        eol.visible_style = capture_eol.visible_style;
-        frame.eol_annotations.push_back(std::move(eol));
-    }
-
-    frame.annotations.reserve(capture_frame.annotations.size());
-    for (const Capture_annotation& capture_annot : capture_frame.annotations) {
-        const Style_attributes& attributes = attributes_for(capture_annot.style_id);
-        const auto& text_bytes = capture_annot.text;
-
-        Annotation_primitive annot;
-        annot.text            = QString::fromUtf8(text_bytes.data(), static_cast<int>(text_bytes.size()));
-        annot.position        = QPointF(capture_annot.text_left, capture_annot.top);
-        annot.baseline_y      = capture_annot.baseline_y;
-        annot.rect            = rect_from_capture(
-            capture_annot.left,
-            capture_annot.top,
-            capture_annot.right,
-            capture_annot.bottom);
-        annot.foreground      = qcolor_from_rgba(capture_annot.fore_rgba);
-        annot.background      = qcolor_from_rgba(capture_annot.back_rgba);
-        annot.font            = attributes.font;
-        annot.document_line   = capture_annot.document_line;
-        annot.annotation_line = capture_annot.annotation_line;
-        annot.style_id        = capture_annot.style_id;
-        annot.boxed           = capture_annot.boxed;
-        frame.annotations.push_back(std::move(annot));
-    }
-
-    frame.whitespace_marks.reserve(capture_frame.whitespace_marks.size());
-    for (const Capture_whitespace_mark& capture_ws : capture_frame.whitespace_marks) {
-        Whitespace_mark_primitive ws;
-        ws.rect  = rect_from_capture(capture_ws.left, capture_ws.top, capture_ws.right, capture_ws.bottom);
-        ws.mid_y = capture_ws.mid_y;
-        ws.color = qcolor_from_rgba(capture_ws.rgba);
-        ws.kind  = capture_ws.kind;
-        frame.whitespace_marks.push_back(std::move(ws));
-    }
-
-    frame.decoration_underlines.reserve(capture_frame.decoration_underlines.size());
-    for (const Capture_decoration_underline& capture_ul : capture_frame.decoration_underlines) {
-        Decoration_underline_primitive ul;
-        ul.rect  = rect_from_capture(capture_ul.left, capture_ul.top, capture_ul.right, capture_ul.bottom);
-        ul.color = qcolor_from_rgba(capture_ul.rgba);
-        ul.kind  = capture_ul.kind;
-        frame.decoration_underlines.push_back(std::move(ul));
-    }
-
-    frame.indent_guides.reserve(capture_frame.indent_guides.size());
-    for (const Capture_indent_guide& capture_ig : capture_frame.indent_guides) {
-        Indent_guide_primitive ig;
-        ig.x         = capture_ig.x;
-        ig.top       = capture_ig.top;
-        ig.bottom    = capture_ig.bottom;
-        ig.color     = qcolor_from_rgba(capture_ig.rgba);
-        ig.highlight = capture_ig.highlight;
-        frame.indent_guides.push_back(std::move(ig));
-    }
-
-    return frame;
-}
-
-Captured_frame ScintillaQuick_core::capture_current_frame(
+Render_frame ScintillaQuick_core::current_render_frame(
     bool static_content_dirty,
     bool ensure_styled,
     bool scrolling,
     int extra_capture_lines)
 {
-    SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame");
+    SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.current_render_frame");
 
-    Captured_frame frame;
+    Render_frame frame;
 
     if (!m_owner) {
         return frame;
@@ -752,20 +468,17 @@ Captured_frame ScintillaQuick_core::capture_current_frame(
     const PRectangle client_rect = GetClientRectangle();
     const PRectangle text_rect   = GetTextRectangle();
 
-    frame.viewport_width  = client_rect.Width();
-    frame.viewport_height = client_rect.Height();
-    frame.text_left       = text_rect.left;
-    frame.text_top        = text_rect.top;
-    frame.text_width      = text_rect.Width();
-    frame.text_height     = text_rect.Height();
-    frame.margin_left     = client_rect.left;
-    frame.margin_top      = client_rect.top;
-    frame.margin_width    = std::max<XYPOSITION>(0.0, text_rect.left - client_rect.left);
-    frame.margin_height   = client_rect.Height();
-
-    if (frame.viewport_width <= 0.0 || frame.viewport_height <= 0.0) {
+    if (client_rect.Width() <= 0.0 || client_rect.Height() <= 0.0) {
         return frame;
     }
+
+    frame.text_rect = QRectF(
+        text_rect.left, text_rect.top, text_rect.Width(), text_rect.Height());
+    frame.margin_rect = QRectF(
+        client_rect.left,
+        client_rect.top,
+        std::max<XYPOSITION>(0.0, text_rect.left - client_rect.left),
+        client_rect.Height());
 
     const int capture_buffer_lines = std::max(0, extra_capture_lines);
     const int estimated_lines = std::max<int>(
@@ -791,7 +504,7 @@ Captured_frame ScintillaQuick_core::capture_current_frame(
         surface_impl->SetCaptureOnly(true);
     }
 
-    Capture_frame_builder collector(frame, static_content_dirty);
+    Render_frame_builder collector(frame, static_content_dirty, *this);
     PRectangle capture_rect = client_rect;
     if (capture_buffer_lines > 0 && vs.lineHeight > 0) {
         capture_rect.top -= static_cast<XYPOSITION>(capture_buffer_lines * vs.lineHeight);
@@ -802,7 +515,7 @@ Captured_frame ScintillaQuick_core::capture_current_frame(
     view.bufferedDraw = false;
 
     {
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame.paint_text");
+        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.current_render_frame.paint_text");
         view.PaintText(surface, *this, capture_rect, client_rect, vs, &collector);
     }
 
@@ -811,7 +524,7 @@ Captured_frame ScintillaQuick_core::capture_current_frame(
     margin_rect.left = 0.0;
     margin_rect.right = static_cast<XYPOSITION>(vs.fixedColumnWidth);
     if (capture_rect.Intersects(margin_rect)) {
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame.paint_margin");
+        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.current_render_frame.paint_margin");
         marginView.PaintMargin(surface, topLine, capture_rect, margin_rect, *this, vs, &collector);
     }
 
@@ -823,24 +536,6 @@ Captured_frame ScintillaQuick_core::capture_current_frame(
     view.bufferedDraw = buffered_draw_before_capture;
 
     return frame;
-}
-
-Render_frame ScintillaQuick_core::current_render_frame(
-    const Captured_frame* capture_frame,
-    bool static_content_dirty,
-    bool ensure_styled,
-    bool scrolling,
-    int extra_capture_lines)
-{
-    SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.current_render_frame");
-
-    if (capture_frame) {
-        return render_frame_from_capture(*capture_frame);
-    }
-
-    Captured_frame captured =
-        capture_current_frame(static_content_dirty, ensure_styled, scrolling, extra_capture_lines);
-    return render_frame_from_capture(captured);
 }
 
 ScintillaQuick_core::~ScintillaQuick_core()

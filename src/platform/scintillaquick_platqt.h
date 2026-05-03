@@ -54,12 +54,10 @@ inline PRectangle PRectFromQRect(QRect qr)
     return PRectangle(qr.x(), qr.y(), qr.x() + qr.width(), qr.y() + qr.height());
 }
 
-#ifdef PLAT_QT_QML
 inline PRectangle PRectFromQRectF(QRectF qr)
 {
     return PRectangle(qr.x(), qr.y(), qr.x() + qr.width(), qr.y() + qr.height());
 }
-#endif
 
 inline Point PointFromQPoint(QPoint qp)
 {

@@ -37,12 +37,10 @@
 #include <QVarLengthArray>
 #include <QTimer>
 #include <qqml.h>
-#ifdef PLAT_QT_QML
 #include <QtGlobal>
 #include <QPoint>
 #include <QPair>
 #include <QList>
-#endif
 
 #include <algorithm>
 #include <array>
@@ -55,15 +53,6 @@ constexpr int k_indicator_input     = static_cast<int>(Scintilla::IndicatorNumbe
 constexpr int k_indicator_target    = k_indicator_input + 1;
 constexpr int k_indicator_converted = k_indicator_input + 2;
 constexpr int k_indicator_unknown   = k_indicator_input + 3;
-
-// Q_WS_MAC and Q_WS_X11 aren't defined in Qt6
-#ifdef Q_OS_MAC
-#define Q_WS_MAC 1
-#endif
-
-#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
-#define Q_WS_X11 1
-#endif
 
 // This translation unit is dominated by Scintilla and Scintilla::Internal
 // interop. Keeping those upstream namespaces open avoids burying the local
@@ -426,23 +415,16 @@ QString profiling_report_path(const QString& directory_path)
 }
 
 ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
-#ifdef PLAT_QT_QML
     : QQuickItem(parent)
-#else
-    : QAbstractScrollArea(parent)
-#endif
     , m_updates_enabled(true)
     , m_logical_width(0)
     , m_logical_height(0)
-#ifdef PLAT_QT_QML
     , m_input_method_hints(Qt::ImhNone)
     , m_last_touch_press_time(-1)
-#endif
     , m_core((ensure_bundled_fonts_loaded(), new ScintillaQuick_core(this)))
     , m_preedit_pos(-1)
     , m_render_data(std::make_unique<Render_data>())
 {
-#ifdef PLAT_QT_QML
     setAcceptedMouseButtons(Qt::AllButtons);
     setAcceptTouchEvents(true);
     setFlag(QQuickItem::ItemAcceptsInputMethod, true);
@@ -451,22 +433,8 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
     setFlag(QQuickItem::ItemAcceptsDrops, true);
     setFlag(QQuickItem::ItemClipsChildrenToShape, true);
     setClip(true);
-#endif
 
     m_elapsed_timer.start();
-
-#ifndef PLAT_QT_QML
-    // Set Qt defaults.
-    setAcceptDrops(true);
-    setMouseTracking(true);
-    setAutoFillBackground(false);
-    setFrameStyle(QFrame::NoFrame);
-    setFocusPolicy(Qt::StrongFocus);
-    setAttribute(Qt::WA_StaticContents);
-    viewport()->setAutoFillBackground(false);
-    setAttribute(Qt::WA_KeyCompression);
-    setAttribute(Qt::WA_InputMethodEnabled);
-#endif
 
     // All IME indicators drawn in same colour, blue, with different patterns
     const ColourRGBA colourIME(0, 0, UCHAR_MAX);
@@ -477,13 +445,6 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
 
     connect(m_core, SIGNAL(notifyParent(Scintilla::NotificationData)), this,
         SLOT(notifyParent(Scintilla::NotificationData)));
-
-    // Connect scroll bars.
-#ifndef PLAT_QT_QML
-    // scrollbars are handled by the QML ScrollView outside this class
-    connect(verticalScrollBar(),   SIGNAL(valueChanged(int)), this, SLOT(scrollVertical(int)));
-    connect(horizontalScrollBar(), SIGNAL(valueChanged(int)), this, SLOT(scrollHorizontal(int)));
-#endif
 
     // Connect pass-through signals.
     connect(m_core, SIGNAL(horizontalRangeChanged(int, int)), this, SIGNAL(horizontalRangeChanged(int, int)));
@@ -498,10 +459,8 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
 
     connect(m_core, SIGNAL(aboutToCopy(QMimeData*)), this, SIGNAL(aboutToCopy(QMimeData*)));
 
-#ifdef PLAT_QT_QML
     connect(m_core, SIGNAL(cursorPositionChanged()), this,
         SIGNAL(cursorPositionChanged())); // needed to update markers on android platform
-#endif
 
     m_caret_blink_timer.setSingleShot(false);
     QObject::connect(&m_caret_blink_timer, &QTimer::timeout, this, [this]() {
@@ -769,8 +728,6 @@ void ScintillaQuick_item::request_scene_graph_update(
     update();
 }
 
-#ifdef PLAT_QT_QML
-
 void ScintillaQuick_item::scrollRow(int delta_lines)
 {
     int current_line = m_core->TopLineOfMain();
@@ -801,8 +758,6 @@ void ScintillaQuick_item::enableUpdate(bool enable)
         request_scene_graph_update();
     }
 }
-
-#endif
 
 void ScintillaQuick_item::scrollHorizontal(int value)
 {
@@ -837,50 +792,13 @@ void ScintillaQuick_item::scrollVertical(int value)
 
 bool ScintillaQuick_item::event(QEvent* event)
 {
-    bool result = false;
-
     if (event->type() == QEvent::KeyPress) {
         // Circumvent the tab focus convention.
         keyPressEvent(static_cast<QKeyEvent*>(event));
-        result = event->isAccepted();
+        return event->isAccepted();
     }
-    else
-    if (event->type() == QEvent::Show) {
-#ifndef PLAT_QT_QML
-        setMouseTracking(true);
-        result = QAbstractScrollArea::event(event);
-#else
-        result = QQuickItem::event(event);
-#endif
-    }
-    else
-    if (event->type() == QEvent::Hide) {
-#ifndef PLAT_QT_QML
-        setMouseTracking(false);
-        result = QAbstractScrollArea::event(event);
-#else
-        result = QQuickItem::event(event);
-#endif
-    }
-    else {
-#ifndef PLAT_QT_QML
-        result = QAbstractScrollArea::event(event);
-#else
-        result = QQuickItem::event(event);
-#endif
-    }
-
-    return result;
+    return QQuickItem::event(event);
 }
-
-#ifndef PLAT_QT_QML
-
-void ScintillaQuick_item::paintEvent(QPaintEvent* event)
-{
-    m_core->PartialPaint(PRectFromQRect(event->rect()));
-}
-
-#endif
 
 namespace
 {
@@ -910,16 +828,7 @@ void ScintillaQuick_item::wheelEvent(QWheelEvent* event)
     }
 
     if (isWheelEventHorizontal(event)) {
-#ifndef PLAT_QT_QML
-        if (horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff) {
-            event->ignore();
-        }
-        else {
-            QAbstractScrollArea::wheelEvent(event);
-        }
-#else
         QQuickItem::wheelEvent(event);
-#endif
     }
     else
     if (QGuiApplication::keyboardModifiers() & Qt::ControlModifier) {
@@ -938,27 +847,15 @@ void ScintillaQuick_item::wheelEvent(QWheelEvent* event)
         request_scene_graph_update(true, true, false);
     }
     else {
-        // Ignore wheel events when the scroll bars are disabled.
-#ifndef PLAT_QT_QML
-        if (verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOff) {
-            event->ignore();
+        // Scroll
+        int lines_to_scroll = 3;
+        if (event->angleDelta().y() > 0) {
+            scrollVertical(m_core->topLine - lines_to_scroll);
         }
         else {
-#endif
-#ifdef PLAT_QT_QML
-            // Scroll
-            int lines_to_scroll = 3;
-            if (event->angleDelta().y() > 0) {
-                scrollVertical(m_core->topLine - lines_to_scroll);
-            }
-            else {
-                scrollVertical(m_core->topLine + lines_to_scroll);
-            }
-            QQuickItem::wheelEvent(event);
-#else
-            QAbstractScrollArea::wheelEvent(event);
+            scrollVertical(m_core->topLine + lines_to_scroll);
         }
-#endif
+        QQuickItem::wheelEvent(event);
     }
 }
 
@@ -966,29 +863,20 @@ void ScintillaQuick_item::focusInEvent(QFocusEvent * event)
 {
     m_core->SetFocusState(true);
 
-#ifdef PLAT_QT_QML
     QQuickItem::focusInEvent(event);
     syncCaretBlinkTimer(true);
     request_scene_graph_update(false, false, false);
-#else
-    QAbstractScrollArea::focusInEvent(event);
-#endif
 }
 
 void ScintillaQuick_item::focusOutEvent(QFocusEvent * event)
 {
     m_core->SetFocusState(false);
 
-#ifdef PLAT_QT_QML
     QQuickItem::focusOutEvent(event);
     syncCaretBlinkTimer(false);
     request_scene_graph_update(false, false, false);
-#else
-    QAbstractScrollArea::focusOutEvent(event);
-#endif
 }
 
-#ifdef PLAT_QT_QML
 void ScintillaQuick_item::geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry)
 {
     // trigger resize handling only if the size of the control has changed
@@ -1007,16 +895,6 @@ void ScintillaQuick_item::geometryChange(const QRectF& newGeometry, const QRectF
     }
 }
 
-#else
-
-void ScintillaQuick_item::resizeEvent(QResizeEvent*)
-{
-    m_core->ChangeSize();
-    emit resized();
-}
-
-#endif
-
 void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
 {
     bool view_changed = false;
@@ -1024,11 +902,7 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
     // All keystrokes containing the meta modifier are
     // assumed to be shortcuts not handled by scintilla.
     if (QGuiApplication::keyboardModifiers() & Qt::MetaModifier) {
-#ifdef PLAT_QT_QML
         QQuickItem::keyPressEvent(event);
-#else
-        QAbstractScrollArea::keyPressEvent(event);
-#endif
         emit keyPressed(event);
         return;
     }
@@ -1090,7 +964,7 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
         // Additionally, on non-mac platforms, don't insert text
         // if the alt key was pressed unless control is also present.
         // On mac alt can be used to insert special characters.
-#ifndef Q_WS_MAC
+#ifndef Q_OS_MAC
         input &= (!alt || ctrl);
 #endif
 
@@ -1105,17 +979,15 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
         }
     }
 
-#ifdef PLAT_QT_QML
     if (view_changed) {
         cursorChangedUpdateMarker();
         request_scene_graph_update(false, false, false);
     }
-#endif
 
     emit keyPressed(event);
 }
 
-#ifdef Q_WS_X11
+#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
 static int modifierTranslated(int sciModifier)
 {
     switch (sciModifier) {
@@ -1148,7 +1020,7 @@ void ScintillaQuick_item::mousePressEvent(QMouseEvent * event)
     if (event->button() == Qt::LeftButton) {
         bool shift = QGuiApplication::keyboardModifiers() & Qt::ShiftModifier;
         bool ctrl  = QGuiApplication::keyboardModifiers() & Qt::ControlModifier;
-#ifdef Q_WS_X11
+#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
         // On X allow choice of rectangular modifier since most window
         // managers grab alt + click for moving windows.
         bool alt =
@@ -1160,39 +1032,32 @@ void ScintillaQuick_item::mousePressEvent(QMouseEvent * event)
 
         m_core->ButtonDownWithModifiers(pos, m_elapsed_timer.elapsed(), ModifierFlags(shift, ctrl, alt));
 
-#ifdef PLAT_QT_QML
         cursorChangedUpdateMarker();
         request_scene_graph_update(false, false, false);
-#endif
     }
 
     if (event->button() == Qt::RightButton) {
         m_core->RightButtonDownWithModifiers(pos, m_elapsed_timer.elapsed(), ModifiersOfKeyboard());
 
-#ifdef PLAT_QT_QML
-        Point pos = PointFromQPoint(event->globalPos());
-        Point pt  = PointFromQPoint(event->pos());
-        if (!m_core->PointInSelection(pt)) {
-            m_core->SetEmptySelection(m_core->PositionFromLocation(pt));
+        Point ctx_global = PointFromQPoint(event->globalPos());
+        Point ctx_pt     = PointFromQPoint(event->pos());
+        if (!m_core->PointInSelection(ctx_pt)) {
+            m_core->SetEmptySelection(m_core->PositionFromLocation(ctx_pt));
         }
         // TODO: call context menu callback if set otherwise use default context menu...
-        if (m_core->ShouldDisplayPopup(pt)) {
-            m_core->ContextMenu(pos);
+        if (m_core->ShouldDisplayPopup(ctx_pt)) {
+            m_core->ContextMenu(ctx_global);
         }
         request_scene_graph_update(false, false, false);
-#endif
     }
 
-#ifdef PLAT_QT_QML
     forceActiveFocus();
 
     emit enableScrollViewInteraction(false);
 
     event->setAccepted(true);
-#endif
 }
 
-#ifdef PLAT_QT_QML
 void ProcessScintillaContextMenu(
     Scintilla::Internal::Point                     pt,
     const Scintilla::Internal::Window&             w,
@@ -1210,7 +1075,6 @@ void ProcessScintillaContextMenu(
     QPoint point(pt.x, pt.y);
     emit qt_object->showContextMenu(point);
 }
-#endif
 
 void ScintillaQuick_item::mouseReleaseEvent(QMouseEvent * event)
 {
@@ -1226,22 +1090,16 @@ void ScintillaQuick_item::mouseReleaseEvent(QMouseEvent * event)
     emit textAreaClicked(line, modifiers);
     emit buttonReleased(event);
 
-#ifdef PLAT_QT_QML
     emit enableScrollViewInteraction(true);
     request_scene_graph_update(false, false, false);
 
     event->setAccepted(true);
-#endif
 }
 
 void ScintillaQuick_item::mouseDoubleClickEvent(QMouseEvent * event)
 {
     // Scintilla does its own double-click detection.
-#ifndef PLAT_QT_QML
-    mousePressEvent(event);
-#else
     Q_UNUSED(event);
-#endif
 }
 
 void ScintillaQuick_item::mouseMoveEvent(QMouseEvent * event)
@@ -1250,7 +1108,7 @@ void ScintillaQuick_item::mouseMoveEvent(QMouseEvent * event)
 
     bool shift = QGuiApplication::keyboardModifiers() & Qt::ShiftModifier;
     bool ctrl  = QGuiApplication::keyboardModifiers() & Qt::ControlModifier;
-#ifdef Q_WS_X11
+#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
     // On X allow choice of rectangular modifier since most window
     // managers grab alt + click for moving windows.
     bool alt   = QGuiApplication::keyboardModifiers() & modifierTranslated(m_core->m_rectangular_selection_modifier);
@@ -1264,7 +1122,6 @@ void ScintillaQuick_item::mouseMoveEvent(QMouseEvent * event)
 
     m_core->ButtonMoveWithModifiers(pos, m_elapsed_timer.elapsed(), modifiers);
 
-#ifdef PLAT_QT_QML
     cursorChangedUpdateMarker();
     const int current_first_visible_line = static_cast<int>(send(SCI_GETFIRSTVISIBLELINE));
     const int current_x_offset           = static_cast<int>(send(SCI_GETXOFFSET));
@@ -1279,24 +1136,7 @@ void ScintillaQuick_item::mouseMoveEvent(QMouseEvent * event)
     }
 
     event->setAccepted(true);
-#endif
 }
-
-#ifndef PLAT_QT_QML
-
-void ScintillaQuick_item::contextMenuEvent(QContextMenuEvent * event)
-{
-    Point pos = PointFromQPoint(event->globalPos());
-    Point pt  = PointFromQPoint(event->pos());
-    if (!m_core->PointInSelection(pt)) {
-        m_core->SetEmptySelection(m_core->PositionFromLocation(pt));
-    }
-    if (m_core->ShouldDisplayPopup(pt)) {
-        m_core->ContextMenu(pos);
-    }
-}
-
-#endif
 
 void ScintillaQuick_item::dragEnterEvent(QDragEnterEvent * event)
 {
@@ -1493,9 +1333,7 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
             }
 
             // update markers by triggering QtAndroidInputContext::updateSelectionHandles()
-#ifdef PLAT_QT_QML
             cursorChangedUpdateMarker();
-#endif
         }
     }
 
@@ -1575,9 +1413,6 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         // Set candidate box position for Qt::ImMicroFocus.
         m_preedit_pos = m_core->CurrentPosition();
         m_core->EnsureCaretVisible();
-#ifndef PLAT_QT_QML
-        updateMicroFocus();
-#endif
     }
     m_core->ShowCaretAtCurrentPosition();
 }
@@ -1615,7 +1450,6 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
     const Scintilla::Position line = send(SCI_LINEFROMPOSITION, pos);
 
     switch (query) {
-#ifdef PLAT_QT_QML
         case Qt::ImEnabled: {
             return QVariant((bool)(flags() & ItemAcceptsInputMethod));
         }
@@ -1627,10 +1461,8 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
         case Qt::ImMaximumTextLength:
             return QVariant(); // No limit.
         case Qt::ImAnchorRectangle: {
-            SelectionPosition sel_start = m_core->SelectionStart();
             SelectionPosition sel_end   = m_core->SelectionEnd();
-            Point pt_start = m_core->LocationFromPosition(sel_start);
-            Point pt_end   = m_core->LocationFromPosition(sel_end);
+            Point pt_end                = m_core->LocationFromPosition(sel_end);
 
             int width  = send(SCI_GETCARETWIDTH);
             int height = send(SCI_TEXTHEIGHT, line);
@@ -1638,7 +1470,6 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
         }
         // selection == Position <--> AnchorPosition
         case Qt::ImAnchorPosition: {
-            SelectionPosition sel_start = m_core->SelectionStart();
             SelectionPosition sel_end   = m_core->SelectionEnd();
 
             int para_start = m_core->pdoc->ParaUp(pos);
@@ -1683,7 +1514,6 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
 
             return m_core->StringFromDocument(buffer.constData());
         }
-#endif
         case Qt::ImCursorRectangle: {
             const Scintilla::Position start_pos = (m_preedit_pos >= 0) ? m_preedit_pos : pos;
             const Point pt   = m_core->LocationFromPosition(start_pos);
@@ -1720,8 +1550,6 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
             return QVariant();
     }
 }
-
-#ifdef PLAT_QT_QML
 
 void ScintillaQuick_item::touchEvent(QTouchEvent * event)
 {
@@ -1912,12 +1740,11 @@ void ScintillaQuick_item::build_render_snapshot()
     }
     else
     if (overlay_only_capture && m_core) {
-        frame = m_core->current_render_frame(nullptr, false, false, false, 0);
+        frame = m_core->current_render_frame(false, false, false, 0);
     }
     else
     if (m_core) {
         frame = m_core->current_render_frame(
-            nullptr,
             static_content_dirty,
             m_render_data->style_sync_needed && static_content_dirty,
             m_render_data->scrolling_update,
@@ -2015,8 +1842,6 @@ const Render_frame& ScintillaQuick_item::rendered_frame_for_test() const
     return m_render_data ? m_render_data->frame : empty_frame;
 }
 
-#endif
-
 void ScintillaQuick_item::notifyParent(NotificationData scn)
 {
     emit notify(&scn);
@@ -2040,9 +1865,7 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
             break;
 
         case Notification::UpdateUI:
-#ifdef PLAT_QT_QML
             updateQuickView(scn.updated);
-#endif
             emit updateUi(scn.updated);
             break;
 
@@ -2162,8 +1985,6 @@ KeyMod ScintillaQuick_item::ModifiersOfKeyboard()
 
     return ModifierFlags(shift, ctrl, alt);
 }
-
-#ifdef PLAT_QT_QML
 
 QString ScintillaQuick_item::getText() const
 {
@@ -2334,13 +2155,11 @@ void ScintillaQuick_item::updateQuickView(Update updated)
         syncQuickViewProperties();
     }
 
-#ifdef PLAT_QT_QML
     cursorChangedUpdateMarker();
     request_scene_graph_update(
         FlagSet(updated, Update::Content) || FlagSet(updated, Update::VScroll) || FlagSet(updated, Update::HScroll),
         FlagSet(updated, Update::Content) || FlagSet(updated, Update::VScroll),
         FlagSet(updated, Update::VScroll));
-#endif
 }
 
 void ScintillaQuick_item::syncQuickViewProperties()
@@ -2482,5 +2301,3 @@ void register_scintilla_type()
 {
     qmlRegisterType<ScintillaQuick_item>("ScintillaQuick", 1, 0, "ScintillaQuick_item");
 }
-
-#endif

@@ -15,15 +15,15 @@
 #include <cstdio>
 #include <ctime>
 #include <cmath>
+#include <map>
+#include <memory>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
-#include <map>
-#include <set>
-#include <optional>
 #include <algorithm>
-#include <memory>
 
 #include "ScintillaTypes.h"
 #include "ScintillaMessages.h"
@@ -100,17 +100,26 @@ class SCINTILLAQUICK_EXPORT ScintillaQuick_core : public QObject, public Scintil
     Q_OBJECT
 
 public:
+    // Style attributes resolved from the Scintilla view-style cache for a
+    // single style id. Kept here so that the in-translation-unit
+    // `Render_frame_builder` can call `style_attributes_for()` directly.
+    struct Style_attributes
+    {
+        QColor foreground;
+        QColor background;
+        QFont font;
+    };
+
     explicit ScintillaQuick_core(::ScintillaQuick_item* parent);
     void UpdateInfos(int winId);
     void ensure_visible_range_styled(bool scrolling);
     void selectCurrentWord();
     void reset_tracked_scroll_width_to_viewport();
     Render_frame current_render_frame(
-        const Captured_frame* capture_frame = nullptr,
-        bool static_content_dirty           = true,
-        bool ensure_styled                  = true,
-        bool scrolling                      = false,
-        int extra_capture_lines             = 0);
+        bool static_content_dirty = true,
+        bool ensure_styled        = true,
+        bool scrolling            = false,
+        int extra_capture_lines   = 0);
 
     // Called from `~ScintillaQuick_item()` before the derived
     // `ScintillaQuick_item` subobject finishes destructing. Stops all
@@ -124,6 +133,10 @@ public:
     void prepare_for_owner_destruction();
 
     virtual ~ScintillaQuick_core();
+
+    sptr_t WndProc(Scintilla::Message i_message, uptr_t w_param, sptr_t l_param) override;
+    sptr_t DefWndProc(Scintilla::Message i_message, uptr_t w_param, sptr_t l_param) override;
+    Style_attributes style_attributes_for(int style) const;
 
 signals:
     void cursorPositionChanged();
@@ -191,10 +204,6 @@ private:
     void CreateCallTipWindow(PRectangle rc) override;
     void AddToPopUp(const char* label, int cmd, bool enabled) override;
 
-public:
-    sptr_t WndProc(Scintilla::Message i_message, uptr_t w_param, sptr_t l_param) override;
-    sptr_t DefWndProc(Scintilla::Message i_message, uptr_t w_param, sptr_t l_param) override;
-
 private:
     static sptr_t DirectFunction(sptr_t ptr, unsigned int i_message, uptr_t w_param, sptr_t l_param);
     static sptr_t DirectStatusFunction(
@@ -203,14 +212,6 @@ private:
         uptr_t       w_param,
         sptr_t       l_param,
         int*         p_status);
-    struct Style_attributes;
-    Captured_frame capture_current_frame(
-        bool static_content_dirty,
-        bool ensure_styled,
-        bool scrolling,
-        int  extra_capture_lines = 0);
-    Render_frame render_frame_from_capture(const Captured_frame& capture_frame) const;
-    Style_attributes style_attributes_for(int style) const;
 
     QPainter* GetPainter() { return m_current_painter; }
 

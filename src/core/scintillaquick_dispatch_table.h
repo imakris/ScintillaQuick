@@ -364,7 +364,7 @@ inline scene_graph_update_request_info_t scene_graph_update_request(unsigned int
         //
         //   1. `static_content_dirty` stays false, so
         //      `build_render_snapshot()` takes the overlay-only capture
-        //      path and skips the `capture_current_frame.paint_text`
+        //      path and skips the `current_render_frame.paint_text`
         //      work for every visual line.
         //   2. `needs_style_sync` stays false, so `send()` skips the
         //      `syncQuickViewProperties()` call that re-queries all

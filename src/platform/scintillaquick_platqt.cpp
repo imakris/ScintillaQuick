@@ -908,11 +908,7 @@ XYPOSITION Surface_impl::WidthText(const Font* font, std::string_view text)
 {
     QFontMetricsF metrics(*font_pointer(font), m_device);
     QString su = unicode_from_text(text);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     return metrics.horizontalAdvance(su);
-#else
-    return metrics.width(su);
-#endif
 }
 
 void Surface_impl::DrawTextNoClipUTF8(
@@ -986,11 +982,7 @@ XYPOSITION Surface_impl::WidthTextUTF8(const Font* font, std::string_view text)
 {
     QFontMetricsF metrics(*font_pointer(font), m_device);
     QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     return metrics.horizontalAdvance(su);
-#else
-    return metrics.width(su);
-#endif
 }
 
 XYPOSITION Surface_impl::Ascent(const Font* font)
@@ -1082,14 +1074,10 @@ QQuickItem* window(WindowID wid) noexcept
 
 QRect ScreenRectangleForPoint(QPoint pos_global)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     const QScreen* screen = QGuiApplication::screenAt(pos_global);
     if (!screen) {
         screen = QGuiApplication::primaryScreen();
     }
-#else
-    const QScreen* screen = QGuiApplication::primaryScreen();
-#endif
     return screen ? screen->availableGeometry() : QRect();
 }
 
