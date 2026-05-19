@@ -266,6 +266,30 @@ void append_outline_pixel_rects(
     rects.push_back({QRectF(std::max<qreal>(left, right - thickness), top, thickness, height), color});
 }
 
+// Walk a primitive vector once, filter by `is_boxed(primitive)`, and
+// emit the per-pixel outline rects for the surviving primitives using
+// each primitive's foreground colour. `outer_rect(primitive)` lets the
+// caller pick the rect to outline (e.g. fold/eol annotations want the
+// rect shrunk by one device pixel on the right; plain annotations want
+// the raw rect). Replaces three near-identical "build an index list,
+// then iterate the indices, then call append_outline_pixel_rects"
+// blocks that walked the same vector twice.
+template <typename Primitive, typename IsBoxedFn, typename OuterRectFn>
+std::vector<Colored_rect> collect_boxed_outline_rects(
+    const std::vector<Primitive>& primitives,
+    QQuickWindow*                 window,
+    IsBoxedFn&&                   is_boxed,
+    OuterRectFn&&                 outer_rect)
+{
+    std::vector<Colored_rect> rects;
+    for (const Primitive& primitive : primitives) {
+        if (is_boxed(primitive)) {
+            append_outline_pixel_rects(rects, outer_rect(primitive), primitive.foreground, window);
+        }
+    }
+    return rects;
+}
+
 void append_corner_mask_rects(
     std::vector<Colored_rect>&  rects,
     const QRectF&               rect,
@@ -1907,12 +1931,18 @@ public:
     Backup_shape_state m_backup;
 };
 
-template <typename NodeT, typename UpdateFn>
-void sync_frame_text_nodes(
+// Resize the children of `parent` so it owns exactly `count` nodes,
+// creating any missing ones via `make_node(window)`, then invoke
+// `update_fn(node, index)` over all surviving nodes. The three concrete
+// sync_*_nodes helpers below differ only in how they allocate a new
+// node; the rest of the resize/diff/update loop is shared here.
+template <typename NodeT, typename MakeNode, typename UpdateFn>
+void sync_nodes_with_factory(
     QQuickWindow*        window,
     QSGNode*             parent,
     std::vector<NodeT*>& nodes,
     qsizetype            count,
+    MakeNode&&           make_node,
     UpdateFn&&           update_fn)
 {
     if (!window || !parent) {
@@ -1927,7 +1957,7 @@ void sync_frame_text_nodes(
     }
 
     while (static_cast<qsizetype>(nodes.size()) < count) {
-        auto* node = new NodeT();
+        NodeT* node = make_node(window);
         parent->appendChildNode(node);
         nodes.push_back(node);
     }
@@ -1935,6 +1965,20 @@ void sync_frame_text_nodes(
     for (qsizetype i = 0; i < count; ++i) {
         update_fn(nodes[static_cast<size_t>(i)], static_cast<size_t>(i));
     }
+}
+
+template <typename NodeT, typename UpdateFn>
+void sync_frame_text_nodes(
+    QQuickWindow*        window,
+    QSGNode*             parent,
+    std::vector<NodeT*>& nodes,
+    qsizetype            count,
+    UpdateFn&&           update_fn)
+{
+    sync_nodes_with_factory(
+        window, parent, nodes, count,
+        [](QQuickWindow*) { return new NodeT(); },
+        std::forward<UpdateFn>(update_fn));
 }
 
 template <typename UpdateFn>
@@ -1945,26 +1989,10 @@ void sync_rectangle_nodes(
     qsizetype                       count,
     UpdateFn&&                      update_fn)
 {
-    if (!window || !parent) {
-        return;
-    }
-
-    while (static_cast<qsizetype>(nodes.size()) > count) {
-        QSGRectangleNode* node = nodes.back();
-        nodes.pop_back();
-        parent->removeChildNode(node);
-        delete node;
-    }
-
-    while (static_cast<qsizetype>(nodes.size()) < count) {
-        QSGRectangleNode* node = window->createRectangleNode();
-        parent->appendChildNode(node);
-        nodes.push_back(node);
-    }
-
-    for (qsizetype i = 0; i < count; ++i) {
-        update_fn(nodes[static_cast<size_t>(i)], static_cast<size_t>(i));
-    }
+    sync_nodes_with_factory(
+        window, parent, nodes, count,
+        [](QQuickWindow* w) { return w->createRectangleNode(); },
+        std::forward<UpdateFn>(update_fn));
 }
 
 template <typename UpdateFn>
@@ -1975,32 +2003,19 @@ void sync_geometry_nodes(
     qsizetype                      count,
     UpdateFn&&                     update_fn)
 {
-    if (!window || !parent) {
-        return;
-    }
-
-    while (static_cast<qsizetype>(nodes.size()) > count) {
-        QSGGeometryNode* node = nodes.back();
-        nodes.pop_back();
-        parent->removeChildNode(node);
-        delete node;
-    }
-
-    while (static_cast<qsizetype>(nodes.size()) < count) {
-        auto* node = new QSGGeometryNode();
-        node->setFlag(QSGNode::OwnsGeometry);
-        node->setFlag(QSGNode::OwnsMaterial);
-        node->setGeometry(new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 2));
-        auto* material = new QSGFlatColorMaterial();
-        material->setColor(QColor(0, 0, 0, 0));
-        node->setMaterial(material);
-        parent->appendChildNode(node);
-        nodes.push_back(node);
-    }
-
-    for (qsizetype i = 0; i < count; ++i) {
-        update_fn(nodes[static_cast<size_t>(i)], static_cast<size_t>(i));
-    }
+    sync_nodes_with_factory(
+        window, parent, nodes, count,
+        [](QQuickWindow*) {
+            auto* node = new QSGGeometryNode();
+            node->setFlag(QSGNode::OwnsGeometry);
+            node->setFlag(QSGNode::OwnsMaterial);
+            node->setGeometry(new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 2));
+            auto* material = new QSGFlatColorMaterial();
+            material->setColor(QColor(0, 0, 0, 0));
+            node->setMaterial(material);
+            return node;
+        },
+        std::forward<UpdateFn>(update_fn));
 }
 
 template <typename NodeT> void reorder_child_nodes(QSGNode* parent, const std::vector<NodeT*>& nodes)
@@ -2013,6 +2028,54 @@ template <typename NodeT> void reorder_child_nodes(QSGNode* parent, const std::v
         parent->removeChildNode(node);
         parent->appendChildNode(node);
     }
+}
+
+// Fold display / EOL annotation / regular annotation primitives all flow
+// through Scene_graph_frame_text_node::update_from_margin_text, which takes
+// a Margin_text_primitive. The renderer used to open-code an 8-field copy
+// at each of the three call sites; these overloads collapse that to one
+// line per site while keeping each primitive's layout self-contained in
+// render_frame.h.
+Margin_text_primitive to_margin_text(const Fold_display_text_primitive& fold)
+{
+    Margin_text_primitive m;
+    m.text          = fold.text;
+    m.position      = fold.position;
+    m.baseline_y    = fold.baseline_y;
+    m.foreground    = fold.foreground;
+    m.font          = fold.font;
+    m.clip_rect     = fold.rect;
+    m.document_line = fold.document_line;
+    m.style_id      = fold.style_id;
+    return m;
+}
+
+Margin_text_primitive to_margin_text(const Eol_annotation_primitive& eol)
+{
+    Margin_text_primitive m;
+    m.text          = eol.text;
+    m.position      = eol.position;
+    m.baseline_y    = eol.baseline_y;
+    m.foreground    = eol.foreground;
+    m.font          = eol.font;
+    m.clip_rect     = eol.rect;
+    m.document_line = eol.document_line;
+    m.style_id      = eol.style_id;
+    return m;
+}
+
+Margin_text_primitive to_margin_text(const Annotation_primitive& annot)
+{
+    Margin_text_primitive m;
+    m.text          = annot.text;
+    m.position      = annot.position;
+    m.baseline_y    = annot.baseline_y;
+    m.foreground    = annot.foreground;
+    m.font          = annot.font;
+    m.clip_rect     = annot.rect;
+    m.document_line = annot.document_line;
+    m.style_id      = annot.style_id;
+    return m;
 }
 
 uint64_t pack_visual_line_key(const Visual_line_key& key)
@@ -2879,35 +2942,18 @@ public:
             m_fold_display_text_nodes,
             static_cast<qsizetype>(frame.fold_display_texts.size()),
             [&](Scene_graph_frame_text_node* node, size_t i) {
-                const Fold_display_text_primitive& fold = frame.fold_display_texts[i];
-                Margin_text_primitive as_margin;
-                as_margin.text          = fold.text;
-                as_margin.position      = fold.position;
-                as_margin.baseline_y    = fold.baseline_y;
-                as_margin.foreground    = fold.foreground;
-                as_margin.font          = fold.font;
-                as_margin.clip_rect     = fold.rect;
-                as_margin.document_line = fold.document_line;
-                as_margin.style_id      = fold.style_id;
-                node->update_from_margin_text(window, as_margin, frame.text_rect);
+                node->update_from_margin_text(
+                    window, to_margin_text(frame.fold_display_texts[i]), frame.text_rect);
             });
 
-        // Fold display text: boxed outlines (index-based to avoid copies)
-        std::vector<size_t> boxed_fold_idx;
-        for (size_t j = 0; j < frame.fold_display_texts.size(); ++j) {
-            if (frame.fold_display_texts[j].boxed) {
-                boxed_fold_idx.push_back(j);
-            }
-        }
-        std::vector<Colored_rect> fold_display_box_rects;
-        for (size_t i = 0; i < boxed_fold_idx.size(); ++i) {
-            const auto& fold = frame.fold_display_texts[boxed_fold_idx[i]];
-            append_outline_pixel_rects(
-                fold_display_box_rects,
-                fold.rect.adjusted(0.0, 0.0, -physical_pixel_size(window), 0.0),
-                fold.foreground,
-                window);
-        }
+        // Fold display text: boxed outlines
+        const qreal pixel_size = physical_pixel_size(window);
+        std::vector<Colored_rect> fold_display_box_rects = collect_boxed_outline_rects(
+            frame.fold_display_texts, window,
+            [](const Fold_display_text_primitive& p) { return p.boxed; },
+            [pixel_size](const Fold_display_text_primitive& p) {
+                return p.rect.adjusted(0.0, 0.0, -pixel_size, 0.0);
+            });
         sync_rectangle_nodes(
             window,
             m_annotation_background_group,
@@ -2939,35 +2985,19 @@ public:
             m_eol_annotation_nodes,
             static_cast<qsizetype>(frame.eol_annotations.size()),
             [&](Scene_graph_frame_text_node* node, size_t i) {
-                const Eol_annotation_primitive& eol = frame.eol_annotations[i];
-                Margin_text_primitive as_margin;
-                as_margin.text          = eol.text;
-                as_margin.position      = eol.position;
-                as_margin.baseline_y    = eol.baseline_y;
-                as_margin.foreground    = eol.foreground;
-                as_margin.font          = eol.font;
-                as_margin.clip_rect     = eol.rect;
-                as_margin.document_line = eol.document_line;
-                as_margin.style_id      = eol.style_id;
-                node->update_from_margin_text(window, as_margin, frame.text_rect);
+                node->update_from_margin_text(
+                    window, to_margin_text(frame.eol_annotations[i]), frame.text_rect);
             });
 
-        // EOL annotation boxed outlines (index-based)
-        std::vector<size_t> boxed_eol_idx;
-        for (size_t j = 0; j < frame.eol_annotations.size(); ++j) {
-            if (frame.eol_annotations[j].visible_style == static_cast<int>(EOLAnnotationVisible::Boxed)) {
-                boxed_eol_idx.push_back(j);
-            }
-        }
-        std::vector<Colored_rect> eol_annotation_box_rects;
-        for (size_t i = 0; i < boxed_eol_idx.size(); ++i) {
-            const auto& eol = frame.eol_annotations[boxed_eol_idx[i]];
-            append_outline_pixel_rects(
-                eol_annotation_box_rects,
-                eol.rect.adjusted(0.0, 0.0, -physical_pixel_size(window), 0.0),
-                eol.foreground,
-                window);
-        }
+        // EOL annotation boxed outlines
+        std::vector<Colored_rect> eol_annotation_box_rects = collect_boxed_outline_rects(
+            frame.eol_annotations, window,
+            [](const Eol_annotation_primitive& p) {
+                return p.visible_style == static_cast<int>(EOLAnnotationVisible::Boxed);
+            },
+            [pixel_size](const Eol_annotation_primitive& p) {
+                return p.rect.adjusted(0.0, 0.0, -pixel_size, 0.0);
+            });
         sync_rectangle_nodes(
             window,
             m_annotation_background_group,
@@ -2995,31 +3025,15 @@ public:
             m_annotation_nodes,
             static_cast<qsizetype>(frame.annotations.size()),
             [&](Scene_graph_frame_text_node* node, size_t i) {
-                const Annotation_primitive& annot = frame.annotations[i];
-                Margin_text_primitive as_margin;
-                as_margin.text          = annot.text;
-                as_margin.position      = annot.position;
-                as_margin.baseline_y    = annot.baseline_y;
-                as_margin.foreground    = annot.foreground;
-                as_margin.font          = annot.font;
-                as_margin.clip_rect     = annot.rect;
-                as_margin.document_line = annot.document_line;
-                as_margin.style_id      = annot.style_id;
-                node->update_from_margin_text(window, as_margin, frame.text_rect);
+                node->update_from_margin_text(
+                    window, to_margin_text(frame.annotations[i]), frame.text_rect);
             });
 
-        // Annotation boxed outlines (index-based)
-        std::vector<size_t> boxed_annot_idx;
-        for (size_t j = 0; j < frame.annotations.size(); ++j) {
-            if (frame.annotations[j].boxed) {
-                boxed_annot_idx.push_back(j);
-            }
-        }
-        std::vector<Colored_rect> annotation_box_rects;
-        for (size_t i = 0; i < boxed_annot_idx.size(); ++i) {
-            const auto& annot = frame.annotations[boxed_annot_idx[i]];
-            append_outline_pixel_rects(annotation_box_rects, annot.rect, annot.foreground, window);
-        }
+        // Annotation boxed outlines
+        std::vector<Colored_rect> annotation_box_rects = collect_boxed_outline_rects(
+            frame.annotations, window,
+            [](const Annotation_primitive& p) { return p.boxed; },
+            [](const Annotation_primitive& p) { return p.rect; });
         sync_rectangle_nodes(
             window,
             m_annotation_background_group,

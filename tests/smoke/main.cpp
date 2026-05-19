@@ -19,6 +19,7 @@
 
 #include "Scintilla.h"
 #include "scintillaquick_font.h"
+#include "scintillaquick_test_macros.h"
 
 #include <cstdio>
 
@@ -26,15 +27,6 @@ namespace
 {
 
 int g_failures = 0;
-
-#define SQ_EXPECT(expr)                                                           \
-    do {                                                                          \
-        if (!(expr)) {                                                            \
-            std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr);  \
-            ++g_failures;                                                         \
-        }                                                                         \
-    }                                                                             \
-    while (0)
 
 void pump_events()
 {

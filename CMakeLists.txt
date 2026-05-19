@@ -233,7 +233,8 @@ if(SCINTILLAQUICK_BUILD_BENCHMARKS)
     target_include_directories(
         scintillaquick_embedded_benchmark
         PRIVATE
-            ${scintillaquick_example_common_include_dir})
+            ${scintillaquick_example_common_include_dir}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
     target_link_libraries(
         scintillaquick_embedded_benchmark
