@@ -23,6 +23,9 @@
 
 #include "Scintilla.h"
 #include "scintillaquick_font.h"
+#include "scintillaquick_test_documents.h"
+#include "scintillaquick_test_editor.h"
+#include "scintillaquick_test_events.h"
 
 // This test exercises Scintilla::Internal render data directly, so keeping the
 // internal namespace open here keeps the assertions readable.
@@ -62,52 +65,10 @@ int g_gen_count   = 0;
 bool trace_enabled();
 void trace_line(const QString& line);
 
-QString build_large_document(int line_count)
-{
-    QStringList lines;
-    lines.reserve(line_count);
-    for (int i = 0; i < line_count; ++i) {
-        lines << QStringLiteral("Line %1: The quick brown fox jumps over the lazy dog. value=%2")
-                     .arg(i + 1, 6, 10, QChar('0'))
-                     .arg((i * 17) % 9973);
-    }
-    return lines.join('\n');
-}
-
-QString build_wrapped_document(int line_count)
-{
-    QStringList lines;
-    lines.reserve(line_count);
-    for (int i = 0; i < line_count; ++i) {
-        lines << QStringLiteral(
-            "Wrapped line %1: The quick brown fox jumps over the lazy dog "
-            "and keeps running until the text spans multiple wrapped sublines "
-            "at the narrow visual-regression width %2.")
-                        .arg(i + 1, 5, 10, QChar('0'))
-                        .arg((i * 13) % 101);
-    }
-    return lines.join('\n');
-}
-
 struct Fixture_editor
 {
-    struct Test_editor : ScintillaQuick_item
-    {
-        std::function<void()> on_paint_node_updated;
-
-    protected:
-        QSGNode* updatePaintNode(QSGNode* old_node, UpdatePaintNodeData* update_paint_node_data) override
-        {
-            QSGNode* node = ScintillaQuick_item::updatePaintNode(old_node, update_paint_node_data);
-            if (on_paint_node_updated) {
-                on_paint_node_updated();
-            }
-            return node;
-        }
-    };
-
     QQuickWindow window;
-    Test_editor editor;
+    Paint_counted_editor editor;
     quint64 paint_counter = 0;
 
     Fixture_editor()
@@ -156,29 +117,7 @@ struct Fixture_editor
 
     bool wait_for_next_paint(quint64 previous_paint_counter, int timeout_ms = 50)
     {
-        if (paint_counter > previous_paint_counter) {
-            return true;
-        }
-
-        QEventLoop loop;
-        QTimer timeout;
-        timeout.setSingleShot(true);
-
-        QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
-        const auto previous_callback = editor.on_paint_node_updated;
-        editor.on_paint_node_updated = [&]() {
-            if (previous_callback) {
-                previous_callback();
-            }
-            if (paint_counter > previous_paint_counter) {
-                loop.quit();
-            }
-        };
-
-        timeout.start(timeout_ms);
-        loop.exec();
-        editor.on_paint_node_updated = previous_callback;
-        return paint_counter > previous_paint_counter;
+        return ::wait_for_next_paint(editor, paint_counter, previous_paint_counter, timeout_ms);
     }
 
     QString window_state_text(const char* fixture_name, const char* stage) const
@@ -321,21 +260,6 @@ struct Fixture_editor
         return result;
     }
 };
-
-void send_wheel_event(
-    QQuickWindow& window,
-    ScintillaQuick_item& editor,
-    QPointF local_pos,
-    QPoint pixel_delta,
-    QPoint angle_delta,
-    Qt::KeyboardModifiers modifiers = Qt::NoModifier)
-{
-    const QPointF scene_pos = editor.mapToScene(local_pos);
-    const QPointF global_pos = window.mapToGlobal(scene_pos.toPoint());
-    QWheelEvent event(
-        local_pos, global_pos, pixel_delta, angle_delta, Qt::NoButton, modifiers, Qt::NoScrollPhase, false);
-    QCoreApplication::sendEvent(&editor, &event);
-}
 
 // ---------------------------------------------------------------------------
 // Image helpers

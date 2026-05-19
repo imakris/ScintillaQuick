@@ -187,6 +187,7 @@ add_executable(
 target_include_directories(
     scintillaquick_visual_regression_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/support
         ${CMAKE_CURRENT_SOURCE_DIR}/../examples/common)
 
 target_compile_definitions(

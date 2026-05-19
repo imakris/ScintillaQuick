@@ -36,6 +36,9 @@
 #include "scintillaquick_font.h"
 #include "scintillaquick_window_binding.h"
 #include "Scintilla.h"
+#include "scintillaquick_test_documents.h"
+#include "scintillaquick_test_editor.h"
+#include "scintillaquick_test_events.h"
 
 namespace Scintilla::Internal
 {
@@ -54,35 +57,7 @@ public:
 namespace
 {
 
-class Benchmark_editor : public ScintillaQuick_item
-{
-public:
-    using ScintillaQuick_item::ScintillaQuick_item;
-
-    std::function<void()> on_paint_node_updated;
-
-protected:
-    QSGNode* updatePaintNode(QSGNode* old_node, UpdatePaintNodeData* update_paint_node_data) override
-    {
-        QSGNode* node = ScintillaQuick_item::updatePaintNode(old_node, update_paint_node_data);
-        if (on_paint_node_updated) {
-            on_paint_node_updated();
-        }
-        return node;
-    }
-};
-
-QString build_large_document(int line_count)
-{
-    QStringList lines;
-    lines.reserve(line_count);
-    for (int i = 0; i < line_count; ++i) {
-        lines << QString("Line %1: The quick brown fox jumps over the lazy dog. value=%2")
-                     .arg(i + 1, 6, 10, QChar('0'))
-                     .arg((i * 17) % 9973);
-    }
-    return lines.join('\n');
-}
+using Benchmark_editor = Paint_counted_editor;
 
 QString profiling_session_directory(QStringView scenario_name)
 {
@@ -251,7 +226,11 @@ QString expected_document_line_text(int zero_based_line)
         .arg((zero_based_line * 17) % 9973);
 }
 
-QString build_wrapped_document(int line_count)
+// Distinct from the shared build_wrapped_document() in
+// tests/support/scintillaquick_test_documents.h: this one builds very
+// long lines of repeated tokens so the wrapped-paint benchmarks see a
+// large fan-out of visual sublines per document line.
+QString build_wide_wrap_document(int line_count)
 {
     static const QString repeated_block = QStringLiteral(
         "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau ");
@@ -396,36 +375,12 @@ std::optional<Correctness_issue> verify_visible_rows(
     return std::nullopt;
 }
 
-bool wait_for_next_paint(
-    Benchmark_editor& editor,
-    quint64&          paint_counter,
-    quint64           previous_paint_counter,
-    int               timeout_ms = 25)
-{
-    if (paint_counter > previous_paint_counter) {
-        return true;
-    }
-
-    QEventLoop loop;
-    QTimer timeout;
-    timeout.setSingleShot(true);
-
-    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
-    const auto previous_callback = editor.on_paint_node_updated;
-    editor.on_paint_node_updated = [&]() {
-        if (previous_callback) {
-            previous_callback();
-        }
-        if (paint_counter > previous_paint_counter) {
-            loop.quit();
-        }
-    };
-
-    timeout.start(timeout_ms);
-    loop.exec();
-    editor.on_paint_node_updated = previous_callback;
-    return paint_counter > previous_paint_counter;
-}
+// Per-step paint-latency timeout. Kept tight (25 ms) so a stalled step
+// is classified as a timeout rather than silently inflating the
+// measured latency. The shared wait_for_next_paint() helper defaults to
+// a more lenient 50 ms for correctness tests; benchmarks pass this
+// constant explicitly to preserve the original measurement contract.
+constexpr int k_paint_latency_timeout_ms = 25;
 
 template <typename StepFn>
 QJsonObject measure_paint_latency_scenario(
@@ -455,7 +410,7 @@ QJsonObject measure_paint_latency_scenario(
 
         step_fn(i);
 
-        if (wait_for_next_paint(editor, paint_counter, previous_paint_counter)) {
+        if (wait_for_next_paint(editor, paint_counter, previous_paint_counter, k_paint_latency_timeout_ms)) {
             latencies_ms.push_back(step_timer.nsecsElapsed() / 1'000'000.0);
             if (verify_step) {
                 if (const auto issue = verify_step(editor, i); issue.has_value()) {
@@ -506,42 +461,6 @@ QPointF local_point_for_position(ScintillaQuick_item& editor, sptr_t position)
     return QPointF(static_cast<qreal>(x), static_cast<qreal>(y + std::max(1, height / 2)));
 }
 
-void send_mouse_event(
-    QQuickWindow&           window,
-    ScintillaQuick_item&    editor,
-    QEvent::Type            type,
-    QPointF                 local_pos,
-    Qt::MouseButton         button,
-    Qt::MouseButtons        buttons,
-    Qt::KeyboardModifiers   modifiers = Qt::NoModifier)
-{
-    const QPointF scene_pos = editor.mapToScene(local_pos);
-    const QPoint global_pos = window.mapToGlobal(scene_pos.toPoint());
-    QMouseEvent event(type, local_pos, scene_pos, global_pos, button, buttons, modifiers);
-    QCoreApplication::sendEvent(&editor, &event);
-}
-
-void send_wheel_event(
-    QQuickWindow& window,
-    ScintillaQuick_item& editor,
-    QPointF local_pos,
-    QPoint pixel_delta,
-    QPoint angle_delta,
-    Qt::KeyboardModifiers modifiers = Qt::NoModifier)
-{
-    const QPointF scene_pos = editor.mapToScene(local_pos);
-    const QPointF global_pos = window.mapToGlobal(scene_pos.toPoint());
-    QWheelEvent event(
-        local_pos, global_pos, pixel_delta, angle_delta, Qt::NoButton, modifiers, Qt::NoScrollPhase, false);
-    QCoreApplication::sendEvent(&editor, &event);
-}
-
-void send_key_press_event(Benchmark_editor& editor, int key, Qt::KeyboardModifiers modifiers = Qt::NoModifier)
-{
-    QKeyEvent event(QEvent::KeyPress, key, modifiers);
-    QCoreApplication::sendEvent(&editor, &event);
-}
-
 } // namespace
 
 int main(int argc, char** argv)
@@ -584,7 +503,7 @@ int main(int argc, char** argv)
     editor.forceActiveFocus();
 
     const QString large_document   = build_large_document(25000);
-    const QString wrapped_document = build_wrapped_document(4000);
+    const QString wrapped_document = build_wide_wrap_document(4000);
     const QByteArray insert_text("x");
     const QStringList selected_scenarios = parser.values(scenarioOption);
     const auto should_run_scenario = [&](QStringView name) {
@@ -779,7 +698,7 @@ int main(int argc, char** argv)
         const QPointF drag_start_point = local_point_for_position(editor, drag_start);
         const quint64 drag_press_paint_counter = paint_counter;
         send_mouse_event(window, editor, QEvent::MouseButtonPress, drag_start_point, Qt::LeftButton, Qt::LeftButton);
-        wait_for_next_paint(editor, paint_counter, drag_press_paint_counter);
+        wait_for_next_paint(editor, paint_counter, drag_press_paint_counter, k_paint_latency_timeout_ms);
 
         scenarios.append(measure_paint_latency_scenario(
             QStringLiteral("selection_drag_latency_48"), 48, editor, paint_counter, [&](int index) {
