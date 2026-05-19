@@ -57,23 +57,31 @@ function(scintillaquick_register_validation_test test_name target_name extra_env
         "${extra_environment}")
 endfunction()
 
-add_executable(
-    scintillaquick_smoke_test
-    smoke/main.cpp)
-
-target_include_directories(
-    scintillaquick_smoke_test
-    PRIVATE
+# Declare a Qt-Quick-using executable in this tests/ tree. Every such
+# target needs tests/support and examples/common on the include path
+# plus the Core/Gui/Quick Qt module triple. Additional include
+# directories (e.g. src/core, src/render) can be passed positionally
+# after the source file.
+#
+# Targets that deliberately link only a subset of Qt (e.g. the
+# dispatch-table unit test, which is Core-only and never spins up a
+# QQuickWindow) should NOT use this helper; declare them by hand.
+function(scintillaquick_add_quick_test_target target_name source_file)
+    add_executable(${target_name} ${source_file})
+    target_include_directories(${target_name} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/support
-        ${CMAKE_CURRENT_SOURCE_DIR}/../examples/common)
-
-target_link_libraries(
-    scintillaquick_smoke_test
-    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../examples/common
+        ${ARGN})
+    target_link_libraries(${target_name} PRIVATE
         ScintillaQuick::ScintillaQuick
         Qt6::Core
         Qt6::Gui
         Qt6::Quick)
+endfunction()
+
+scintillaquick_add_quick_test_target(
+    scintillaquick_smoke_test
+    smoke/main.cpp)
 
 scintillaquick_register_validation_test(
     scintillaquick_smoke_test
@@ -115,25 +123,11 @@ add_test(
 
 # --- Review capture utility ---
 
-add_executable(
+scintillaquick_add_quick_test_target(
     scintillaquick_review_capture
-    review_capture/main.cpp)
-
-target_include_directories(
-    scintillaquick_review_capture
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/support
-        ${CMAKE_CURRENT_SOURCE_DIR}/../examples/common
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/render)
-
-target_link_libraries(
-    scintillaquick_review_capture
-    PRIVATE
-        ScintillaQuick::ScintillaQuick
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Quick)
+    review_capture/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/render)
 
 # --- Benchmark-backed validation ---
 #
@@ -150,25 +144,11 @@ endif()
 
 # --- Phase 2 frame validation (structural + semantic) ---
 
-add_executable(
+scintillaquick_add_quick_test_target(
     scintillaquick_frame_validation_test
-    frame_validation/main.cpp)
-
-target_include_directories(
-    scintillaquick_frame_validation_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/support
-        ${CMAKE_CURRENT_SOURCE_DIR}/../examples/common
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/render)
-
-target_link_libraries(
-    scintillaquick_frame_validation_test
-    PRIVATE
-        ScintillaQuick::ScintillaQuick
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Quick)
+    frame_validation/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/render)
 
 scintillaquick_register_validation_test(
     scintillaquick_frame_validation_test
@@ -180,29 +160,15 @@ scintillaquick_register_validation_test(
 set(VR_BASELINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/frame_visual_regression/baselines")
 set(VR_ARTIFACT_DIR "${CMAKE_CURRENT_BINARY_DIR}/visual_regression_artifacts")
 
-add_executable(
+scintillaquick_add_quick_test_target(
     scintillaquick_visual_regression_test
     frame_visual_regression/main.cpp)
-
-target_include_directories(
-    scintillaquick_visual_regression_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/support
-        ${CMAKE_CURRENT_SOURCE_DIR}/../examples/common)
 
 target_compile_definitions(
     scintillaquick_visual_regression_test
     PRIVATE
         BASELINE_DIR="${VR_BASELINE_DIR}"
         ARTIFACT_DIR="${VR_ARTIFACT_DIR}")
-
-target_link_libraries(
-    scintillaquick_visual_regression_test
-    PRIVATE
-        ScintillaQuick::ScintillaQuick
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Quick)
 
 scintillaquick_register_validation_test(
     scintillaquick_visual_regression_test
