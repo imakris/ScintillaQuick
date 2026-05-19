@@ -64,6 +64,7 @@ add_executable(
 target_include_directories(
     scintillaquick_smoke_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/support
         ${CMAKE_CURRENT_SOURCE_DIR}/../examples/common)
 
 target_link_libraries(
@@ -93,6 +94,7 @@ add_executable(
 target_include_directories(
     scintillaquick_dispatch_table_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/support
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/scintilla/include)
 

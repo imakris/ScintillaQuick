@@ -2015,6 +2015,54 @@ template <typename NodeT> void reorder_child_nodes(QSGNode* parent, const std::v
     }
 }
 
+// Fold display / EOL annotation / regular annotation primitives all flow
+// through Scene_graph_frame_text_node::update_from_margin_text, which takes
+// a Margin_text_primitive. The renderer used to open-code an 8-field copy
+// at each of the three call sites; these overloads collapse that to one
+// line per site while keeping each primitive's layout self-contained in
+// render_frame.h.
+Margin_text_primitive to_margin_text(const Fold_display_text_primitive& fold)
+{
+    Margin_text_primitive m;
+    m.text          = fold.text;
+    m.position      = fold.position;
+    m.baseline_y    = fold.baseline_y;
+    m.foreground    = fold.foreground;
+    m.font          = fold.font;
+    m.clip_rect     = fold.rect;
+    m.document_line = fold.document_line;
+    m.style_id      = fold.style_id;
+    return m;
+}
+
+Margin_text_primitive to_margin_text(const Eol_annotation_primitive& eol)
+{
+    Margin_text_primitive m;
+    m.text          = eol.text;
+    m.position      = eol.position;
+    m.baseline_y    = eol.baseline_y;
+    m.foreground    = eol.foreground;
+    m.font          = eol.font;
+    m.clip_rect     = eol.rect;
+    m.document_line = eol.document_line;
+    m.style_id      = eol.style_id;
+    return m;
+}
+
+Margin_text_primitive to_margin_text(const Annotation_primitive& annot)
+{
+    Margin_text_primitive m;
+    m.text          = annot.text;
+    m.position      = annot.position;
+    m.baseline_y    = annot.baseline_y;
+    m.foreground    = annot.foreground;
+    m.font          = annot.font;
+    m.clip_rect     = annot.rect;
+    m.document_line = annot.document_line;
+    m.style_id      = annot.style_id;
+    return m;
+}
+
 uint64_t pack_visual_line_key(const Visual_line_key& key)
 {
     return (static_cast<uint64_t>(static_cast<uint32_t>(key.document_line)) << 32) |
@@ -2879,17 +2927,8 @@ public:
             m_fold_display_text_nodes,
             static_cast<qsizetype>(frame.fold_display_texts.size()),
             [&](Scene_graph_frame_text_node* node, size_t i) {
-                const Fold_display_text_primitive& fold = frame.fold_display_texts[i];
-                Margin_text_primitive as_margin;
-                as_margin.text          = fold.text;
-                as_margin.position      = fold.position;
-                as_margin.baseline_y    = fold.baseline_y;
-                as_margin.foreground    = fold.foreground;
-                as_margin.font          = fold.font;
-                as_margin.clip_rect     = fold.rect;
-                as_margin.document_line = fold.document_line;
-                as_margin.style_id      = fold.style_id;
-                node->update_from_margin_text(window, as_margin, frame.text_rect);
+                node->update_from_margin_text(
+                    window, to_margin_text(frame.fold_display_texts[i]), frame.text_rect);
             });
 
         // Fold display text: boxed outlines (index-based to avoid copies)
@@ -2939,17 +2978,8 @@ public:
             m_eol_annotation_nodes,
             static_cast<qsizetype>(frame.eol_annotations.size()),
             [&](Scene_graph_frame_text_node* node, size_t i) {
-                const Eol_annotation_primitive& eol = frame.eol_annotations[i];
-                Margin_text_primitive as_margin;
-                as_margin.text          = eol.text;
-                as_margin.position      = eol.position;
-                as_margin.baseline_y    = eol.baseline_y;
-                as_margin.foreground    = eol.foreground;
-                as_margin.font          = eol.font;
-                as_margin.clip_rect     = eol.rect;
-                as_margin.document_line = eol.document_line;
-                as_margin.style_id      = eol.style_id;
-                node->update_from_margin_text(window, as_margin, frame.text_rect);
+                node->update_from_margin_text(
+                    window, to_margin_text(frame.eol_annotations[i]), frame.text_rect);
             });
 
         // EOL annotation boxed outlines (index-based)
@@ -2995,17 +3025,8 @@ public:
             m_annotation_nodes,
             static_cast<qsizetype>(frame.annotations.size()),
             [&](Scene_graph_frame_text_node* node, size_t i) {
-                const Annotation_primitive& annot = frame.annotations[i];
-                Margin_text_primitive as_margin;
-                as_margin.text          = annot.text;
-                as_margin.position      = annot.position;
-                as_margin.baseline_y    = annot.baseline_y;
-                as_margin.foreground    = annot.foreground;
-                as_margin.font          = annot.font;
-                as_margin.clip_rect     = annot.rect;
-                as_margin.document_line = annot.document_line;
-                as_margin.style_id      = annot.style_id;
-                node->update_from_margin_text(window, as_margin, frame.text_rect);
+                node->update_from_margin_text(
+                    window, to_margin_text(frame.annotations[i]), frame.text_rect);
             });
 
         // Annotation boxed outlines (index-based)

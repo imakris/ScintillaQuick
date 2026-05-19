@@ -19,6 +19,7 @@
 // content until the next unrelated update.
 
 #include "scintillaquick_dispatch_table.h"
+#include "scintillaquick_test_macros.h"
 
 #include "Scintilla.h"
 
@@ -29,15 +30,6 @@ namespace
 {
 
 int g_failures = 0;
-
-#define SQ_EXPECT(expr)                                                           \
-    do {                                                                          \
-        if (!(expr)) {                                                            \
-            std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr);  \
-            ++g_failures;                                                         \
-        }                                                                         \
-    }                                                                             \
-    while (0)
 
 using Scintilla::Internal::scene_graph_message_is_known_read_only;
 using Scintilla::Internal::scene_graph_update_request;
@@ -402,6 +394,20 @@ void test_tracked_scroll_width_reset_table()
     SQ_EXPECT(!tracked_scroll_width_should_reset(SCI_INSERTTEXT));
 }
 
+// Lock the invariant that the new scroll_width_reset field on
+// scene_graph_update_request_info_t is a faithful mirror of
+// tracked_scroll_width_should_reset(). Callers (ScintillaQuick_item::send)
+// rely on this, so a future refactor that drifts the two must fail loudly.
+void test_dispatch_struct_mirrors_scroll_width_reset_helper()
+{
+    constexpr unsigned int sweep_upper_bound = 4300;
+    for (unsigned int msg = SCI_START; msg <= sweep_upper_bound; ++msg) {
+        SQ_EXPECT(
+            scene_graph_update_request(msg).scroll_width_reset
+            == tracked_scroll_width_should_reset(msg));
+    }
+}
+
 // Exhaustive sweep over Scintilla's entire public message range.
 //
 // The property enforced here is the single structural invariant of
@@ -500,6 +506,7 @@ int main()
     test_unknown_messages_trigger_conservative_full_resync();
     test_read_only_and_mutating_lists_are_disjoint();
     test_tracked_scroll_width_reset_table();
+    test_dispatch_struct_mirrors_scroll_width_reset_helper();
     test_full_scintilla_message_range_is_classified();
 
     if (g_failures > 0) {
