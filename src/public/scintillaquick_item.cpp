@@ -1018,19 +1018,7 @@ void ScintillaQuick_item::mousePressEvent(QMouseEvent * event)
     }
 
     if (event->button() == Qt::LeftButton) {
-        bool shift = QGuiApplication::keyboardModifiers() & Qt::ShiftModifier;
-        bool ctrl  = QGuiApplication::keyboardModifiers() & Qt::ControlModifier;
-#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
-        // On X allow choice of rectangular modifier since most window
-        // managers grab alt + click for moving windows.
-        bool alt =
-            QGuiApplication::keyboardModifiers() &
-            modifierTranslated(m_core->m_rectangular_selection_modifier);
-#else
-        bool alt = QGuiApplication::keyboardModifiers() & Qt::AltModifier;
-#endif
-
-        m_core->ButtonDownWithModifiers(pos, m_elapsed_timer.elapsed(), ModifierFlags(shift, ctrl, alt));
+        m_core->ButtonDownWithModifiers(pos, m_elapsed_timer.elapsed(), ModifiersOfMouse());
 
         cursorChangedUpdateMarker();
         request_scene_graph_update(false, false, false);
@@ -1106,21 +1094,10 @@ void ScintillaQuick_item::mouseMoveEvent(QMouseEvent * event)
 {
     Point pos  = PointFromQPoint(event->pos());
 
-    bool shift = QGuiApplication::keyboardModifiers() & Qt::ShiftModifier;
-    bool ctrl  = QGuiApplication::keyboardModifiers() & Qt::ControlModifier;
-#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
-    // On X allow choice of rectangular modifier since most window
-    // managers grab alt + click for moving windows.
-    bool alt   = QGuiApplication::keyboardModifiers() & modifierTranslated(m_core->m_rectangular_selection_modifier);
-#else
-    bool alt   = QGuiApplication::keyboardModifiers() & Qt::AltModifier;
-#endif
-
-    const KeyMod modifiers                = ModifierFlags(shift, ctrl, alt);
     const int previous_first_visible_line = static_cast<int>(send(SCI_GETFIRSTVISIBLELINE));
     const int previous_x_offset           = static_cast<int>(send(SCI_GETXOFFSET));
 
-    m_core->ButtonMoveWithModifiers(pos, m_elapsed_timer.elapsed(), modifiers);
+    m_core->ButtonMoveWithModifiers(pos, m_elapsed_timer.elapsed(), ModifiersOfMouse());
 
     cursorChangedUpdateMarker();
     const int current_first_visible_line = static_cast<int>(send(SCI_GETFIRSTVISIBLELINE));
@@ -1986,6 +1963,21 @@ KeyMod ScintillaQuick_item::ModifiersOfKeyboard()
     return ModifierFlags(shift, ctrl, alt);
 }
 
+KeyMod ScintillaQuick_item::ModifiersOfMouse() const
+{
+    const auto kbd_modifiers = QGuiApplication::keyboardModifiers();
+    const bool shift = kbd_modifiers & Qt::ShiftModifier;
+    const bool ctrl  = kbd_modifiers & Qt::ControlModifier;
+#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
+    // On X allow choice of rectangular modifier since most window
+    // managers grab alt + click for moving windows.
+    const bool alt = kbd_modifiers & modifierTranslated(m_core->m_rectangular_selection_modifier);
+#else
+    const bool alt = kbd_modifiers & Qt::AltModifier;
+#endif
+    return ModifierFlags(shift, ctrl, alt);
+}
+
 QString ScintillaQuick_item::getText() const
 {
     const int text_length = static_cast<int>(send(SCI_GETTEXTLENGTH));
@@ -2039,8 +2031,7 @@ int ScintillaQuick_item::getLogicalHeight() const
 
 int ScintillaQuick_item::getCharHeight() const
 {
-    int char_height = send(SCI_TEXTHEIGHT);
-    return char_height;
+    return static_cast<int>(send(SCI_TEXTHEIGHT));
 }
 
 int ScintillaQuick_item::getCharWidth() const
@@ -2051,8 +2042,7 @@ int ScintillaQuick_item::getCharWidth() const
 
 int ScintillaQuick_item::getFirstVisibleLine() const
 {
-    int first_line = send(SCI_GETFIRSTVISIBLELINE);
-    return first_line;
+    return static_cast<int>(send(SCI_GETFIRSTVISIBLELINE));
 }
 
 void ScintillaQuick_item::setFirstVisibleLine(int line_no)
@@ -2063,8 +2053,7 @@ void ScintillaQuick_item::setFirstVisibleLine(int line_no)
 
 int ScintillaQuick_item::getTotalLines() const
 {
-    int line_count = send(SCI_GETLINECOUNT);
-    return line_count;
+    return static_cast<int>(send(SCI_GETLINECOUNT));
 }
 
 int ScintillaQuick_item::getFirstVisibleColumn() const
@@ -2087,8 +2076,7 @@ int ScintillaQuick_item::getTotalColumns() const
 
 int ScintillaQuick_item::getVisibleLines() const
 {
-    int count = send(SCI_LINESONSCREEN);
-    return count;
+    return static_cast<int>(send(SCI_LINESONSCREEN));
 }
 
 int ScintillaQuick_item::getVisibleColumns() const
