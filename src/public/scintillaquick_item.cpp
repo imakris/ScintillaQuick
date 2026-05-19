@@ -509,10 +509,10 @@ sptr_t ScintillaQuick_item::send(
     ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
 
     const sptr_t result = m_core->WndProc(static_cast<Message>(i_message), w_param, l_param);
-    if (tracked_scroll_width_should_reset(i_message)) {
+    const scene_graph_update_request_info_t update_request = scene_graph_update_request(i_message);
+    if (update_request.scroll_width_reset) {
         self->reset_tracked_scroll_width();
     }
-    const scene_graph_update_request_info_t update_request = scene_graph_update_request(i_message);
     // Re-entry guard (defence-in-depth): `syncQuickViewProperties()`
     // itself issues SCI_* queries through `send()`. If any of those
     // queries is not in the read-only allow-list, the dispatch's

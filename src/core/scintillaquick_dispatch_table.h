@@ -30,6 +30,11 @@ struct scene_graph_update_request_info_t
     bool static_content_dirty = false;
     bool needs_style_sync     = false;
     bool scrolling            = false;
+    // Set by scene_graph_update_request() to mirror
+    // tracked_scroll_width_should_reset(message) so callers can consult a
+    // single dispatch result instead of issuing two parallel classifier
+    // calls for the same message.
+    bool scroll_width_reset   = false;
 };
 
 // Known read-only / query-like Scintilla messages that are safe to treat
@@ -338,7 +343,14 @@ inline bool scene_graph_message_is_known_read_only(unsigned int i_message)
     }
 }
 
-inline scene_graph_update_request_info_t scene_graph_update_request(unsigned int i_message)
+namespace detail
+{
+
+// Historical four-field classifier. Public callers should use
+// scene_graph_update_request() instead; the wrapper combines this with
+// tracked_scroll_width_should_reset() so the entire dispatch result
+// flows through one struct.
+inline scene_graph_update_request_info_t scene_graph_update_request_classify(unsigned int i_message)
 {
     switch (i_message) {
         case SCI_SETXOFFSET:
@@ -521,6 +533,8 @@ inline scene_graph_update_request_info_t scene_graph_update_request(unsigned int
     return {true, true, true, false};
 }
 
+} // namespace detail
+
 inline bool tracked_scroll_width_should_reset(unsigned int i_message)
 {
     switch (i_message) {
@@ -545,6 +559,17 @@ inline bool tracked_scroll_width_should_reset(unsigned int i_message)
         default:
             return false;
     }
+}
+
+// Single dispatch entry point. Combines the historical four-field
+// classification (detail::scene_graph_update_request_classify) with the
+// scroll-width reset predicate so callers consult one struct instead of
+// issuing two parallel classifier calls for the same message.
+inline scene_graph_update_request_info_t scene_graph_update_request(unsigned int i_message)
+{
+    scene_graph_update_request_info_t info = detail::scene_graph_update_request_classify(i_message);
+    info.scroll_width_reset = tracked_scroll_width_should_reset(i_message);
+    return info;
 }
 
 } // namespace Scintilla::Internal
