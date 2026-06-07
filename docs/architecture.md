@@ -199,5 +199,9 @@ What it is not intended to be:
 
 This document is intended to stay stable and public.
 
-Transient implementation notes, work packages, and profiling checklists age
-quickly and are not part of the public documentation set.
+Maintainer contracts that change with implementation details live in
+[`maintenance_invariants.md`](maintenance_invariants.md). Work packages and
+validation gates live in
+[`review_remediation_plan.md`](review_remediation_plan.md). Platform-window
+ownership rules live in
+[`platform_window_ownership.md`](platform_window_ownership.md).

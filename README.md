@@ -164,11 +164,19 @@ Notes:
 - [`docs/`](docs): public project documentation
 - [`third_party/`](third_party): vendored dependencies
 
+ScintillaQuick-specific work should normally stay outside
+[`third_party/scintilla/`](third_party/scintilla). That tree is vendored
+upstream Scintilla code and should be changed only when intentionally updating
+or patching the dependency.
+
 ## Documentation
 
 - [Getting Started](docs/getting_started.md)
 - [Architecture](docs/architecture.md)
 - [Known Limitations](docs/limitations.md)
+- [Maintenance Invariants](docs/maintenance_invariants.md)
+- [Review Remediation Plan](docs/review_remediation_plan.md)
+- [Platform Window Ownership](docs/platform_window_ownership.md)
 
 ## License
 
