@@ -21,6 +21,8 @@
 
 #include "Scintilla.h"
 
+#include <cstddef>
+
 namespace Scintilla::Internal
 {
 
@@ -30,500 +32,553 @@ struct scene_graph_update_request_info_t
     bool static_content_dirty = false;
     bool needs_style_sync     = false;
     bool scrolling            = false;
-    // Set by scene_graph_update_request() to mirror
-    // tracked_scroll_width_should_reset(message) so callers can consult a
-    // single dispatch result instead of issuing two parallel classifier
-    // calls for the same message.
+    // Set by scene_graph_update_request() from the same rule entry as
+    // the visual update classification so scroll-width behavior cannot
+    // drift into a parallel switch.
     bool scroll_width_reset   = false;
 };
-
-// Known read-only / query-like Scintilla messages that are safe to treat
-// as non-visual. Messages listed here take the fast path and skip
-// scene-graph resync.
-//
-// CRITICAL invariant: every SCI_* message that ScintillaQuick_item or its
-// helper getters call INTERNALLY via `send()` must appear in this list
-// if it is a read-only query. If it does not, the conservative default
-// in `scene_graph_update_request()` will trigger a full resync, which
-// in turn calls `syncQuickViewProperties()` which itself issues SCI_*
-// queries through `send()` -- recursing until the stack overflows.
-//
-// The "internal callers" we must cover today are:
-//
-//   * ScintillaQuick_item::syncQuickViewProperties()
-//   * ScintillaQuick_item::getCharHeight() / getCharWidth()
-//   * ScintillaQuick_item::getVisibleLines() / getVisibleColumns()
-//   * ScintillaQuick_item::getFirstVisibleColumn() / getFirstVisibleLine()
-//   * ScintillaQuick_item::getTotalLines() / getTotalColumns()
-//   * ScintillaQuick_item::getText() / getReadonly()
-//   * style_attributes_for() (helper in ScintillaQuick_item.cpp)
-//   * ProcessScintillaContextMenu() and IME query helpers
-//
-// Public callers also routinely use `send()` for getter-style queries
-// such as SCI_GETLENGTH / SCI_GETMODEVENTMASK / SCI_GETSELECTIONS.
-// These must NOT trigger fake content invalidation or full scene-graph
-// rebuilds just because they are not on the small internal hot-path
-// allow-list; they are semantically queries and do not change what is
-// rendered.
-inline bool scene_graph_message_is_known_getter(unsigned int i_message)
-{
-    switch (i_message) {
-        case SCI_GETLENGTH:
-        case SCI_GETCHARAT:
-        case SCI_GETCURRENTPOS:
-        case SCI_GETANCHOR:
-        case SCI_GETSTYLEAT:
-        case SCI_GETSTYLEINDEXAT:
-        case SCI_GETSTYLEDTEXT:
-        case SCI_GETSTYLEDTEXTFULL:
-        case SCI_GETUNDOCOLLECTION:
-        case SCI_GETVIEWWS:
-        case SCI_GETTABDRAWMODE:
-        case SCI_GETCURLINE:
-        case SCI_GETENDSTYLED:
-        case SCI_GETEOLMODE:
-        case SCI_GETBUFFEREDDRAW:
-        case SCI_GETTABWIDTH:
-        case SCI_GETTABMINIMUMWIDTH:
-        case SCI_GETNEXTTABSTOP:
-        case SCI_GETFONTLOCALE:
-        case SCI_GETIMEINTERACTION:
-        case SCI_GETMARGINTYPEN:
-        case SCI_GETMARGINWIDTHN:
-        case SCI_GETMARGINMASKN:
-        case SCI_GETMARGINSENSITIVEN:
-        case SCI_GETMARGINCURSORN:
-        case SCI_GETMARGINBACKN:
-        case SCI_GETMARGINS:
-        case SCI_GETELEMENTCOLOUR:
-        case SCI_GETELEMENTISSET:
-        case SCI_GETELEMENTALLOWSTRANSLUCENT:
-        case SCI_GETELEMENTBASECOLOUR:
-        case SCI_GETSELALPHA:
-        case SCI_GETSELEOLFILLED:
-        case SCI_GETSELECTIONLAYER:
-        case SCI_GETCARETLINELAYER:
-        case SCI_GETCARETLINEHIGHLIGHTSUBLINE:
-        case SCI_GETCARETPERIOD:
-        case SCI_GETWORDCHARS:
-        case SCI_GETCHARACTERCATEGORYOPTIMIZATION:
-        case SCI_GETWHITESPACESIZE:
-        case SCI_GETLINESTATE:
-        case SCI_GETMAXLINESTATE:
-        case SCI_GETCARETLINEVISIBLE:
-        case SCI_GETCARETLINEBACK:
-        case SCI_GETCARETLINEFRAME:
-        case SCI_GETINDENT:
-        case SCI_GETUSETABS:
-        case SCI_GETLINEINDENTATION:
-        case SCI_GETLINEINDENTPOSITION:
-        case SCI_GETCOLUMN:
-        case SCI_GETHSCROLLBAR:
-        case SCI_GETINDENTATIONGUIDES:
-        case SCI_GETHIGHLIGHTGUIDE:
-        case SCI_GETLINEENDPOSITION:
-        case SCI_GETCODEPAGE:
-        case SCI_GETCARETFORE:
-        case SCI_GETREADONLY:
-        case SCI_GETSELECTIONSTART:
-        case SCI_GETSELECTIONEND:
-        case SCI_GETPRINTMAGNIFICATION:
-        case SCI_GETPRINTCOLOURMODE:
-        case SCI_GETCHANGEHISTORY:
-        case SCI_GETFIRSTVISIBLELINE:
-        case SCI_GETLINE:
-        case SCI_GETLINECOUNT:
-        case SCI_GETMARGINLEFT:
-        case SCI_GETMARGINRIGHT:
-        case SCI_GETMODIFY:
-        case SCI_GETSELTEXT:
-        case SCI_GETTEXTRANGE:
-        case SCI_GETTEXTRANGEFULL:
-        case SCI_GETSELECTIONHIDDEN:
-        case SCI_GETTEXT:
-        case SCI_GETTEXTLENGTH:
-        case SCI_GETDIRECTFUNCTION:
-        case SCI_GETDIRECTSTATUSFUNCTION:
-        case SCI_GETDIRECTPOINTER:
-        case SCI_GETOVERTYPE:
-        case SCI_GETCARETWIDTH:
-        case SCI_GETTARGETSTART:
-        case SCI_GETTARGETSTARTVIRTUALSPACE:
-        case SCI_GETTARGETEND:
-        case SCI_GETTARGETENDVIRTUALSPACE:
-        case SCI_GETTARGETTEXT:
-        case SCI_GETSEARCHFLAGS:
-        case SCI_GETFOLDLEVEL:
-        case SCI_GETLASTCHILD:
-        case SCI_GETFOLDPARENT:
-        case SCI_GETLINEVISIBLE:
-        case SCI_GETALLLINESVISIBLE:
-        case SCI_GETFOLDEXPANDED:
-        case SCI_GETDEFAULTFOLDDISPLAYTEXT:
-        case SCI_GETAUTOMATICFOLD:
-        case SCI_GETTABINDENTS:
-        case SCI_GETBACKSPACEUNINDENTS:
-        case SCI_GETMOUSEDWELLTIME:
-        case SCI_GETIDLESTYLING:
-        case SCI_GETWRAPMODE:
-        case SCI_GETWRAPVISUALFLAGS:
-        case SCI_GETWRAPVISUALFLAGSLOCATION:
-        case SCI_GETWRAPSTARTINDENT:
-        case SCI_GETWRAPINDENTMODE:
-        case SCI_GETLAYOUTCACHE:
-        case SCI_GETSCROLLWIDTH:
-        case SCI_GETSCROLLWIDTHTRACKING:
-        case SCI_GETENDATLASTLINE:
-        case SCI_GETVSCROLLBAR:
-        case SCI_GETPHASESDRAW:
-        case SCI_GETFONTQUALITY:
-        case SCI_GETMULTIPASTE:
-        case SCI_GETTAG:
-        case SCI_GETACCESSIBILITY:
-        case SCI_GETVIEWEOL:
-        case SCI_GETDOCPOINTER:
-        case SCI_GETEDGECOLUMN:
-        case SCI_GETEDGEMODE:
-        case SCI_GETEDGECOLOUR:
-        case SCI_GETMULTIEDGECOLUMN:
-        case SCI_GETZOOM:
-        case SCI_GETDOCUMENTOPTIONS:
-        case SCI_GETMODEVENTMASK:
-        case SCI_GETCOMMANDEVENTS:
-        case SCI_GETFOCUS:
-        case SCI_GETSTATUS:
-        case SCI_GETMOUSEDOWNCAPTURES:
-        case SCI_GETMOUSEWHEELCAPTURES:
-        case SCI_GETCURSOR:
-        case SCI_GETCONTROLCHARSYMBOL:
-        case SCI_GETXOFFSET:
-        case SCI_GETPRINTWRAPMODE:
-        case SCI_GETHOTSPOTACTIVEFORE:
-        case SCI_GETHOTSPOTACTIVEBACK:
-        case SCI_GETHOTSPOTACTIVEUNDERLINE:
-        case SCI_GETHOTSPOTSINGLELINE:
-        case SCI_GETSELECTIONMODE:
-        case SCI_GETMOVEEXTENDSSELECTION:
-        case SCI_GETLINESELSTARTPOSITION:
-        case SCI_GETLINESELENDPOSITION:
-        case SCI_GETWHITESPACECHARS:
-        case SCI_GETPUNCTUATIONCHARS:
-        case SCI_GETCARETSTICKY:
-        case SCI_GETPASTECONVERTENDINGS:
-        case SCI_GETCARETLINEBACKALPHA:
-        case SCI_GETCARETSTYLE:
-        case SCI_GETINDICATORCURRENT:
-        case SCI_GETINDICATORVALUE:
-        case SCI_GETPOSITIONCACHE:
-        case SCI_GETLAYOUTTHREADS:
-        case SCI_GETCHARACTERPOINTER:
-        case SCI_GETRANGEPOINTER:
-        case SCI_GETGAPPOSITION:
-        case SCI_GETEXTRAASCENT:
-        case SCI_GETEXTRADESCENT:
-        case SCI_GETMARGINOPTIONS:
-        case SCI_GETMOUSESELECTIONRECTANGULARSWITCH:
-        case SCI_GETMULTIPLESELECTION:
-        case SCI_GETADDITIONALSELECTIONTYPING:
-        case SCI_GETADDITIONALCARETSBLINK:
-        case SCI_GETADDITIONALCARETSVISIBLE:
-        case SCI_GETSELECTIONS:
-        case SCI_GETSELECTIONEMPTY:
-        case SCI_GETMAINSELECTION:
-        case SCI_GETSELECTIONNCARET:
-        case SCI_GETSELECTIONNANCHOR:
-        case SCI_GETSELECTIONNCARETVIRTUALSPACE:
-        case SCI_GETSELECTIONNANCHORVIRTUALSPACE:
-        case SCI_GETSELECTIONNSTART:
-        case SCI_GETSELECTIONNSTARTVIRTUALSPACE:
-        case SCI_GETSELECTIONNENDVIRTUALSPACE:
-        case SCI_GETSELECTIONNEND:
-        case SCI_GETRECTANGULARSELECTIONCARET:
-        case SCI_GETRECTANGULARSELECTIONANCHOR:
-        case SCI_GETRECTANGULARSELECTIONCARETVIRTUALSPACE:
-        case SCI_GETRECTANGULARSELECTIONANCHORVIRTUALSPACE:
-        case SCI_GETVIRTUALSPACEOPTIONS:
-        case SCI_GETRECTANGULARSELECTIONMODIFIER:
-        case SCI_GETADDITIONALSELALPHA:
-        case SCI_GETADDITIONALCARETFORE:
-        case SCI_GETIDENTIFIER:
-        case SCI_GETTECHNOLOGY:
-        case SCI_GETCARETLINEVISIBLEALWAYS:
-        case SCI_GETLINEENDTYPESALLOWED:
-        case SCI_GETLINEENDTYPESACTIVE:
-        case SCI_GETREPRESENTATION:
-        case SCI_GETREPRESENTATIONAPPEARANCE:
-        case SCI_GETREPRESENTATIONCOLOUR:
-        case SCI_GETLINECHARACTERINDEX:
-        case SCI_GETLEXER:
-        case SCI_GETPROPERTY:
-        case SCI_GETPROPERTYEXPANDED:
-        case SCI_GETPROPERTYINT:
-        case SCI_GETLEXERLANGUAGE:
-        case SCI_GETLINEENDTYPESSUPPORTED:
-        case SCI_GETSUBSTYLESSTART:
-        case SCI_GETSUBSTYLESLENGTH:
-        case SCI_GETSTYLEFROMSUBSTYLE:
-        case SCI_GETPRIMARYSTYLEFROMSTYLE:
-        case SCI_GETSUBSTYLEBASES:
-        case SCI_GETNAMEDSTYLES:
-        case SCI_GETBIDIRECTIONAL:
-            return true;
-        default:
-            return false;
-    }
-}
-
-inline bool scene_graph_message_is_known_read_only(unsigned int i_message)
-{
-    if (scene_graph_message_is_known_getter(i_message)) {
-        return true;
-    }
-
-    switch (i_message) {
-        // Non-GET query helpers with no visual side effects.
-        case SCI_CANREDO:
-        case SCI_CANPASTE:
-        case SCI_CANUNDO:
-        case SCI_FINDTEXT:
-        case SCI_FINDTEXTFULL:
-        // Geometry / layout queries called from getCharHeight(),
-        // getCharWidth(), getVisibleLines() and the mouse-event / IME
-        // helpers. Omitting any of these produced a stack-overflow
-        // recursion when the conservative resync default was added,
-        // because `syncQuickViewProperties()` re-enters `send()` via
-        // these same calls.
-        case SCI_TEXTHEIGHT:
-        case SCI_TEXTWIDTH:
-        case SCI_LINESONSCREEN:
-        case SCI_LINEFROMPOSITION:
-        case SCI_POSITIONFROMPOINT:
-        case SCI_POSITIONFROMPOINTCLOSE:
-        case SCI_POINTXFROMPOSITION:
-        case SCI_POINTYFROMPOSITION:
-        case SCI_WORDSTARTPOSITION:
-        case SCI_WORDENDPOSITION:
-        case SCI_BRACEMATCH:
-        case SCI_BRACEMATCHNEXT:
-        case SCI_POSITIONRELATIVE:
-        case SCI_POSITIONRELATIVECODEUNITS:
-        case SCI_CHARPOSITIONFROMPOINT:
-        case SCI_CHARPOSITIONFROMPOINTCLOSE:
-        case SCI_COUNTCHARACTERS:
-        case SCI_COUNTCODEUNITS:
-        // Line / position lookups. These are pure read-only queries but
-        // are not named SCI_GET*, so they fell through to the conservative
-        // default branch and silently marked the scene graph dirty. That
-        // defeated the vertical-scroll reuse fast path in
-        // `build_render_snapshot()` whenever an application (or a
-        // benchmark verifier) inspected line / position state between
-        // scroll steps: each query set `content_modified_since_last_capture`
-        // and forced the next frame to take a full recapture instead of
-        // the buffer-translate fast path. Classifying them correctly as
-        // read-only is both semantically accurate and unlocks the
-        // scroll-reuse path they were inadvertently disabling.
-        case SCI_POSITIONFROMLINE:
-        case SCI_LINELENGTH:
-        case SCI_VISIBLEFROMDOCLINE:
-        case SCI_DOCLINEFROMVISIBLE:
-        case SCI_WRAPCOUNT:
-        // Style queries called from style_attributes_for() so that
-        // per-style font / colour sync during
-        // `syncQuickViewProperties()` does not recurse.
-        case SCI_STYLEGETFORE:
-        case SCI_STYLEGETBACK:
-        case SCI_STYLEGETSIZE:
-        case SCI_STYLEGETSIZEFRACTIONAL:
-        case SCI_STYLEGETWEIGHT:
-        case SCI_STYLEGETITALIC:
-        case SCI_STYLEGETUNDERLINE:
-            return true;
-        default:
-            return false;
-    }
-}
 
 namespace detail
 {
 
-// Historical four-field classifier. Public callers should use
-// scene_graph_update_request() instead; the wrapper combines this with
-// tracked_scroll_width_should_reset() so the entire dispatch result
-// flows through one struct.
-inline scene_graph_update_request_info_t scene_graph_update_request_classify(unsigned int i_message)
+enum class Dispatch_effect : unsigned char
 {
-    switch (i_message) {
-        case SCI_SETXOFFSET:
-            return {true, true, false, false};
+    Read_only,
+    Overlay,
+    Static_content,
+    Static_content_and_style,
+    Scroll,
+};
 
-        case SCI_SETDOCPOINTER:
-            return {true, true, true, false};
+struct Message_rule
+{
+    unsigned int message;
+    Dispatch_effect effect;
+    bool scroll_width_reset;
+    bool known_getter;
+};
 
-        case SCI_SETFIRSTVISIBLELINE:
-            return {true, true, true, true};
+// Single source of truth for classified messages. The array is sorted
+// by numeric SCI_* id and looked up with binary search. Messages not
+// listed here retain the conservative full-resync fallback.
+//
+// Overlay rules include caret/selection movement and caret/selection
+// colour changes: they need a repaint, but they must not dirty static
+// text/style content or force property/style synchronization.
+inline constexpr Message_rule k_message_rules[] = {
+    {SCI_INSERTTEXT, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_CLEARALL, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_GETLENGTH, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCHARAT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCURRENTPOS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETANCHOR, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSTYLEAT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSTYLEDTEXT, Dispatch_effect::Read_only, false, true},
+    {SCI_CANREDO, Dispatch_effect::Read_only, false, false},
+    {SCI_MARKERLINEFROMHANDLE, Dispatch_effect::Read_only, false, false},
+    {SCI_MARKERDELETEHANDLE, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_GETUNDOCOLLECTION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETVIEWWS, Dispatch_effect::Read_only, false, true},
+    {SCI_POSITIONFROMPOINT, Dispatch_effect::Read_only, false, false},
+    {SCI_POSITIONFROMPOINTCLOSE, Dispatch_effect::Read_only, false, false},
+    {SCI_GOTOPOS, Dispatch_effect::Overlay, false, false},
+    {SCI_SETANCHOR, Dispatch_effect::Overlay, false, false},
+    {SCI_GETCURLINE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETENDSTYLED, Dispatch_effect::Read_only, false, true},
+    {SCI_GETEOLMODE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETBUFFEREDDRAW, Dispatch_effect::Read_only, false, true},
+    {SCI_SETTABWIDTH, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_GETSTYLEINDEXAT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETTEXTRANGEFULL, Dispatch_effect::Read_only, false, true},
+    {SCI_MARKERDEFINE, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_MARKERSETFORE, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_MARKERSETBACK, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_MARKERADD, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_MARKERDELETE, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_MARKERDELETEALL, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_MARKERGET, Dispatch_effect::Read_only, false, false},
+    {SCI_MARKERNEXT, Dispatch_effect::Read_only, false, false},
+    {SCI_MARKERPREVIOUS, Dispatch_effect::Read_only, false, false},
+    {SCI_MARKERDEFINEPIXMAP, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_STYLECLEARALL, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_STYLESETFORE, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_STYLESETBACK, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_STYLESETBOLD, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_STYLESETITALIC, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_STYLESETSIZE, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_STYLESETFONT, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_STYLESETEOLFILLED, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_STYLESETUNDERLINE, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_STYLESETSIZEFRACTIONAL, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_STYLEGETSIZEFRACTIONAL, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLESETWEIGHT, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_STYLEGETWEIGHT, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLESETCHARACTERSET, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_SETSELFORE, Dispatch_effect::Overlay, false, false},
+    {SCI_SETSELBACK, Dispatch_effect::Overlay, false, false},
+    {SCI_SETCARETFORE, Dispatch_effect::Overlay, false, false},
+    {SCI_STYLESETVISIBLE, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_GETCARETPERIOD, Dispatch_effect::Read_only, false, true},
+    {SCI_INDICGETSTYLE, Dispatch_effect::Read_only, false, false},
+    {SCI_INDICGETFORE, Dispatch_effect::Read_only, false, false},
+    {SCI_GETWHITESPACESIZE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONHIDDEN, Dispatch_effect::Read_only, false, true},
+#ifdef SCI_GETSTYLEBITS
+    {SCI_GETSTYLEBITS, Dispatch_effect::Read_only, false, true},
+#endif
+    {SCI_GETLINESTATE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMAXLINESTATE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCARETLINEVISIBLE, Dispatch_effect::Read_only, false, true},
+    {SCI_SETCARETLINEVISIBLE, Dispatch_effect::Overlay, false, false},
+    {SCI_GETCARETLINEBACK, Dispatch_effect::Read_only, false, true},
+    {SCI_SETCARETLINEBACK, Dispatch_effect::Overlay, false, false},
+    {SCI_AUTOCACTIVE, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCPOSSTART, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCGETSEPARATOR, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCGETCANCELATSTART, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCGETCHOOSESINGLE, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCGETIGNORECASE, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCGETAUTOHIDE, Dispatch_effect::Read_only, false, false},
+    {SCI_GETTABWIDTH, Dispatch_effect::Read_only, false, true},
+    {SCI_GETINDENT, Dispatch_effect::Read_only, false, true},
+    {SCI_SETUSETABS, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_GETUSETABS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLINEINDENTATION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLINEINDENTPOSITION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCOLUMN, Dispatch_effect::Read_only, false, true},
+    {SCI_GETHSCROLLBAR, Dispatch_effect::Read_only, false, true},
+    {SCI_GETINDENTATIONGUIDES, Dispatch_effect::Read_only, false, true},
+    {SCI_GETHIGHLIGHTGUIDE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLINEENDPOSITION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCODEPAGE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCARETFORE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETREADONLY, Dispatch_effect::Read_only, false, true},
+    {SCI_SETCURRENTPOS, Dispatch_effect::Overlay, false, false},
+    {SCI_GETSELECTIONSTART, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONEND, Dispatch_effect::Read_only, false, true},
+    {SCI_GETPRINTMAGNIFICATION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETPRINTCOLOURMODE, Dispatch_effect::Read_only, false, true},
+    {SCI_FINDTEXT, Dispatch_effect::Read_only, false, false},
+    {SCI_GETFIRSTVISIBLELINE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLINE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLINECOUNT, Dispatch_effect::Read_only, false, true},
+    {SCI_SETMARGINLEFT, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_GETMARGINLEFT, Dispatch_effect::Read_only, false, true},
+    {SCI_SETMARGINRIGHT, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_GETMARGINRIGHT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMODIFY, Dispatch_effect::Read_only, false, true},
+    {SCI_SETSEL, Dispatch_effect::Overlay, false, false},
+    {SCI_GETSELTEXT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETTEXTRANGE, Dispatch_effect::Read_only, false, true},
+    {SCI_POINTXFROMPOSITION, Dispatch_effect::Read_only, false, false},
+    {SCI_POINTYFROMPOSITION, Dispatch_effect::Read_only, false, false},
+    {SCI_LINEFROMPOSITION, Dispatch_effect::Read_only, false, false},
+    {SCI_POSITIONFROMLINE, Dispatch_effect::Read_only, false, false},
+    {SCI_REPLACESEL, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_SETREADONLY, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_CANPASTE, Dispatch_effect::Read_only, false, false},
+    {SCI_CANUNDO, Dispatch_effect::Read_only, false, false},
+    {SCI_SETTEXT, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_GETTEXT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETTEXTLENGTH, Dispatch_effect::Read_only, false, true},
+    {SCI_GETDIRECTFUNCTION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETDIRECTPOINTER, Dispatch_effect::Read_only, false, true},
+    {SCI_GETOVERTYPE, Dispatch_effect::Read_only, false, true},
+    {SCI_SETCARETWIDTH, Dispatch_effect::Overlay, false, false},
+    {SCI_GETCARETWIDTH, Dispatch_effect::Read_only, false, true},
+    {SCI_GETTARGETSTART, Dispatch_effect::Read_only, false, true},
+    {SCI_GETTARGETEND, Dispatch_effect::Read_only, false, true},
+    {SCI_FINDTEXTFULL, Dispatch_effect::Read_only, false, false},
+    {SCI_GETSEARCHFLAGS, Dispatch_effect::Read_only, false, true},
+    {SCI_CALLTIPACTIVE, Dispatch_effect::Read_only, false, false},
+    {SCI_CALLTIPPOSSTART, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCGETMAXWIDTH, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCGETMAXHEIGHT, Dispatch_effect::Read_only, false, false},
+    {SCI_VISIBLEFROMDOCLINE, Dispatch_effect::Read_only, false, false},
+    {SCI_DOCLINEFROMVISIBLE, Dispatch_effect::Read_only, false, false},
+    {SCI_GETFOLDLEVEL, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLASTCHILD, Dispatch_effect::Read_only, false, true},
+    {SCI_GETFOLDPARENT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLINEVISIBLE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETFOLDEXPANDED, Dispatch_effect::Read_only, false, true},
+    {SCI_WRAPCOUNT, Dispatch_effect::Read_only, false, false},
+    {SCI_GETALLLINESVISIBLE, Dispatch_effect::Read_only, false, true},
+    {SCI_SETMARGINTYPEN, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_GETMARGINTYPEN, Dispatch_effect::Read_only, false, true},
+    {SCI_SETMARGINWIDTHN, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_GETMARGINWIDTHN, Dispatch_effect::Read_only, false, true},
+    {SCI_SETMARGINMASKN, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_GETMARGINMASKN, Dispatch_effect::Read_only, false, true},
+    {SCI_SETMARGINSENSITIVEN, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_GETMARGINSENSITIVEN, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMARGINCURSORN, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMARGINBACKN, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMARGINS, Dispatch_effect::Read_only, false, true},
+    {SCI_STYLEGETCHECKMONOSPACED, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETINVISIBLEREPRESENTATION, Dispatch_effect::Read_only, false, false},
+    {SCI_GETTABINDENTS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETBACKSPACEUNINDENTS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMOUSEDWELLTIME, Dispatch_effect::Read_only, false, true},
+    {SCI_WORDSTARTPOSITION, Dispatch_effect::Read_only, false, false},
+    {SCI_WORDENDPOSITION, Dispatch_effect::Read_only, false, false},
+    {SCI_SETWRAPMODE, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_GETWRAPMODE, Dispatch_effect::Read_only, false, true},
+    {SCI_AUTOCGETDROPRESTOFWORD, Dispatch_effect::Read_only, false, false},
+    {SCI_GETLAYOUTCACHE, Dispatch_effect::Read_only, false, true},
+    {SCI_SETSCROLLWIDTH, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_GETSCROLLWIDTH, Dispatch_effect::Read_only, false, true},
+    {SCI_TEXTWIDTH, Dispatch_effect::Read_only, false, false},
+    {SCI_GETENDATLASTLINE, Dispatch_effect::Read_only, false, true},
+    {SCI_TEXTHEIGHT, Dispatch_effect::Read_only, false, false},
+    {SCI_GETVSCROLLBAR, Dispatch_effect::Read_only, false, true},
+    {SCI_APPENDTEXT, Dispatch_effect::Static_content_and_style, false, false},
+#ifdef SCI_GETTWOPHASEDRAW
+    {SCI_GETTWOPHASEDRAW, Dispatch_effect::Read_only, false, true},
+#endif
+    {SCI_AUTOCGETTYPESEPARATOR, Dispatch_effect::Read_only, false, false},
+    {SCI_MARKERSETBACKSELECTED, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_MARKERENABLEHIGHLIGHT, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_MARKERSETFORETRANSLUCENT, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_MARKERSETBACKTRANSLUCENT, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_MARKERSETBACKSELECTEDTRANSLUCENT, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_LINEDOWN, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEDOWNEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEUP, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEUPEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_CHARLEFT, Dispatch_effect::Overlay, false, false},
+    {SCI_CHARLEFTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_CHARRIGHT, Dispatch_effect::Overlay, false, false},
+    {SCI_CHARRIGHTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDLEFT, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDLEFTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDRIGHT, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDRIGHTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_HOME, Dispatch_effect::Overlay, false, false},
+    {SCI_HOMEEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEEND, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEENDEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_DOCUMENTSTART, Dispatch_effect::Overlay, false, false},
+    {SCI_DOCUMENTSTARTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_DOCUMENTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_DOCUMENTENDEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_PAGEUP, Dispatch_effect::Overlay, false, false},
+    {SCI_PAGEUPEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_PAGEDOWN, Dispatch_effect::Overlay, false, false},
+    {SCI_PAGEDOWNEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_VCHOME, Dispatch_effect::Overlay, false, false},
+    {SCI_VCHOMEEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_HOMEDISPLAY, Dispatch_effect::Overlay, false, false},
+    {SCI_HOMEDISPLAYEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEENDDISPLAY, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEENDDISPLAYEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_HOMEWRAP, Dispatch_effect::Overlay, false, false},
+    {SCI_LINELENGTH, Dispatch_effect::Read_only, false, false},
+    {SCI_BRACEMATCH, Dispatch_effect::Read_only, false, false},
+    {SCI_GETVIEWEOL, Dispatch_effect::Read_only, false, true},
+    {SCI_GETDOCPOINTER, Dispatch_effect::Read_only, false, true},
+    {SCI_SETDOCPOINTER, Dispatch_effect::Static_content_and_style, true, false},
+    {SCI_GETEDGECOLUMN, Dispatch_effect::Read_only, false, true},
+    {SCI_GETEDGEMODE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETEDGECOLOUR, Dispatch_effect::Read_only, false, true},
+    {SCI_BRACEMATCHNEXT, Dispatch_effect::Read_only, false, false},
+    {SCI_LINESONSCREEN, Dispatch_effect::Read_only, false, false},
+    {SCI_SELECTIONISRECTANGLE, Dispatch_effect::Read_only, false, false},
+    {SCI_GETZOOM, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMODEVENTMASK, Dispatch_effect::Read_only, false, true},
+    {SCI_GETDOCUMENTOPTIONS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETFOCUS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSTATUS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMOUSEDOWNCAPTURES, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCURSOR, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCONTROLCHARSYMBOL, Dispatch_effect::Read_only, false, true},
+    {SCI_WORDPARTLEFT, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDPARTLEFTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDPARTRIGHT, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDPARTRIGHTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_SETXOFFSET, Dispatch_effect::Static_content, false, false},
+    {SCI_GETXOFFSET, Dispatch_effect::Read_only, false, true},
+    {SCI_GETPRINTWRAPMODE, Dispatch_effect::Read_only, false, true},
+    {SCI_POSITIONBEFORE, Dispatch_effect::Read_only, false, false},
+    {SCI_POSITIONAFTER, Dispatch_effect::Read_only, false, false},
+    {SCI_GETSELECTIONMODE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLINESELSTARTPOSITION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLINESELENDPOSITION, Dispatch_effect::Read_only, false, true},
+    {SCI_LINEDOWNRECTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEUPRECTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_CHARLEFTRECTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_CHARRIGHTRECTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_HOMERECTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_VCHOMERECTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEENDRECTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_PAGEUPRECTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_PAGEDOWNRECTEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_STUTTEREDPAGEUP, Dispatch_effect::Overlay, false, false},
+    {SCI_STUTTEREDPAGEUPEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_STUTTEREDPAGEDOWN, Dispatch_effect::Overlay, false, false},
+    {SCI_STUTTEREDPAGEDOWNEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDLEFTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDLEFTENDEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDRIGHTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_WORDRIGHTENDEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_AUTOCGETCURRENT, Dispatch_effect::Read_only, false, false},
+    {SCI_TARGETASUTF8, Dispatch_effect::Read_only, false, false},
+    {SCI_ENCODEDFROMUTF8, Dispatch_effect::Read_only, false, false},
+    {SCI_HOMEWRAPEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEENDWRAP, Dispatch_effect::Overlay, false, false},
+    {SCI_LINEENDWRAPEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_VCHOMEWRAP, Dispatch_effect::Overlay, false, false},
+    {SCI_VCHOMEWRAPEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_FINDCOLUMN, Dispatch_effect::Read_only, false, false},
+    {SCI_GETCARETSTICKY, Dispatch_effect::Read_only, false, true},
+    {SCI_GETWRAPVISUALFLAGS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETWRAPVISUALFLAGSLOCATION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETWRAPSTARTINDENT, Dispatch_effect::Read_only, false, true},
+    {SCI_MARKERADDSET, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_GETPASTECONVERTENDINGS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCARETLINEBACKALPHA, Dispatch_effect::Read_only, false, true},
+    {SCI_GETWRAPINDENTMODE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELALPHA, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELEOLFILLED, Dispatch_effect::Read_only, false, true},
+    {SCI_STYLEGETFORE, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETBACK, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETBOLD, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETITALIC, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETSIZE, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETFONT, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETEOLFILLED, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETUNDERLINE, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETCASE, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETCHARACTERSET, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETVISIBLE, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETCHANGEABLE, Dispatch_effect::Read_only, false, false},
+    {SCI_STYLEGETHOTSPOT, Dispatch_effect::Read_only, false, false},
+    {SCI_GETHOTSPOTACTIVEFORE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETHOTSPOTACTIVEBACK, Dispatch_effect::Read_only, false, true},
+    {SCI_GETHOTSPOTACTIVEUNDERLINE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETHOTSPOTSINGLELINE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETINDICATORCURRENT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETINDICATORVALUE, Dispatch_effect::Read_only, false, true},
+    {SCI_INDICATORALLONFOR, Dispatch_effect::Read_only, false, false},
+    {SCI_INDICATORVALUEAT, Dispatch_effect::Read_only, false, false},
+    {SCI_INDICATORSTART, Dispatch_effect::Read_only, false, false},
+    {SCI_INDICATOREND, Dispatch_effect::Read_only, false, false},
+    {SCI_INDICGETUNDER, Dispatch_effect::Read_only, false, false},
+    {SCI_GETCARETSTYLE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETPOSITIONCACHE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSCROLLWIDTHTRACKING, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCHARACTERPOINTER, Dispatch_effect::Read_only, false, true},
+#ifdef SCI_GETKEYSUNICODE
+    {SCI_GETKEYSUNICODE, Dispatch_effect::Read_only, false, true},
+#endif
+    {SCI_INDICGETALPHA, Dispatch_effect::Read_only, false, false},
+    {SCI_GETEXTRAASCENT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETEXTRADESCENT, Dispatch_effect::Read_only, false, true},
+    {SCI_MARKERSYMBOLDEFINED, Dispatch_effect::Read_only, false, false},
+    {SCI_MARGINGETTEXT, Dispatch_effect::Read_only, false, false},
+    {SCI_MARGINGETSTYLE, Dispatch_effect::Read_only, false, false},
+    {SCI_MARGINGETSTYLES, Dispatch_effect::Read_only, false, false},
+    {SCI_MARGINGETSTYLEOFFSET, Dispatch_effect::Read_only, false, false},
+    {SCI_ANNOTATIONGETTEXT, Dispatch_effect::Read_only, false, false},
+    {SCI_ANNOTATIONGETSTYLE, Dispatch_effect::Read_only, false, false},
+    {SCI_ANNOTATIONGETSTYLES, Dispatch_effect::Read_only, false, false},
+    {SCI_ANNOTATIONGETLINES, Dispatch_effect::Read_only, false, false},
+    {SCI_ANNOTATIONGETVISIBLE, Dispatch_effect::Read_only, false, false},
+    {SCI_ANNOTATIONGETSTYLEOFFSET, Dispatch_effect::Read_only, false, false},
+    {SCI_SETEMPTYSELECTION, Dispatch_effect::Overlay, false, false},
+    {SCI_GETMARGINOPTIONS, Dispatch_effect::Read_only, false, true},
+    {SCI_INDICGETOUTLINEALPHA, Dispatch_effect::Read_only, false, false},
+    {SCI_CHARPOSITIONFROMPOINT, Dispatch_effect::Read_only, false, false},
+    {SCI_CHARPOSITIONFROMPOINTCLOSE, Dispatch_effect::Read_only, false, false},
+    {SCI_GETMULTIPLESELECTION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETADDITIONALSELECTIONTYPING, Dispatch_effect::Read_only, false, true},
+    {SCI_GETADDITIONALCARETSBLINK, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMAINSELECTION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONNCARET, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONNANCHOR, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONNCARETVIRTUALSPACE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONNANCHORVIRTUALSPACE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONNSTART, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONNEND, Dispatch_effect::Read_only, false, true},
+    {SCI_GETRECTANGULARSELECTIONCARET, Dispatch_effect::Read_only, false, true},
+    {SCI_GETRECTANGULARSELECTIONANCHOR, Dispatch_effect::Read_only, false, true},
+    {SCI_GETRECTANGULARSELECTIONCARETVIRTUALSPACE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETRECTANGULARSELECTIONANCHORVIRTUALSPACE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETVIRTUALSPACEOPTIONS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETRECTANGULARSELECTIONMODIFIER, Dispatch_effect::Read_only, false, true},
+    {SCI_GETADDITIONALSELALPHA, Dispatch_effect::Read_only, false, true},
+    {SCI_GETADDITIONALCARETFORE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETADDITIONALCARETSVISIBLE, Dispatch_effect::Read_only, false, true},
+    {SCI_AUTOCGETCURRENTTEXT, Dispatch_effect::Read_only, false, false},
+    {SCI_GETFONTQUALITY, Dispatch_effect::Read_only, false, true},
+    {SCI_SETFIRSTVISIBLELINE, Dispatch_effect::Scroll, false, false},
+    {SCI_GETMULTIPASTE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETTAG, Dispatch_effect::Read_only, false, true},
+    {SCI_CONTRACTEDFOLDNEXT, Dispatch_effect::Read_only, false, false},
+    {SCI_GETIDENTIFIER, Dispatch_effect::Read_only, false, true},
+    {SCI_MARKERDEFINERGBAIMAGE, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_GETTECHNOLOGY, Dispatch_effect::Read_only, false, true},
+    {SCI_COUNTCHARACTERS, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCGETCASEINSENSITIVEBEHAVIOUR, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCGETMULTI, Dispatch_effect::Read_only, false, false},
+    {SCI_AUTOCGETOPTIONS, Dispatch_effect::Read_only, false, false},
+    {SCI_GETRANGEPOINTER, Dispatch_effect::Read_only, false, true},
+    {SCI_GETGAPPOSITION, Dispatch_effect::Read_only, false, true},
+    {SCI_DELETERANGE, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_GETWORDCHARS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETWHITESPACECHARS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETPUNCTUATIONCHARS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONEMPTY, Dispatch_effect::Read_only, false, true},
+    {SCI_VCHOMEDISPLAY, Dispatch_effect::Overlay, false, false},
+    {SCI_VCHOMEDISPLAYEXTEND, Dispatch_effect::Overlay, false, false},
+    {SCI_GETCARETLINEVISIBLEALWAYS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLINEENDTYPESALLOWED, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLINEENDTYPESACTIVE, Dispatch_effect::Read_only, false, true},
+    {SCI_AUTOCGETORDER, Dispatch_effect::Read_only, false, false},
+    {SCI_GETAUTOMATICFOLD, Dispatch_effect::Read_only, false, true},
+    {SCI_GETREPRESENTATION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMOUSESELECTIONRECTANGULARSWITCH, Dispatch_effect::Read_only, false, true},
+    {SCI_POSITIONRELATIVE, Dispatch_effect::Read_only, false, false},
+    {SCI_GETPHASESDRAW, Dispatch_effect::Read_only, false, true},
+    {SCI_GETNEXTTABSTOP, Dispatch_effect::Read_only, false, true},
+    {SCI_GETIMEINTERACTION, Dispatch_effect::Read_only, false, true},
+    {SCI_INDICGETHOVERSTYLE, Dispatch_effect::Read_only, false, false},
+    {SCI_INDICGETHOVERFORE, Dispatch_effect::Read_only, false, false},
+    {SCI_INDICGETFLAGS, Dispatch_effect::Read_only, false, false},
+    {SCI_GETTARGETTEXT, Dispatch_effect::Read_only, false, true},
+    {SCI_ISRANGEWORD, Dispatch_effect::Read_only, false, false},
+    {SCI_GETIDLESTYLING, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMOUSEWHEELCAPTURES, Dispatch_effect::Read_only, false, true},
+    {SCI_GETTABDRAWMODE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETACCESSIBILITY, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCARETLINEFRAME, Dispatch_effect::Read_only, false, true},
+    {SCI_GETMOVEEXTENDSSELECTION, Dispatch_effect::Read_only, false, true},
+    {SCI_FOLDDISPLAYTEXTGETSTYLE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETBIDIRECTIONAL, Dispatch_effect::Read_only, false, true},
+    {SCI_SETBIDIRECTIONAL, Dispatch_effect::Static_content_and_style, false, false},
+    {SCI_GETLINECHARACTERINDEX, Dispatch_effect::Read_only, false, true},
+    {SCI_LINEFROMINDEXPOSITION, Dispatch_effect::Read_only, false, false},
+    {SCI_INDEXPOSITIONFROMLINE, Dispatch_effect::Read_only, false, false},
+    {SCI_COUNTCODEUNITS, Dispatch_effect::Read_only, false, false},
+    {SCI_POSITIONRELATIVECODEUNITS, Dispatch_effect::Read_only, false, false},
+    {SCI_GETCOMMANDEVENTS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCHARACTERCATEGORYOPTIMIZATION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETDEFAULTFOLDDISPLAYTEXT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETTABMINIMUMWIDTH, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONNSTARTVIRTUALSPACE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONNENDVIRTUALSPACE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETTARGETSTARTVIRTUALSPACE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETTARGETENDVIRTUALSPACE, Dispatch_effect::Read_only, false, true},
+    {SCI_MARKERHANDLEFROMLINE, Dispatch_effect::Read_only, false, false},
+    {SCI_MARKERNUMBERFROMLINE, Dispatch_effect::Read_only, false, false},
+    {SCI_MARKERGETLAYER, Dispatch_effect::Read_only, false, false},
+    {SCI_EOLANNOTATIONGETTEXT, Dispatch_effect::Read_only, false, false},
+    {SCI_EOLANNOTATIONGETSTYLE, Dispatch_effect::Read_only, false, false},
+    {SCI_EOLANNOTATIONGETVISIBLE, Dispatch_effect::Read_only, false, false},
+    {SCI_EOLANNOTATIONGETSTYLEOFFSET, Dispatch_effect::Read_only, false, false},
+    {SCI_GETMULTIEDGECOLUMN, Dispatch_effect::Read_only, false, true},
+    {SCI_SUPPORTSFEATURE, Dispatch_effect::Read_only, false, false},
+    {SCI_INDICGETSTROKEWIDTH, Dispatch_effect::Read_only, false, false},
+    {SCI_GETELEMENTCOLOUR, Dispatch_effect::Read_only, false, true},
+    {SCI_GETELEMENTISSET, Dispatch_effect::Read_only, false, true},
+    {SCI_GETELEMENTALLOWSTRANSLUCENT, Dispatch_effect::Read_only, false, true},
+    {SCI_GETELEMENTBASECOLOUR, Dispatch_effect::Read_only, false, true},
+    {SCI_GETFONTLOCALE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSELECTIONLAYER, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCARETLINELAYER, Dispatch_effect::Read_only, false, true},
+    {SCI_GETREPRESENTATIONAPPEARANCE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETREPRESENTATIONCOLOUR, Dispatch_effect::Read_only, false, true},
+    {SCI_GETDIRECTSTATUSFUNCTION, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCARETLINEHIGHLIGHTSUBLINE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLAYOUTTHREADS, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSTYLEDTEXTFULL, Dispatch_effect::Read_only, false, true},
+    {SCI_GETCHANGEHISTORY, Dispatch_effect::Read_only, false, true},
+    {SCI_GETLEXER, Dispatch_effect::Read_only, false, true},
+    {SCI_GETPROPERTY, Dispatch_effect::Read_only, false, true},
+    {SCI_GETPROPERTYEXPANDED, Dispatch_effect::Read_only, false, true},
+    {SCI_GETPROPERTYINT, Dispatch_effect::Read_only, false, true},
+#ifdef SCI_GETSTYLEBITSNEEDED
+    {SCI_GETSTYLEBITSNEEDED, Dispatch_effect::Read_only, false, true},
+#endif
+    {SCI_GETLEXERLANGUAGE, Dispatch_effect::Read_only, false, true},
+    {SCI_PROPERTYNAMES, Dispatch_effect::Read_only, false, false},
+    {SCI_PROPERTYTYPE, Dispatch_effect::Read_only, false, false},
+    {SCI_DESCRIBEPROPERTY, Dispatch_effect::Read_only, false, false},
+    {SCI_DESCRIBEKEYWORDSETS, Dispatch_effect::Read_only, false, false},
+    {SCI_GETLINEENDTYPESSUPPORTED, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSUBSTYLESSTART, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSUBSTYLESLENGTH, Dispatch_effect::Read_only, false, true},
+    {SCI_DISTANCETOSECONDARYSTYLES, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSUBSTYLEBASES, Dispatch_effect::Read_only, false, true},
+    {SCI_GETSTYLEFROMSUBSTYLE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETPRIMARYSTYLEFROMSTYLE, Dispatch_effect::Read_only, false, true},
+    {SCI_GETNAMEDSTYLES, Dispatch_effect::Read_only, false, true},
+    {SCI_NAMEOFSTYLE, Dispatch_effect::Read_only, false, false},
+    {SCI_TAGSOFSTYLE, Dispatch_effect::Read_only, false, false},
+    {SCI_DESCRIPTIONOFSTYLE, Dispatch_effect::Read_only, false, false},
+};
 
-        case SCI_SETSEL:
-        case SCI_SETEMPTYSELECTION:
-        case SCI_GOTOPOS:
-        case SCI_SETCURRENTPOS:
-        case SCI_SETANCHOR:
-        // Caret / selection movement commands. These are mutators on the
-        // caret and selection state, so they DO need a scene-graph
-        // update request, but they do NOT modify document text or
-        // styles. Classifying them here (rather than letting them fall
-        // through to the conservative full-resync default) is a
-        // double win:
-        //
-        //   1. `static_content_dirty` stays false, so
-        //      `build_render_snapshot()` takes the overlay-only capture
-        //      path and skips the `current_render_frame.paint_text`
-        //      work for every visual line.
-        //   2. `needs_style_sync` stays false, so `send()` skips the
-        //      `syncQuickViewProperties()` call that re-queries all
-        //      the exported editor properties and emits any number of
-        //      property-change signals per caret move.
-        //
-        // The tight `caret_move_right_5000` benchmark loop issues
-        // SCI_CHARRIGHT 5000 times. Without the explicit
-        // classification below, each call pays the full resync cost.
-        // The editor still repaints the caret
-        // and selection exactly as before, but the per-call cost of
-        // each movement collapses from "full resync" to "overlay-only
-        // resync".
-        //
-        // If a caret movement happens to scroll the view (e.g.
-        // CHARRIGHT at end of a long wrapped line jumps to the next
-        // visible line), Scintilla will fire `Notification::UpdateUI`
-        // with the `Update::VScroll` bit set, and
-        // `updateQuickView()` in `notifyParent` will observe the
-        // scroll and follow up with the appropriate scroll-aware
-        // `request_scene_graph_update`. So scroll handling is not
-        // lost; it just moves from the dispatch table to the Update
-        // notification path, which is where Scintilla actually knows
-        // whether a scroll happened.
-        case SCI_LINEDOWN:
-        case SCI_LINEDOWNEXTEND:
-        case SCI_LINEDOWNRECTEXTEND:
-        case SCI_LINEUP:
-        case SCI_LINEUPEXTEND:
-        case SCI_LINEUPRECTEXTEND:
-        case SCI_CHARLEFT:
-        case SCI_CHARLEFTEXTEND:
-        case SCI_CHARLEFTRECTEXTEND:
-        case SCI_CHARRIGHT:
-        case SCI_CHARRIGHTEXTEND:
-        case SCI_CHARRIGHTRECTEXTEND:
-        case SCI_WORDLEFT:
-        case SCI_WORDLEFTEXTEND:
-        case SCI_WORDRIGHT:
-        case SCI_WORDRIGHTEXTEND:
-        case SCI_WORDLEFTEND:
-        case SCI_WORDLEFTENDEXTEND:
-        case SCI_WORDRIGHTEND:
-        case SCI_WORDRIGHTENDEXTEND:
-        case SCI_WORDPARTLEFT:
-        case SCI_WORDPARTLEFTEXTEND:
-        case SCI_WORDPARTRIGHT:
-        case SCI_WORDPARTRIGHTEXTEND:
-        case SCI_HOME:
-        case SCI_HOMEEXTEND:
-        case SCI_HOMERECTEXTEND:
-        case SCI_HOMEDISPLAY:
-        case SCI_HOMEDISPLAYEXTEND:
-        case SCI_HOMEWRAP:
-        case SCI_HOMEWRAPEXTEND:
-        case SCI_VCHOME:
-        case SCI_VCHOMEEXTEND:
-        case SCI_VCHOMERECTEXTEND:
-        case SCI_VCHOMEDISPLAY:
-        case SCI_VCHOMEDISPLAYEXTEND:
-        case SCI_VCHOMEWRAP:
-        case SCI_VCHOMEWRAPEXTEND:
-        case SCI_LINEEND:
-        case SCI_LINEENDEXTEND:
-        case SCI_LINEENDRECTEXTEND:
-        case SCI_LINEENDDISPLAY:
-        case SCI_LINEENDDISPLAYEXTEND:
-        case SCI_LINEENDWRAP:
-        case SCI_LINEENDWRAPEXTEND:
-        case SCI_DOCUMENTSTART:
-        case SCI_DOCUMENTSTARTEXTEND:
-        case SCI_DOCUMENTEND:
-        case SCI_DOCUMENTENDEXTEND:
-        case SCI_PAGEUP:
-        case SCI_PAGEUPEXTEND:
-        case SCI_PAGEUPRECTEXTEND:
-        case SCI_PAGEDOWN:
-        case SCI_PAGEDOWNEXTEND:
-        case SCI_PAGEDOWNRECTEXTEND:
-        case SCI_STUTTEREDPAGEUP:
-        case SCI_STUTTEREDPAGEUPEXTEND:
-        case SCI_STUTTEREDPAGEDOWN:
-        case SCI_STUTTEREDPAGEDOWNEXTEND:
-            return {true, false, false, false};
-
-        case SCI_SETSELFORE:
-        case SCI_SETSELBACK:
-        case SCI_SETCARETFORE:
-        case SCI_SETCARETWIDTH:
-        case SCI_SETCARETLINEVISIBLE:
-        case SCI_SETCARETLINEBACK:
-            return {true, false, false, false};
-
-        case SCI_SETTEXT:
-        case SCI_CLEARALL:
-        case SCI_INSERTTEXT:
-        case SCI_APPENDTEXT:
-        case SCI_REPLACESEL:
-        case SCI_DELETERANGE:
-        case SCI_STYLECLEARALL:
-        case SCI_STYLESETFORE:
-        case SCI_STYLESETBACK:
-        case SCI_STYLESETFONT:
-        case SCI_STYLESETSIZE:
-        case SCI_STYLESETSIZEFRACTIONAL:
-        case SCI_STYLESETBOLD:
-        case SCI_STYLESETWEIGHT:
-        case SCI_STYLESETITALIC:
-        case SCI_STYLESETUNDERLINE:
-        case SCI_STYLESETVISIBLE:
-        case SCI_STYLESETEOLFILLED:
-        case SCI_STYLESETCHARACTERSET:
-        case SCI_SETTABWIDTH:
-        case SCI_SETUSETABS:
-        case SCI_SETWRAPMODE:
-        case SCI_SETBIDIRECTIONAL:
-        case SCI_SETSCROLLWIDTH:
-        case SCI_SETMARGINWIDTHN:
-        case SCI_SETMARGINTYPEN:
-        case SCI_SETMARGINMASKN:
-        case SCI_SETMARGINSENSITIVEN:
-        case SCI_SETMARGINLEFT:
-        case SCI_SETMARGINRIGHT:
-        case SCI_MARKERDEFINE:
-        case SCI_MARKERSETFORE:
-        case SCI_MARKERSETBACK:
-        case SCI_MARKERSETBACKSELECTED:
-        case SCI_MARKERSETFORETRANSLUCENT:
-        case SCI_MARKERSETBACKTRANSLUCENT:
-        case SCI_MARKERSETBACKSELECTEDTRANSLUCENT:
-        case SCI_MARKERENABLEHIGHLIGHT:
-        case SCI_MARKERADD:
-        case SCI_MARKERADDSET:
-        case SCI_MARKERDELETE:
-        case SCI_MARKERDELETEALL:
-        case SCI_MARKERDELETEHANDLE:
-        case SCI_MARKERDEFINEPIXMAP:
-        case SCI_MARKERDEFINERGBAIMAGE:
-        case SCI_SETREADONLY:
-            return {true, true, true, false};
-        default:
-            break;
+constexpr bool message_rules_are_sorted()
+{
+    for (std::size_t i = 1; i < sizeof(k_message_rules) / sizeof(k_message_rules[0]); ++i) {
+        if (k_message_rules[i - 1].message >= k_message_rules[i].message) {
+            return false;
+        }
     }
 
-    // Fast path for the read-only messages the library itself calls frequently.
-    if (scene_graph_message_is_known_read_only(i_message)) {
-        return {};
+    return true;
+}
+
+static_assert(message_rules_are_sorted(), "ScintillaQuick dispatch rules must be sorted and unique");
+
+inline const Message_rule* find_message_rule(unsigned int message)
+{
+    std::size_t first = 0;
+    std::size_t count = sizeof(k_message_rules) / sizeof(k_message_rules[0]);
+
+    while (count > 0) {
+        const std::size_t step = count / 2;
+        const std::size_t index = first + step;
+        const Message_rule& rule = k_message_rules[index];
+
+        if (rule.message < message) {
+            first = index + 1;
+            count -= step + 1;
+        } else {
+            count = step;
+        }
+    }
+
+    if (first < sizeof(k_message_rules) / sizeof(k_message_rules[0])
+        && k_message_rules[first].message == message) {
+        return &k_message_rules[first];
+    }
+
+    return nullptr;
+}
+
+constexpr scene_graph_update_request_info_t info_for_effect(Dispatch_effect effect)
+{
+    switch (effect) {
+        case Dispatch_effect::Read_only:
+            return {};
+        case Dispatch_effect::Overlay:
+            return {true, false, false, false};
+        case Dispatch_effect::Static_content:
+            return {true, true, false, false};
+        case Dispatch_effect::Static_content_and_style:
+            return {true, true, true, false};
+        case Dispatch_effect::Scroll:
+            return {true, true, true, true};
+    }
+
+    return {true, true, true, false};
+}
+
+inline scene_graph_update_request_info_t scene_graph_update_request_classify(unsigned int i_message)
+{
+    if (const Message_rule* rule = find_message_rule(i_message)) {
+        return info_for_effect(rule->effect);
     }
 
     // Unknown message: default to a conservative full resync. Repainting
@@ -535,40 +590,47 @@ inline scene_graph_update_request_info_t scene_graph_update_request_classify(uns
 
 } // namespace detail
 
-inline bool tracked_scroll_width_should_reset(unsigned int i_message)
+// Known getter-style Scintilla messages from the historical getter
+// allow-list. Kept separate from the broader read-only predicate for
+// compatibility with tests and diagnostics that need the old distinction.
+inline bool scene_graph_message_is_known_getter(unsigned int i_message)
 {
-    switch (i_message) {
-        case SCI_SETTEXT:
-        case SCI_CLEARALL:
-        case SCI_STYLECLEARALL:
-        case SCI_STYLESETFONT:
-        case SCI_STYLESETSIZE:
-        case SCI_STYLESETSIZEFRACTIONAL:
-        case SCI_STYLESETBOLD:
-        case SCI_STYLESETWEIGHT:
-        case SCI_STYLESETITALIC:
-        case SCI_STYLESETCHARACTERSET:
-        case SCI_SETTABWIDTH:
-        case SCI_SETUSETABS:
-        case SCI_SETWRAPMODE:
-        case SCI_SETMARGINWIDTHN:
-        case SCI_SETMARGINLEFT:
-        case SCI_SETMARGINRIGHT:
-        case SCI_SETDOCPOINTER:
-            return true;
-        default:
-            return false;
-    }
+    const detail::Message_rule* rule = detail::find_message_rule(i_message);
+    return rule && rule->known_getter;
 }
 
-// Single dispatch entry point. Combines the historical four-field
-// classification (detail::scene_graph_update_request_classify) with the
-// scroll-width reset predicate so callers consult one struct instead of
-// issuing two parallel classifier calls for the same message.
+// Known read-only / query-like Scintilla messages that are safe to treat
+// as non-visual. Messages listed with Dispatch_effect::Read_only take
+// the fast path and skip scene-graph resync.
+//
+// CRITICAL invariant: every SCI_* message that ScintillaQuick_item or its
+// helper getters call INTERNALLY via `send()` must appear in the table as
+// read-only if it is a pure query. If it does not, the conservative default
+// in `scene_graph_update_request()` will trigger a full resync, which can
+// re-enter `syncQuickViewProperties()` and recurse.
+inline bool scene_graph_message_is_known_read_only(unsigned int i_message)
+{
+    const detail::Message_rule* rule = detail::find_message_rule(i_message);
+    return rule && rule->effect == detail::Dispatch_effect::Read_only;
+}
+
+inline bool tracked_scroll_width_should_reset(unsigned int i_message)
+{
+    const detail::Message_rule* rule = detail::find_message_rule(i_message);
+    return rule && rule->scroll_width_reset;
+}
+
+// Single dispatch entry point. The update classification and scroll-width
+// reset flag now come from one Message_rule entry instead of parallel
+// switches.
 inline scene_graph_update_request_info_t scene_graph_update_request(unsigned int i_message)
 {
     scene_graph_update_request_info_t info = detail::scene_graph_update_request_classify(i_message);
-    info.scroll_width_reset = tracked_scroll_width_should_reset(i_message);
+
+    if (const detail::Message_rule* rule = detail::find_message_rule(i_message)) {
+        info.scroll_width_reset = rule->scroll_width_reset;
+    }
+
     return info;
 }
 

@@ -27,6 +27,7 @@
 #include "ScintillaMessages.h"
 #include "ScintillaStructures.h"
 
+#include <QByteArray>
 #include <QFont>
 #include <QElapsedTimer>
 #include <QMimeData>
@@ -96,6 +97,50 @@ class ScintillaQuick_validation_access;
 #define SCINTILLAQUICK_EXPORT
 #endif
 #endif
+
+enum class ScintillaQuick_lparam_kind {
+    None,
+    Numeric,
+    Text
+};
+
+struct SCINTILLAQUICK_EXPORT ScintillaQuick_notification
+{
+    Scintilla::uptr_t hwndFrom = 0;
+    Scintilla::uptr_t idFrom   = 0;
+    Scintilla::Notification code = static_cast<Scintilla::Notification>(0);
+    Scintilla::Position position = 0;
+    int ch = 0;
+    Scintilla::KeyMod modifiers = Scintilla::KeyMod::Norm;
+    Scintilla::ModificationFlags modificationType = Scintilla::ModificationFlags::None;
+    QByteArray text;
+    bool textAvailable = false;
+    Scintilla::Position length = 0;
+    Scintilla::Position linesAdded = 0;
+    Scintilla::Message message = static_cast<Scintilla::Message>(0);
+    Scintilla::uptr_t wParam = 0;
+    ScintillaQuick_lparam_kind lParamKind = ScintillaQuick_lparam_kind::None;
+    Scintilla::sptr_t lParamValue = 0;
+    QByteArray lParamText;
+    bool lParamTextAvailable = false;
+    Scintilla::Position line = 0;
+    Scintilla::FoldLevel foldLevelNow = Scintilla::FoldLevel::None;
+    Scintilla::FoldLevel foldLevelPrev = Scintilla::FoldLevel::None;
+    int margin = 0;
+    int listType = 0;
+    int x = 0;
+    int y = 0;
+    int token = 0;
+    Scintilla::Position annotationLinesAdded = 0;
+    Scintilla::Update updated = Scintilla::Update::None;
+    Scintilla::CompletionMethods listCompletionMethod =
+        static_cast<Scintilla::CompletionMethods>(0);
+    Scintilla::CharacterSource characterSource = Scintilla::CharacterSource::DirectInput;
+};
+
+Q_DECLARE_METATYPE(ScintillaQuick_notification)
+Q_DECLARE_METATYPE(Scintilla::ModificationFlags)
+Q_DECLARE_METATYPE(Scintilla::FoldLevel)
 
 // Scrollbar interaction is handled by the surrounding Qt Quick container
 // rather than by embedding widget-style scrollbars into the editor item
@@ -232,6 +277,7 @@ signals:
     void showContextMenu(const QPoint& pos);
     void addToContextMenu(int menuId, const QString& txt, bool enabled);
     void clearContextMenu();
+    void notificationReceived(const ScintillaQuick_notification& notification);
 
 protected:
     bool event(QEvent* event) override;

@@ -101,7 +101,6 @@ public:
     };
 
     explicit ScintillaQuick_core(::ScintillaQuick_item* parent);
-    void UpdateInfos(int winId);
     void ensure_visible_range_styled(bool scrolling);
     void selectCurrentWord();
     void reset_tracked_scroll_width_to_viewport();
@@ -195,6 +194,12 @@ private:
     void AddToPopUp(const char* label, int cmd, bool enabled) override;
 
 private:
+    sptr_t DispatchDirectMessage(unsigned int i_message, uptr_t w_param, sptr_t l_param);
+    sptr_t DispatchDirectStatusMessage(
+        unsigned int       i_message,
+        uptr_t             w_param,
+        sptr_t             l_param,
+        Scintilla::Status& status_after_dispatch);
     static sptr_t DirectFunction(sptr_t ptr, unsigned int i_message, uptr_t w_param, sptr_t l_param);
     static sptr_t DirectStatusFunction(
         sptr_t       ptr,
@@ -206,6 +211,9 @@ private:
     QPainter* GetPainter() { return m_current_painter; }
 
 protected:
+    // Raster paint adapter retained for validation-access reference captures.
+    // Production rendering captures Render_frame data and renders it through
+    // the Qt Quick scene graph.
     void PartialPaint(const PRectangle& rect);
     void PartialPaintQml(const PRectangle& rect, QPainter* painter);
 
@@ -221,6 +229,15 @@ private:
     // Non-owning back-pointer to the enclosing editor item. Parenting is
     // handled by the QObject parent link established in the constructor.
     ::ScintillaQuick_item* m_owner;
+
+    struct Direct_status_capture {
+        int               wnd_proc_depth = 0;
+        Scintilla::Status status         = Scintilla::Status::Failure;
+        bool              captured       = false;
+    };
+
+    int m_wnd_proc_depth = 0;
+    std::vector<Direct_status_capture> m_direct_status_captures;
 
     // Owning idle timer. The unique_ptr makes ownership explicit while the
     // QObject parent link provides cleanup as a fallback.

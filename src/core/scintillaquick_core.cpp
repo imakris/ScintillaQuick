@@ -17,6 +17,7 @@
 #include <QPointer>
 #include <QPixmap>
 #include <QQuickWindow>
+#include <QScopeGuard>
 #include <QSGImageNode>
 #include <QStyleHints>
 #include <QTimer>
@@ -24,7 +25,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cmath>
 #include <optional>
 #include <utility>
@@ -367,11 +367,6 @@ ScintillaQuick_core::ScintillaQuick_core(::ScintillaQuick_item* parent)
     std::fill(timers, std::end(timers), 0);
 }
 
-void ScintillaQuick_core::UpdateInfos(int winId)
-{
-    SetCtrlID(winId);
-}
-
 void ScintillaQuick_core::ensure_visible_range_styled(bool scrolling)
 {
     StyleAreaBounded(GetClientDrawingRectangle(), scrolling);
@@ -380,8 +375,8 @@ void ScintillaQuick_core::ensure_visible_range_styled(bool scrolling)
 void ScintillaQuick_core::selectCurrentWord()
 {
     auto pos = CurrentPosition();
-    const auto max = pdoc->Length();
-    if (max <= 0) {
+    const auto length = pdoc->Length();
+    if (length <= 0) {
         return;
     }
 
@@ -389,28 +384,14 @@ void ScintillaQuick_core::selectCurrentWord()
         pos = 0;
     }
     else
-    if (pos >= max) {
-        pos = max - 1;
+    if (pos > length) {
+        pos = length;
     }
 
-    if (pos > 0 &&
-        !std::isalnum(static_cast<unsigned char>(pdoc->CharAt(pos))) &&
-        std::isalnum(static_cast<unsigned char>(pdoc->CharAt(pos - 1))))
-    {
-        pos--;
-    }
+    const auto start_pos = pdoc->ExtendWordSelect(pos, -1, true);
+    const auto end_pos   = pdoc->ExtendWordSelect(start_pos, 1, true);
 
-    auto start_pos = pos;
-    while (start_pos > 0 && std::isalnum(static_cast<unsigned char>(pdoc->CharAt(start_pos - 1)))) {
-        start_pos--;
-    }
-
-    auto end_pos = pos + 1;
-    while (end_pos < max && std::isalnum(static_cast<unsigned char>(pdoc->CharAt(end_pos)))) {
-        end_pos++;
-    }
-
-    if (start_pos == end_pos) {
+    if (start_pos >= end_pos) {
         return;
     }
 
@@ -482,9 +463,11 @@ Render_frame ScintillaQuick_core::current_render_frame(
         client_rect.Height());
 
     const int capture_buffer_lines = std::max(0, extra_capture_lines);
+    const int estimated_line_height = std::max(1, vs.lineHeight);
     const int estimated_lines = std::max<int>(
         1,
-        static_cast<int>(client_rect.Height() / vs.lineHeight) + (capture_buffer_lines * 2) + 2);
+        static_cast<int>(client_rect.Height() / estimated_line_height)
+            + (capture_buffer_lines * 2) + 2);
     frame.visual_lines.reserve(estimated_lines);
     frame.selection_primitives.reserve(4);
     frame.caret_primitives.reserve(4);
@@ -514,6 +497,8 @@ Render_frame ScintillaQuick_core::current_render_frame(
 
     const bool buffered_draw_before_capture = view.bufferedDraw;
     view.bufferedDraw = false;
+    const auto restore_buffered_draw =
+        qScopeGuard([&] { view.bufferedDraw = buffered_draw_before_capture; });
 
     {
         SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.current_render_frame.paint_text");
@@ -533,8 +518,6 @@ Render_frame ScintillaQuick_core::current_render_frame(
         scrollWidth = view.lineWidthMaxSeen;
         SetScrollBars();
     }
-
-    view.bufferedDraw = buffered_draw_before_capture;
 
     return frame;
 }
@@ -627,6 +610,9 @@ static QString string_from_selected_text(const SelectionText& selected_text)
 static void add_rectangular_to_mime(QMimeData* mime_data, [[maybe_unused]] const QString& su)
 {
     Q_UNUSED(su);
+    if (!mime_data) {
+        return;
+    }
 #if defined(Q_OS_WIN)
     // Add an empty marker
     mime_data->setData(sMSDEVColumnSelect, QByteArray());
@@ -645,6 +631,9 @@ static void add_rectangular_to_mime(QMimeData* mime_data, [[maybe_unused]] const
 static void add_line_cut_copy_to_mime([[maybe_unused]] QMimeData* mime_data)
 {
     Q_UNUSED(mime_data);
+    if (!mime_data) {
+        return;
+    }
 #if defined(Q_OS_WIN)
     // Add an empty marker
     mime_data->setData(sVSEditorLineCutCopy, QByteArray());
@@ -653,6 +642,9 @@ static void add_line_cut_copy_to_mime([[maybe_unused]] QMimeData* mime_data)
 
 static bool is_rectangular_in_mime(const QMimeData* mime_data)
 {
+    if (!mime_data) {
+        return false;
+    }
     QStringList formats = mime_data->formats();
     for (int i = 0; i < formats.size(); ++i) {
 #if defined(Q_OS_WIN)
@@ -681,6 +673,9 @@ static bool is_rectangular_in_mime(const QMimeData* mime_data)
 
 static bool is_line_cut_copy_in_mime(const QMimeData* mime_data)
 {
+    if (!mime_data) {
+        return false;
+    }
     QStringList formats = mime_data->formats();
     for (int i = 0; i < formats.size(); ++i) {
 #if defined(Q_OS_WIN)
@@ -1121,7 +1116,10 @@ void ScintillaQuick_core::CreateCallTipWindow(PRectangle rc)
                 ? m_owner->window()->contentItem()
                 : static_cast<QQuickItem*>(m_owner);
         QQuickItem* call_tip_item = new Call_tip_item(&ct, parent_item);
-        ct.wCallTip = call_tip_item;
+        register_owned_window(ct.wCallTip, call_tip_item, Platform_owned_window_kind::CallTip);
+    }
+
+    if (QQuickItem* call_tip_item = resolve_window_item(ct.wCallTip.GetID())) {
         call_tip_item->setPosition(QPointF(rc.left, rc.top));
         call_tip_item->setSize(QSizeF(rc.Width(), rc.Height()));
         call_tip_item->update();
@@ -1139,6 +1137,11 @@ void ScintillaQuick_core::AddToPopUp(const char* label, int cmd, bool enabled)
 
 sptr_t ScintillaQuick_core::WndProc(Message i_message, uptr_t w_param, sptr_t l_param)
 {
+    const int current_wnd_proc_depth = ++m_wnd_proc_depth;
+    const auto leave_wnd_proc =
+        qScopeGuard([this] { --m_wnd_proc_depth; });
+
+    sptr_t result = 0;
     try {
         switch (i_message) {
 
@@ -1157,23 +1160,28 @@ sptr_t ScintillaQuick_core::WndProc(Message i_message, uptr_t w_param, sptr_t l_
                 break;
 
             case Message::GetDirectFunction:
-                return reinterpret_cast<sptr_t>(DirectFunction);
+                result = reinterpret_cast<sptr_t>(DirectFunction);
+                break;
 
             case Message::GetDirectStatusFunction:
-                return reinterpret_cast<sptr_t>(DirectStatusFunction);
+                result = reinterpret_cast<sptr_t>(DirectStatusFunction);
+                break;
 
             case Message::GetDirectPointer:
-                return reinterpret_cast<sptr_t>(this);
+                result = reinterpret_cast<sptr_t>(this);
+                break;
 
             case Message::SetRectangularSelectionModifier:
                 m_rectangular_selection_modifier = static_cast<int>(w_param);
                 break;
 
             case Message::GetRectangularSelectionModifier:
-                return m_rectangular_selection_modifier;
+                result = m_rectangular_selection_modifier;
+                break;
 
             default:
-                return ScintillaBase::WndProc(i_message, w_param, l_param);
+                result = ScintillaBase::WndProc(i_message, w_param, l_param);
+                break;
         }
     }
     catch (std::bad_alloc&) {
@@ -1182,7 +1190,14 @@ sptr_t ScintillaQuick_core::WndProc(Message i_message, uptr_t w_param, sptr_t l_
     catch (...) {
         errorStatus = Status::Failure;
     }
-    return 0;
+
+    for (Direct_status_capture& capture : m_direct_status_captures) {
+        if (!capture.captured && capture.wnd_proc_depth == current_wnd_proc_depth) {
+            capture.status   = errorStatus;
+            capture.captured = true;
+        }
+    }
+    return result;
 }
 
 sptr_t ScintillaQuick_core::DefWndProc(Message, uptr_t, sptr_t)
@@ -1190,10 +1205,59 @@ sptr_t ScintillaQuick_core::DefWndProc(Message, uptr_t, sptr_t)
     return 0;
 }
 
+sptr_t ScintillaQuick_core::DispatchDirectMessage(unsigned int i_message, uptr_t w_param, sptr_t l_param)
+{
+    if (!m_owner) {
+        return 0;
+    }
+    return m_owner->ScintillaQuick_item::send(i_message, w_param, l_param);
+}
+
+sptr_t ScintillaQuick_core::DispatchDirectStatusMessage(
+    unsigned int i_message,
+    uptr_t       w_param,
+    sptr_t       l_param,
+    Status&      status_after_dispatch)
+{
+    if (!m_owner) {
+        status_after_dispatch = Status::Failure;
+        return 0;
+    }
+
+    const std::size_t capture_index = m_direct_status_captures.size();
+    m_direct_status_captures.push_back(
+        Direct_status_capture{m_wnd_proc_depth + 1, Status::Failure, false});
+    const auto discard_capture = qScopeGuard([this, capture_index] {
+        if (capture_index < m_direct_status_captures.size()) {
+            m_direct_status_captures.erase(
+                m_direct_status_captures.begin()
+                + static_cast<std::ptrdiff_t>(capture_index));
+        }
+    });
+
+    const sptr_t return_value =
+        m_owner->ScintillaQuick_item::send(i_message, w_param, l_param);
+
+    Direct_status_capture& capture = m_direct_status_captures[capture_index];
+    if (!capture.captured) {
+        // If a future direct path returns before entering WndProc, report
+        // the current editor status rather than leaking capture state into
+        // the next unrelated message.
+        capture.status   = errorStatus;
+        capture.captured = true;
+    }
+
+    status_after_dispatch = capture.status;
+    return return_value;
+}
+
 sptr_t ScintillaQuick_core::DirectFunction(sptr_t ptr, unsigned int i_message, uptr_t w_param, sptr_t l_param)
 {
     ScintillaQuick_core* sci = reinterpret_cast<ScintillaQuick_core*>(ptr);
-    return sci->WndProc(static_cast<Message>(i_message), w_param, l_param);
+    if (!sci) {
+        return 0;
+    }
+    return sci->DispatchDirectMessage(i_message, w_param, l_param);
 }
 
 sptr_t ScintillaQuick_core::DirectStatusFunction(
@@ -1204,18 +1268,29 @@ sptr_t ScintillaQuick_core::DirectStatusFunction(
     int*         p_status)
 {
     ScintillaQuick_core* sci  = reinterpret_cast<ScintillaQuick_core*>(ptr);
-    const sptr_t return_value = sci->WndProc(static_cast<Message>(i_message), w_param, l_param);
-    *p_status                 = static_cast<int>(sci->errorStatus);
+    if (!sci) {
+        if (p_status) {
+            *p_status = static_cast<int>(Status::Failure);
+        }
+        return 0;
+    }
+    Status status = Status::Failure;
+    const sptr_t return_value =
+        sci->DispatchDirectStatusMessage(i_message, w_param, l_param, status);
+    if (p_status) {
+        *p_status = static_cast<int>(status);
+    }
     return return_value;
 }
-
-// Additions to merge in Scientific Toolworks widget structure
 
 void ScintillaQuick_core::PartialPaint(const PRectangle& rect)
 {
     PartialPaintQml(rect, nullptr);
 }
 
+// Raster reference path used by tests through ScintillaQuick_validation_access.
+// The production Qt Quick path builds Render_frame snapshots and renders those
+// with scene graph nodes.
 void ScintillaQuick_core::PartialPaintQml(const PRectangle& rect, QPainter* painter)
 {
     m_current_painter   = painter;
@@ -1265,6 +1340,9 @@ void ScintillaQuick_core::DragLeave()
 
 void ScintillaQuick_core::Drop(const Point& point, const QMimeData* data, bool move)
 {
+    if (!data) {
+        return;
+    }
     QString text     = data->text();
     bool rectangular = is_rectangular_in_mime(data);
     QByteArray bytes = BytesForDocument(text);
@@ -1277,6 +1355,9 @@ void ScintillaQuick_core::Drop(const Point& point, const QMimeData* data, bool m
 
 void ScintillaQuick_core::DropUrls(const QMimeData* data)
 {
+    if (!data) {
+        return;
+    }
     foreach (const QUrl& url, data->urls()) {
         NotifyURIDropped(url.toString().toUtf8().constData());
     }

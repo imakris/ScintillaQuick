@@ -61,6 +61,8 @@ public:
         image.fill(Qt::white);
 
         QPainter painter(&image);
+        // Intentional raster oracle for frame/renderer validation. This is not
+        // the production Qt Quick scene-graph rendering path.
         item.m_core->PartialPaintQml(PRectangle(0.0, 0.0, logical_width, logical_height), &painter);
         painter.end();
 

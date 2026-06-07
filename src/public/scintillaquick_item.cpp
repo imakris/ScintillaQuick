@@ -28,6 +28,8 @@
 #include <QInputMethod>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaMethod>
+#include <QMetaType>
 #include <QPalette>
 #include <QQuickWindow>
 #include <QSaveFile>
@@ -48,6 +50,7 @@
 #include <cmath>
 #include <limits>
 #include <string_view>
+#include <utility>
 
 constexpr int k_indicator_input     = static_cast<int>(Scintilla::IndicatorNumbers::Ime);
 constexpr int k_indicator_target    = k_indicator_input + 1;
@@ -173,6 +176,199 @@ constexpr int k_vertical_scroll_reuse_buffer_min_lines = 16;
 // window. They are reachable here via the file-scope
 // `using namespace Scintilla::Internal;` above.
 
+void register_notification_metatypes()
+{
+    static const int snapshot_type_id =
+        qRegisterMetaType<ScintillaQuick_notification>("ScintillaQuick_notification");
+    static const int position_type_id =
+        qRegisterMetaType<Scintilla::Position>("Scintilla::Position");
+    static const int modification_flags_type_id =
+        qRegisterMetaType<Scintilla::ModificationFlags>("Scintilla::ModificationFlags");
+    static const int fold_level_type_id =
+        qRegisterMetaType<Scintilla::FoldLevel>("Scintilla::FoldLevel");
+
+    (void)snapshot_type_id;
+    (void)position_type_id;
+    (void)modification_flags_type_id;
+    (void)fold_level_type_id;
+}
+
+bool copy_byte_count(uptr_t byte_count, qsizetype& result)
+{
+    if (byte_count > static_cast<uptr_t>(std::numeric_limits<qsizetype>::max())) {
+        return false;
+    }
+
+    result = static_cast<qsizetype>(byte_count);
+    return true;
+}
+
+bool copy_position_byte_count(Position byte_count, qsizetype& result)
+{
+    if (byte_count < 0) {
+        return false;
+    }
+
+    return copy_byte_count(static_cast<uptr_t>(byte_count), result);
+}
+
+QByteArray copy_nul_terminated_bytes(const char* text)
+{
+    return text ? QByteArray(text) : QByteArray();
+}
+
+bool macro_lparam_contract_is_numeric(Message message)
+{
+    switch (message) {
+        case Message::DeleteRange:
+        case Message::SetSel:
+        case Message::LineScroll:
+        case Message::ScrollRange:
+        case Message::SetTargetRange:
+        case Message::CallTipSetHlt:
+        case Message::ShowLines:
+        case Message::HideLines:
+        case Message::BraceHighlight:
+        case Message::CopyRange:
+        case Message::SetSelection:
+        case Message::FindIndicatorShow:
+        case Message::FindIndicatorFlash:
+        case Message::Colourise:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+void copy_notification_text_payload(
+    const NotificationData& scn,
+    ScintillaQuick_notification& snapshot)
+{
+    switch (scn.nmhdr.code) {
+        case Notification::Modified: {
+            snapshot.textAvailable = scn.text != nullptr;
+            qsizetype byte_count = 0;
+            if (scn.text && scn.length > 0 && copy_position_byte_count(scn.length, byte_count)) {
+                snapshot.text = QByteArray(scn.text, byte_count);
+            }
+            break;
+        }
+
+        case Notification::UserListSelection:
+        case Notification::AutoCSelection:
+        case Notification::AutoCCompleted:
+        case Notification::AutoCSelectionChange:
+        case Notification::URIDropped:
+            snapshot.textAvailable = scn.text != nullptr;
+            snapshot.text = copy_nul_terminated_bytes(scn.text);
+            break;
+
+        default:
+            snapshot.textAvailable = false;
+            snapshot.text.clear();
+            break;
+    }
+}
+
+void copy_macro_lparam_payload(
+    const NotificationData& scn,
+    ScintillaQuick_notification& snapshot)
+{
+    switch (scn.message) {
+        case Message::AddText:
+        case Message::AppendText: {
+            snapshot.lParamKind = ScintillaQuick_lparam_kind::Text;
+            if (scn.lParam == 0) {
+                break;
+            }
+            const char* const payload = reinterpret_cast<const char*>(scn.lParam);
+            qsizetype byte_count = 0;
+            if (copy_byte_count(scn.wParam, byte_count)) {
+                snapshot.lParamText = QByteArray(payload, byte_count);
+                snapshot.lParamTextAvailable = true;
+            }
+            break;
+        }
+
+        case Message::ReplaceSel:
+        case Message::InsertText:
+        case Message::SearchNext:
+        case Message::SearchPrev:
+            snapshot.lParamKind = ScintillaQuick_lparam_kind::Text;
+            if (scn.lParam == 0) {
+                break;
+            }
+            {
+                const char* const payload = reinterpret_cast<const char*>(scn.lParam);
+                snapshot.lParamText = copy_nul_terminated_bytes(payload);
+                snapshot.lParamTextAvailable = true;
+            }
+            break;
+
+        default:
+            if (macro_lparam_contract_is_numeric(scn.message)) {
+                snapshot.lParamKind = ScintillaQuick_lparam_kind::Numeric;
+                snapshot.lParamValue = scn.lParam;
+            }
+            break;
+    }
+}
+
+void copy_notification_lparam_payload(
+    const NotificationData& scn,
+    ScintillaQuick_notification& snapshot)
+{
+    switch (scn.nmhdr.code) {
+        case Notification::AutoCSelection:
+        case Notification::AutoCCompleted:
+        case Notification::AutoCSelectionChange:
+        case Notification::UserListSelection:
+            snapshot.lParamKind = ScintillaQuick_lparam_kind::Numeric;
+            snapshot.lParamValue = scn.lParam;
+            break;
+
+        case Notification::MacroRecord:
+            copy_macro_lparam_payload(scn, snapshot);
+            break;
+
+        default:
+            break;
+    }
+}
+
+ScintillaQuick_notification notification_snapshot_from(const NotificationData& scn)
+{
+    ScintillaQuick_notification snapshot;
+    snapshot.hwndFrom = reinterpret_cast<uptr_t>(scn.nmhdr.hwndFrom);
+    snapshot.idFrom = scn.nmhdr.idFrom;
+    snapshot.code = scn.nmhdr.code;
+    snapshot.position = scn.position;
+    snapshot.ch = scn.ch;
+    snapshot.modifiers = scn.modifiers;
+    snapshot.modificationType = scn.modificationType;
+    snapshot.length = scn.length;
+    snapshot.linesAdded = scn.linesAdded;
+    snapshot.message = scn.message;
+    snapshot.wParam = scn.wParam;
+    snapshot.line = scn.line;
+    snapshot.foldLevelNow = scn.foldLevelNow;
+    snapshot.foldLevelPrev = scn.foldLevelPrev;
+    snapshot.margin = scn.margin;
+    snapshot.listType = scn.listType;
+    snapshot.x = scn.x;
+    snapshot.y = scn.y;
+    snapshot.token = scn.token;
+    snapshot.annotationLinesAdded = scn.annotationLinesAdded;
+    snapshot.updated = scn.updated;
+    snapshot.listCompletionMethod = scn.listCompletionMethod;
+    snapshot.characterSource = scn.characterSource;
+
+    copy_notification_text_payload(scn, snapshot);
+    copy_notification_lparam_payload(scn, snapshot);
+    return snapshot;
+}
+
 void translate_rect(QRectF& rect, qreal dy)
 {
     if (!rect.isNull()) {
@@ -196,6 +392,11 @@ void translate_render_frame(Render_frame& frame, qreal dy)
         translate_rect(visual_line.clip_rect, dy);
         for (Text_run& run : visual_line.text_runs) {
             translate_point(run.position, dy);
+            run.top += dy;
+            run.bottom += dy;
+            translate_rect(run.blob_text_clip_rect, dy);
+            translate_rect(run.blob_outer_rect, dy);
+            translate_rect(run.blob_inner_rect, dy);
         }
     }
 
@@ -207,6 +408,8 @@ void translate_render_frame(Render_frame& frame, qreal dy)
     }
     for (Indicator_primitive& indicator : frame.indicator_primitives) {
         translate_rect(indicator.rect, dy);
+        translate_rect(indicator.line_rect, dy);
+        translate_rect(indicator.character_rect, dy);
     }
     for (Current_line_primitive& current_line : frame.current_line_primitives) {
         translate_rect(current_line.rect, dy);
@@ -245,6 +448,20 @@ void translate_render_frame(Render_frame& frame, qreal dy)
         guide.top += dy;
         guide.bottom += dy;
     }
+}
+
+template <typename Dispatch, typename Apply_update>
+sptr_t dispatch_scintilla_message(
+    unsigned int i_message,
+    uptr_t       w_param,
+    sptr_t       l_param,
+    Dispatch&&   dispatch,
+    Apply_update&& apply_update)
+{
+    const sptr_t result = std::forward<Dispatch>(dispatch)(
+        static_cast<Message>(i_message), w_param, l_param);
+    std::forward<Apply_update>(apply_update)(scene_graph_update_request(i_message));
+    return result;
 }
 
 QString text_for_visual_line(const Visual_line_frame& line)
@@ -425,6 +642,8 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
     , m_preedit_pos(-1)
     , m_render_data(std::make_unique<Render_data>())
 {
+    register_notification_metatypes();
+
     setAcceptedMouseButtons(Qt::AllButtons);
     setAcceptTouchEvents(true);
     setFlag(QQuickItem::ItemAcceptsInputMethod, true);
@@ -508,58 +727,66 @@ sptr_t ScintillaQuick_item::send(
     // once, in a single, well-marked place.
     ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
 
-    const sptr_t result = m_core->WndProc(static_cast<Message>(i_message), w_param, l_param);
-    const scene_graph_update_request_info_t update_request = scene_graph_update_request(i_message);
-    if (update_request.scroll_width_reset) {
-        self->reset_tracked_scroll_width();
-    }
-    // Re-entry guard (defence-in-depth): `syncQuickViewProperties()`
-    // itself issues SCI_* queries through `send()`. If any of those
-    // queries is not in the read-only allow-list, the dispatch's
-    // "unknown -> full resync" default would call
-    // `syncQuickViewProperties()` again, recursing until the stack
-    // overflows. The primary defence is the allow-list
-    // (`scene_graph_message_is_known_read_only()` in
-    // scintillaquick_dispatch_table.h); this guard ensures that a
-    // future missed entry degrades into "no nested resync" rather than
-    // a crash.
-    if (update_request.needed && !m_in_sync_quick_view_properties) {
-        // `syncQuickViewProperties()` is only needed when the
-        // dispatch result reports that static content, style state
-        // or scroll position might have changed. Pure caret /
-        // selection mutators (SCI_CHARRIGHT, SCI_GOTOPOS,
-        // SCI_SETSEL, ...) leave every single property exposed
-        // through `syncQuickViewProperties` untouched, so calling it
-        // per-message just burns CPU issuing SCI_TEXTHEIGHT /
-        // SCI_GETLINECOUNT / SCI_GETSCROLLWIDTH / SCI_LINESONSCREEN
-        // / SCI_GETFIRSTVISIBLELINE getters and running the
-        // `emit_if_changed` comparison loop to conclude nothing
-        // changed. In `caret_move_right_5000` that is 5000 copies of
-        // a no-op sync per second, which dominated the scenario cost.
-        //
-        // If a caret movement does end up scrolling the view (e.g.
-        // SCI_CHARRIGHT falling off the end of a long line),
-        // Scintilla fires `Notification::UpdateUI` with
-        // `Update::VScroll` set, and `updateQuickView()` synchronously
-        // calls `syncQuickViewProperties()` from the notification
-        // handler, so we do not lose any property change coverage by
-        // skipping the redundant call here.
-        const bool needs_property_sync =
-            update_request.static_content_dirty ||
-            update_request.needs_style_sync     ||
-            update_request.scrolling;
-        if (needs_property_sync) {
-            self->syncQuickViewProperties();
-            if (update_request.static_content_dirty && m_render_data) {
-                m_render_data->content_modified_since_last_capture = true;
-            }
+    auto apply_update_request = [this, self](const scene_graph_update_request_info_t& update_request) {
+        if (update_request.scroll_width_reset) {
+            self->reset_tracked_scroll_width();
         }
-        self->request_scene_graph_update(
-            update_request.static_content_dirty,
-            update_request.needs_style_sync,
-            update_request.scrolling);
-    }
-    return result;
+        // Re-entry guard (defence-in-depth): `syncQuickViewProperties()`
+        // itself issues SCI_* queries through `send()`. If any of those
+        // queries is not in the read-only allow-list, the dispatch's
+        // "unknown -> full resync" default would call
+        // `syncQuickViewProperties()` again, recursing until the stack
+        // overflows. The primary defence is the allow-list
+        // (`scene_graph_message_is_known_read_only()` in
+        // scintillaquick_dispatch_table.h); this guard ensures that a
+        // future missed entry degrades into "no nested resync" rather than
+        // a crash.
+        if (update_request.needed && !m_in_sync_quick_view_properties) {
+            // `syncQuickViewProperties()` is only needed when the
+            // dispatch result reports that static content, style state
+            // or scroll position might have changed. Pure caret /
+            // selection mutators (SCI_CHARRIGHT, SCI_GOTOPOS,
+            // SCI_SETSEL, ...) leave every single property exposed
+            // through `syncQuickViewProperties` untouched, so calling it
+            // per-message just burns CPU issuing SCI_TEXTHEIGHT /
+            // SCI_GETLINECOUNT / SCI_GETSCROLLWIDTH / SCI_LINESONSCREEN
+            // / SCI_GETFIRSTVISIBLELINE getters and running the
+            // `emit_if_changed` comparison loop to conclude nothing
+            // changed. In `caret_move_right_5000` that is 5000 copies of
+            // a no-op sync per second, which dominated the scenario cost.
+            //
+            // If a caret movement does end up scrolling the view (e.g.
+            // SCI_CHARRIGHT falling off the end of a long line),
+            // Scintilla fires `Notification::UpdateUI` with
+            // `Update::VScroll` set, and `updateQuickView()` synchronously
+            // calls `syncQuickViewProperties()` from the notification
+            // handler, so we do not lose any property change coverage by
+            // skipping the redundant call here.
+            const bool needs_property_sync =
+                update_request.static_content_dirty ||
+                update_request.needs_style_sync     ||
+                update_request.scrolling;
+            if (needs_property_sync) {
+                self->syncQuickViewProperties();
+                if (update_request.static_content_dirty && m_render_data) {
+                    m_render_data->content_modified_since_last_capture = true;
+                }
+            }
+            self->request_scene_graph_update(
+                update_request.static_content_dirty,
+                update_request.needs_style_sync,
+                update_request.scrolling);
+        }
+    };
+
+    return dispatch_scintilla_message(
+        i_message,
+        w_param,
+        l_param,
+        [this](Message message, uptr_t w, sptr_t l) {
+            return m_core->WndProc(message, w, l);
+        },
+        apply_update_request);
 }
 
 sptr_t ScintillaQuick_item::sends(
@@ -567,7 +794,38 @@ sptr_t ScintillaQuick_item::sends(
     uptr_t       w_param,
     const char*  s) const
 {
-    return m_core->WndProc(static_cast<Message>(i_message), w_param, reinterpret_cast<sptr_t>(s));
+    ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
+
+    auto apply_update_request = [this, self](const scene_graph_update_request_info_t& update_request) {
+        if (update_request.scroll_width_reset) {
+            self->reset_tracked_scroll_width();
+        }
+        if (update_request.needed && !m_in_sync_quick_view_properties) {
+            const bool needs_property_sync =
+                update_request.static_content_dirty ||
+                update_request.needs_style_sync     ||
+                update_request.scrolling;
+            if (needs_property_sync) {
+                self->syncQuickViewProperties();
+                if (update_request.static_content_dirty && m_render_data) {
+                    m_render_data->content_modified_since_last_capture = true;
+                }
+            }
+            self->request_scene_graph_update(
+                update_request.static_content_dirty,
+                update_request.needs_style_sync,
+                update_request.scrolling);
+        }
+    };
+
+    return dispatch_scintilla_message(
+        i_message,
+        w_param,
+        reinterpret_cast<sptr_t>(s),
+        [this](Message message, uptr_t w, sptr_t l) {
+            return m_core->WndProc(message, w, l);
+        },
+        apply_update_request);
 }
 
 bool ScintillaQuick_item::startProfilingSession(const QString& output_directory, double duration_seconds)
@@ -831,7 +1089,7 @@ void ScintillaQuick_item::wheelEvent(QWheelEvent* event)
         QQuickItem::wheelEvent(event);
     }
     else
-    if (QGuiApplication::keyboardModifiers() & Qt::ControlModifier) {
+    if (event->modifiers() & Qt::ControlModifier) {
         // Zoom! We play with the font sizes in the styles.
         // Number of steps/line is ignored, we just care if sizing up or down
         if (wheelEventYDelta(event) > 0) {
@@ -845,6 +1103,7 @@ void ScintillaQuick_item::wheelEvent(QWheelEvent* event)
         }
         syncQuickViewProperties();
         request_scene_graph_update(true, true, false);
+        event->accept();
     }
     else {
         // Scroll
@@ -855,7 +1114,7 @@ void ScintillaQuick_item::wheelEvent(QWheelEvent* event)
         else {
             scrollVertical(m_core->topLine + lines_to_scroll);
         }
-        QQuickItem::wheelEvent(event);
+        event->accept();
     }
 }
 
@@ -879,6 +1138,8 @@ void ScintillaQuick_item::focusOutEvent(QFocusEvent * event)
 
 void ScintillaQuick_item::geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry)
 {
+    QQuickItem::geometryChange(newGeometry, oldGeometry);
+
     // trigger resize handling only if the size of the control has changed
     // no update is needed for a position change
     if (newGeometry.width()  != oldGeometry.width() ||
@@ -886,7 +1147,6 @@ void ScintillaQuick_item::geometryChange(const QRectF& newGeometry, const QRectF
     {
         m_core->ChangeSize();
         emit resized();
-        QQuickItem::geometryChange(newGeometry, oldGeometry);
 
         if (m_render_data) {
             m_render_data->content_modified_since_last_capture = true;
@@ -901,7 +1161,7 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
 
     // All keystrokes containing the meta modifier are
     // assumed to be shortcuts not handled by scintilla.
-    if (QGuiApplication::keyboardModifiers() & Qt::MetaModifier) {
+    if (event->modifiers() & Qt::MetaModifier) {
         QQuickItem::keyPressEvent(event);
         emit keyPressed(event);
         return;
@@ -941,9 +1201,9 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
     bool ctrl  = event->modifiers() & Qt::ControlModifier;
     bool alt   = event->modifiers() & Qt::AltModifier;
 #else
-    bool shift = QGuiApplication::keyboardModifiers() & Qt::ShiftModifier;
-    bool ctrl  = QGuiApplication::keyboardModifiers() & Qt::ControlModifier;
-    bool alt   = QGuiApplication::keyboardModifiers() & Qt::AltModifier;
+    bool shift = event->modifiers() & Qt::ShiftModifier;
+    bool ctrl  = event->modifiers() & Qt::ControlModifier;
+    bool alt   = event->modifiers() & Qt::AltModifier;
 #endif
 
     bool consumed = false;
@@ -1006,6 +1266,12 @@ void ScintillaQuick_item::mousePressEvent(QMouseEvent * event)
 
     emit buttonPressed(event);
 
+    auto finish_consumed_press = [this, event]() {
+        forceActiveFocus();
+        emit enableScrollViewInteraction(false);
+        event->setAccepted(true);
+    };
+
     if (event->button() == Qt::MiddleButton &&
         QGuiApplication::clipboard()->supportsSelection())
     {
@@ -1014,6 +1280,9 @@ void ScintillaQuick_item::mousePressEvent(QMouseEvent * event)
         m_core->sel.Clear();
         m_core->SetSelection(selPos, selPos);
         m_core->PasteFromMode(QClipboard::Selection);
+        cursorChangedUpdateMarker();
+        request_scene_graph_update(true, true, false);
+        finish_consumed_press();
         return;
     }
 
@@ -1039,11 +1308,7 @@ void ScintillaQuick_item::mousePressEvent(QMouseEvent * event)
         request_scene_graph_update(false, false, false);
     }
 
-    forceActiveFocus();
-
-    emit enableScrollViewInteraction(false);
-
-    event->setAccepted(true);
+    finish_consumed_press();
 }
 
 void ProcessScintillaContextMenu(
@@ -1217,11 +1482,46 @@ void ScintillaQuick_item::DrawImeIndicator(int indicator, int len)
     }
 }
 
-static int GetImeCaretPos(QInputMethodEvent * event)
+static int bounded_ime_length(Sci::Position length)
+{
+    if (length <= 0) {
+        return 0;
+    }
+    const Sci::Position max_int = static_cast<Sci::Position>(std::numeric_limits<int>::max());
+    return static_cast<int>(std::min(length, max_int));
+}
+
+static std::pair<int, int> clamped_ime_attribute_range(int start, int length, int limit)
+{
+    const long long bounded_limit = std::max(0, limit);
+    long long begin = static_cast<long long>(start);
+    long long end = begin + static_cast<long long>(length);
+    if (end < begin) {
+        std::swap(begin, end);
+    }
+
+    begin = std::clamp(begin, 0LL, bounded_limit);
+    end = std::clamp(end, 0LL, bounded_limit);
+    if (end < begin) {
+        end = begin;
+    }
+
+    return {static_cast<int>(begin), static_cast<int>(end - begin)};
+}
+
+static int clamped_ime_position(int position, int limit)
+{
+    return static_cast<int>(std::clamp(
+        static_cast<long long>(position),
+        0LL,
+        static_cast<long long>(std::max(0, limit))));
+}
+
+static int GetImeCaretPos(QInputMethodEvent * event, int preedit_length)
 {
     foreach (QInputMethodEvent::Attribute attr, event->attributes()) {
         if (attr.type == QInputMethodEvent::Cursor) {
-            return attr.start;
+            return clamped_ime_position(attr.start, preedit_length);
         }
     }
     return 0;
@@ -1229,7 +1529,8 @@ static int GetImeCaretPos(QInputMethodEvent * event)
 
 static std::vector<int> MapImeIndicators(QInputMethodEvent * event)
 {
-    std::vector<int> ime_indicator(event->preeditString().size(), k_indicator_unknown);
+    const int preedit_length = event->preeditString().size();
+    std::vector<int> ime_indicator(preedit_length, k_indicator_unknown);
     foreach (QInputMethodEvent::Attribute attr, event->attributes()) {
         if (attr.type == QInputMethodEvent::TextFormat) {
             QTextFormat format = attr.value.value<QTextFormat>();
@@ -1267,7 +1568,10 @@ static std::vector<int> MapImeIndicators(QInputMethodEvent * event)
             }
 #endif
 
-            for (int i = attr.start; i < attr.start + attr.length; i++) {
+            const auto [range_start, range_length] =
+                clamped_ime_attribute_range(attr.start, attr.length, preedit_length);
+            const int range_end = range_start + range_length;
+            for (int i = range_start; i < range_end; i++) {
                 ime_indicator[i] = indicator;
             }
         }
@@ -1281,7 +1585,10 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
     // Great thanks for my forerunners, jiniya and BLUEnLIVE
 
     if (m_core->pdoc->IsReadOnly() || m_core->SelectionContainsProtected()) {
-        // Here, a canceling and/or completing composition function is needed.
+        m_core->ShowCaretAtCurrentPosition();
+        cursorChangedUpdateMarker();
+        request_scene_graph_update(false, false, false);
+        event->accept();
         return;
     }
 
@@ -1299,9 +1606,13 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         if (a.type == QInputMethodEvent::Selection) {
             const Sci::Position cur_pos = m_core->CurrentPosition();
             const int para_start        = m_core->pdoc->ParaUp(cur_pos);
+            const int para_end          = m_core->pdoc->ParaDown(cur_pos);
+            const int para_length       = bounded_ime_length(para_end - para_start);
+            const auto [selection_start, selection_length] =
+                clamped_ime_attribute_range(a.start, a.length, para_length);
 
-            SelectionPosition new_start(para_start + a.start);
-            SelectionPosition new_end(para_start + a.start + a.length);
+            SelectionPosition new_start(para_start + selection_start);
+            SelectionPosition new_end(para_start + selection_start + selection_length);
             if (new_start > new_end) {
                 m_core->SetSelection(new_end, new_start);
             }
@@ -1344,10 +1655,6 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
     if (!event->preeditString().isEmpty()) {
         const QString preedit_str = event->preeditString();
         const int preedit_str_len = preedit_str.length();
-        if (preedit_str_len == 0) {
-            m_core->ShowCaretAtCurrentPosition();
-            return;
-        }
 
         if (initial_compose) {
             m_core->ClearBeforeTentativeStart();
@@ -1370,7 +1677,7 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         }
 
         // Move IME carets.
-        int ime_caret_pos            = GetImeCaretPos(event);
+        int ime_caret_pos            = GetImeCaretPos(event, preedit_str_len);
         int ime_end_to_ime_caret_u16 = ime_caret_pos - preedit_str_len;
         const Sci::Position ime_caret_pos_doc =
             m_core->pdoc->GetRelativePositionUTF16(m_core->CurrentPosition(), ime_end_to_ime_caret_u16);
@@ -1392,6 +1699,13 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         m_core->EnsureCaretVisible();
     }
     m_core->ShowCaretAtCurrentPosition();
+    cursorChangedUpdateMarker();
+    syncQuickViewProperties();
+    if (m_render_data) {
+        m_render_data->content_modified_since_last_capture = true;
+    }
+    request_scene_graph_update(true, true, false);
+    event->accept();
 }
 
 QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const
@@ -1821,7 +2135,19 @@ const Render_frame& ScintillaQuick_item::rendered_frame_for_test() const
 
 void ScintillaQuick_item::notifyParent(NotificationData scn)
 {
+    static const QMetaMethod notification_received_signal =
+        QMetaMethod::fromSignal(&ScintillaQuick_item::notificationReceived);
+    const bool safe_notification_connected = isSignalConnected(notification_received_signal);
+    const char* const pre_notify_text = scn.text;
+    const Position pre_notify_length = scn.length;
+    const ScintillaQuick_notification snapshot =
+        safe_notification_connected ? notification_snapshot_from(scn) : ScintillaQuick_notification();
+
     emit notify(&scn);
+    if (safe_notification_connected) {
+        emit notificationReceived(snapshot);
+    }
+
     switch (scn.nmhdr.code) {
         case Notification::StyleNeeded:
             emit styleNeeded(scn.position);
@@ -1861,7 +2187,20 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
                 emit linesAdded(added ? 1 : -1);
             }
 
-            const QByteArray bytes = QByteArray::fromRawData(scn.text, scn.text ? scn.length : 0);
+            const QByteArray bytes = [&scn, safe_notification_connected, &snapshot,
+                pre_notify_text, pre_notify_length]() {
+                if (safe_notification_connected &&
+                    snapshot.code == Notification::Modified &&
+                    scn.text == pre_notify_text &&
+                    scn.length == pre_notify_length) {
+                    return snapshot.text;
+                }
+
+                qsizetype byte_count = 0;
+                return scn.text && scn.length > 0 && copy_position_byte_count(scn.length, byte_count)
+                    ? QByteArray(scn.text, byte_count)
+                    : QByteArray();
+            }();
             emit modified(scn.modificationType, scn.position, scn.length,
                 scn.linesAdded, bytes, scn.line, scn.foldLevelNow, scn.foldLevelPrev);
             if (m_render_data) {
@@ -2250,13 +2589,11 @@ void ScintillaQuick_item::setStylesFont(const QFont& f, int style)
 
 void ScintillaQuick_item::cursorChangedUpdateMarker()
 {
-    if (!m_core->pdoc->IsReadOnly()) {
-        syncCaretBlinkTimer(true);
-        emit qGuiApp->inputMethod()->cursorRectangleChanged(); // IMPORTANT: this moves the handle !!! see:
-                                                               // QQuickTextControl::updateCursorRectangle()
-        emit qGuiApp->inputMethod()->anchorRectangleChanged();
-        emit cursorPositionChanged();
-    }
+    syncCaretBlinkTimer(true);
+    emit qGuiApp->inputMethod()->cursorRectangleChanged(); // IMPORTANT: this moves the handle !!! see:
+                                                           // QQuickTextControl::updateCursorRectangle()
+    emit qGuiApp->inputMethod()->anchorRectangleChanged();
+    emit cursorPositionChanged();
 }
 
 void ScintillaQuick_item::syncCaretBlinkTimer(bool resetPhase)
@@ -2287,5 +2624,6 @@ void ScintillaQuick_item::syncCaretBlinkTimer(bool resetPhase)
 
 void register_scintilla_type()
 {
+    register_notification_metatypes();
     qmlRegisterType<ScintillaQuick_item>("ScintillaQuick", 1, 0, "ScintillaQuick_item");
 }

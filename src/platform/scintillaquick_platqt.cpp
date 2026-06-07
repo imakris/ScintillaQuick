@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <limits>
 
 #include <scintillaquick/scintillaquick_item.h>
 #include "../core/scintillaquick_hierarchical_profiler.h"
@@ -30,6 +31,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPalette>
+#include <QPointer>
 #include <QPixmap>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -279,12 +281,29 @@ const Font_and_character_set* as_font_and_character_set(const Font* f)
 
 QFont* font_pointer(const Font* f)
 {
-    return as_font_and_character_set(f)->m_font.get();
+    const Font_and_character_set* font = as_font_and_character_set(f);
+    return font && font->m_font ? font->m_font.get() : nullptr;
 }
 
 Surface_impl* as_surface_impl(Surface& surface) noexcept
 {
     return dynamic_cast<Surface_impl*>(&surface);
+}
+
+bool is_valid_rgba_image(int width, int height, const unsigned char* pixels_image) noexcept
+{
+    if (!pixels_image || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    const size_t image_width  = static_cast<size_t>(width);
+    const size_t image_height = static_cast<size_t>(height);
+    if (image_width > std::numeric_limits<size_t>::max() / image_height) {
+        return false;
+    }
+
+    const size_t pixel_count = image_width * image_height;
+    return pixel_count <= std::numeric_limits<size_t>::max() / 4;
 }
 
 const QScreen* screen_for_log_pixels() noexcept
@@ -398,9 +417,13 @@ void Surface_impl::PenColour(ColourRGBA fore)
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     QPen penOutline(QColorFromColourRGBA(fore));
     penOutline.setCapStyle(Qt::FlatCap);
-    GetPainter()->setPen(penOutline);
+    painter->setPen(penOutline);
 }
 
 void Surface_impl::PenColourWidth(ColourRGBA fore, XYPOSITION strokeWidth)
@@ -408,11 +431,15 @@ void Surface_impl::PenColourWidth(ColourRGBA fore, XYPOSITION strokeWidth)
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     QPen penOutline(QColorFromColourRGBA(fore));
     penOutline.setCapStyle(Qt::FlatCap);
     penOutline.setJoinStyle(Qt::MiterJoin);
     penOutline.setWidthF(strokeWidth);
-    GetPainter()->setPen(penOutline);
+    painter->setPen(penOutline);
 }
 
 void Surface_impl::BrushColour(ColourRGBA back)
@@ -420,7 +447,11 @@ void Surface_impl::BrushColour(ColourRGBA back)
     if (m_capture_only) {
         return;
     }
-    GetPainter()->setBrush(QBrush(QColorFromColourRGBA(back)));
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
+    painter->setBrush(QBrush(QColorFromColourRGBA(back)));
 }
 
 void Surface_impl::SetFont(const Font* font)
@@ -430,7 +461,9 @@ void Surface_impl::SetFont(const Font* font)
     }
     const Font_and_character_set* pfacs = as_font_and_character_set(font);
     if (pfacs && pfacs->m_font) {
-        GetPainter()->setFont(*(pfacs->m_font));
+        if (QPainter* painter = GetPainter()) {
+            painter->setFont(*(pfacs->m_font));
+        }
     }
 }
 
@@ -456,26 +489,38 @@ void Surface_impl::LineDraw(Point start, Point end, Stroke stroke)
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     PenColourWidth(stroke.colour, stroke.width);
     QLineF line(start.x, start.y, end.x, end.y);
-    GetPainter()->drawLine(line);
+    painter->drawLine(line);
 }
 
 void Surface_impl::PolyLine(const Point* pts, size_t npts, Stroke stroke)
 {
-    if (m_capture_only) {
+    if (m_capture_only || !pts || npts == 0) {
+        return;
+    }
+    QPainter* painter = GetPainter();
+    if (!painter) {
         return;
     }
     // TODO: set line joins and caps
     PenColourWidth(stroke.colour, stroke.width);
     std::vector<QPointF> qpts;
     std::transform(pts, pts + npts, std::back_inserter(qpts), QPointFFromPoint);
-    GetPainter()->drawPolyline(&qpts[0], static_cast<int>(npts));
+    painter->drawPolyline(qpts.data(), static_cast<int>(qpts.size()));
 }
 
 void Surface_impl::Polygon(const Point* pts, size_t npts, FillStroke fillStroke)
 {
-    if (m_capture_only) {
+    if (m_capture_only || !pts || npts == 0) {
+        return;
+    }
+    QPainter* painter = GetPainter();
+    if (!painter) {
         return;
     }
     PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
@@ -484,7 +529,7 @@ void Surface_impl::Polygon(const Point* pts, size_t npts, FillStroke fillStroke)
     std::vector<QPointF> qpts;
     std::transform(pts, pts + npts, std::back_inserter(qpts), QPointFFromPoint);
 
-    GetPainter()->drawPolygon(&qpts[0], static_cast<int>(npts));
+    painter->drawPolygon(qpts.data(), static_cast<int>(qpts.size()));
 }
 
 void Surface_impl::RectangleDraw(PRectangle rc, FillStroke fillStroke)
@@ -492,10 +537,14 @@ void Surface_impl::RectangleDraw(PRectangle rc, FillStroke fillStroke)
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
     BrushColour(fillStroke.fill.colour);
     const QRectF rect = QRectFFromPRect(rc.Inset(fillStroke.stroke.width / 2));
-    GetPainter()->drawRect(rect);
+    painter->drawRect(rect);
 }
 
 void Surface_impl::RectangleFrame(PRectangle rc, Stroke stroke)
@@ -503,11 +552,15 @@ void Surface_impl::RectangleFrame(PRectangle rc, Stroke stroke)
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     PenColourWidth(stroke.colour, stroke.width);
     // Default QBrush is Qt::NoBrush so does not fill
-    GetPainter()->setBrush(QBrush());
+    painter->setBrush(QBrush());
     const QRectF rect = QRectFFromPRect(rc.Inset(stroke.width / 2));
-    GetPainter()->drawRect(rect);
+    painter->drawRect(rect);
 }
 
 void Surface_impl::FillRectangle(PRectangle rc, Fill fill)
@@ -515,7 +568,11 @@ void Surface_impl::FillRectangle(PRectangle rc, Fill fill)
     if (m_capture_only) {
         return;
     }
-    GetPainter()->fillRect(QRectFFromPRect(rc), QColorFromColourRGBA(fill.colour));
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
+    painter->fillRect(QRectFFromPRect(rc), QColorFromColourRGBA(fill.colour));
 }
 
 void Surface_impl::FillRectangleAligned(PRectangle rc, Fill fill)
@@ -528,16 +585,20 @@ void Surface_impl::FillRectangle(PRectangle rc, Surface& surfacePattern)
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     // Tile pattern over rectangle
     Surface_impl* surface = as_surface_impl(surfacePattern);
     if (!surface) {
         return;
     }
-    const QPixmap* pixmap = static_cast<QPixmap*>(surface->GetPaintDevice());
+    const QPixmap* pixmap = dynamic_cast<const QPixmap*>(surface->GetPaintDevice());
     if (!pixmap) {
         return;
     }
-    GetPainter()->drawTiledPixmap(QRectFromPRect(rc), *pixmap);
+    painter->drawTiledPixmap(QRectFromPRect(rc), *pixmap);
 }
 
 void Surface_impl::RoundedRectangle(PRectangle rc, FillStroke fillStroke)
@@ -545,9 +606,13 @@ void Surface_impl::RoundedRectangle(PRectangle rc, FillStroke fillStroke)
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
     BrushColour(fillStroke.fill.colour);
-    GetPainter()->drawRoundedRect(QRectFFromPRect(rc), 3.0f, 3.0f);
+    painter->drawRoundedRect(QRectFFromPRect(rc), 3.0f, 3.0f);
 }
 
 void Surface_impl::AlphaRectangle(PRectangle rc, XYPOSITION cornerSize, FillStroke fillStroke)
@@ -555,35 +620,39 @@ void Surface_impl::AlphaRectangle(PRectangle rc, XYPOSITION cornerSize, FillStro
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     QColor q_fill = QColorFromColourRGBA(fillStroke.fill.colour);
     QBrush brush_fill(q_fill);
-    GetPainter()->setBrush(brush_fill);
+    painter->setBrush(brush_fill);
     if (fillStroke.fill.colour == fillStroke.stroke.colour) {
-        m_painter->setPen(Qt::NoPen);
+        painter->setPen(Qt::NoPen);
         QRectF rect = QRectFFromPRect(rc);
         if (cornerSize > 0.0f) {
             // A radius of 1 shows no curve so add 1
             qreal radius = cornerSize + 1;
-            GetPainter()->drawRoundedRect(rect, radius, radius);
+            painter->drawRoundedRect(rect, radius, radius);
         }
         else {
-            GetPainter()->fillRect(rect, brush_fill);
+            painter->fillRect(rect, brush_fill);
         }
     }
     else {
         QColor q_outline = QColorFromColourRGBA(fillStroke.stroke.colour);
         QPen pen_outline(q_outline);
         pen_outline.setWidthF(fillStroke.stroke.width);
-        GetPainter()->setPen(pen_outline);
+        painter->setPen(pen_outline);
 
         QRectF rect = QRectFFromPRect(rc.Inset(fillStroke.stroke.width / 2));
         if (cornerSize > 0.0f) {
             // A radius of 1 shows no curve so add 1
             qreal radius = cornerSize + 1;
-            GetPainter()->drawRoundedRect(rect, radius, radius);
+            painter->drawRoundedRect(rect, radius, radius);
         }
         else {
-            GetPainter()->drawRect(rect);
+            painter->drawRect(rect);
         }
     }
 }
@@ -594,6 +663,10 @@ void Surface_impl::GradientRectangle(
     GradientOptions                m_options)
 {
     if (m_capture_only) {
+        return;
+    }
+    QPainter* painter = GetPainter();
+    if (!painter) {
         return;
     }
     QRectF rect = QRectFFromPRect(rc);
@@ -612,13 +685,17 @@ void Surface_impl::GradientRectangle(
         linearGradient.setColorAt(stop.position, QColorFromColourRGBA(stop.colour));
     }
     QBrush brush = QBrush(linearGradient);
-    GetPainter()->fillRect(rect, brush);
+    painter->fillRect(rect, brush);
 }
 
 static std::vector<unsigned char> ImageByteSwapped(int width, int height, const unsigned char* pixels_image)
 {
     // Input is RGBA, but Format_ARGB32 is BGRA, so swap the red bytes and blue bytes
-    size_t bytes = width * height * 4;
+    if (!is_valid_rgba_image(width, height, pixels_image)) {
+        return {};
+    }
+    const size_t bytes =
+        static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(4);
     std::vector<unsigned char> image_bytes(pixels_image, pixels_image + bytes);
     for (size_t i = 0; i < bytes; i += 4) {
         std::swap(image_bytes[i], image_bytes[i + 2]);
@@ -632,13 +709,23 @@ void Surface_impl::DrawRGBAImage(
     int                  height,
     const unsigned char* pixels_image)
 {
-    if (m_capture_only) {
+    if (m_capture_only || !is_valid_rgba_image(width, height, pixels_image)) {
+        return;
+    }
+    QPainter* painter = GetPainter();
+    if (!painter) {
         return;
     }
     std::vector<unsigned char> image_bytes = ImageByteSwapped(width, height, pixels_image);
-    QImage image(&image_bytes[0], width, height, QImage::Format_ARGB32);
+    if (image_bytes.empty()) {
+        return;
+    }
+    QImage image(image_bytes.data(), width, height, QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
     QPoint pt(rc.left, rc.top);
-    GetPainter()->drawImage(pt, image);
+    painter->drawImage(pt, image);
 }
 
 void Surface_impl::Ellipse(PRectangle rc, FillStroke fillStroke)
@@ -646,15 +733,23 @@ void Surface_impl::Ellipse(PRectangle rc, FillStroke fillStroke)
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     PenColourWidth(fillStroke.stroke.colour, fillStroke.stroke.width);
     BrushColour(fillStroke.fill.colour);
     const QRectF rect = QRectFFromPRect(rc.Inset(fillStroke.stroke.width / 2));
-    GetPainter()->drawEllipse(rect);
+    painter->drawEllipse(rect);
 }
 
 void Surface_impl::Stadium(PRectangle rc, FillStroke fillStroke, Ends ends)
 {
     if (m_capture_only) {
+        return;
+    }
+    QPainter* painter = GetPainter();
+    if (!painter) {
         return;
     }
     const XYPOSITION halfStroke = fillStroke.stroke.width / 2.0f;
@@ -709,7 +804,7 @@ void Surface_impl::Stadium(PRectangle rc, FillStroke fillStroke, Ends ends)
 
     // Close the path to enclose it for stroking and for filling, then draw it
     path.closeSubpath();
-    GetPainter()->drawPath(path);
+    painter->drawPath(path);
 }
 
 void Surface_impl::Copy(PRectangle rc, Point from, Surface& surfaceSource)
@@ -717,17 +812,26 @@ void Surface_impl::Copy(PRectangle rc, Point from, Surface& surfaceSource)
     if (m_capture_only) {
         return;
     }
+    const XYPOSITION width  = rc.Width();
+    const XYPOSITION height = rc.Height();
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     Surface_impl* source = as_surface_impl(surfaceSource);
     Q_ASSERT(source);
     if (!source) {
         return;
     }
-    QPixmap* pixmap = static_cast<QPixmap*>(source->GetPaintDevice());
+    QPixmap* pixmap = dynamic_cast<QPixmap*>(source->GetPaintDevice());
     if (!pixmap) {
         return;
     }
 
-    GetPainter()->drawPixmap(rc.left, rc.top, *pixmap, from.x, from.y, -1, -1);
+    painter->drawPixmap(rc.left, rc.top, *pixmap, from.x, from.y, width, height);
 }
 
 std::unique_ptr<IScreenLineLayout> Surface_impl::Layout(const IScreenLine*)
@@ -746,13 +850,17 @@ void Surface_impl::DrawTextNoClip(
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     SetFont(font);
     PenColour(fore);
 
-    GetPainter()->setBackground(QColorFromColourRGBA(back));
-    GetPainter()->setBackgroundMode(Qt::OpaqueMode);
+    painter->setBackground(QColorFromColourRGBA(back));
+    painter->setBackgroundMode(Qt::OpaqueMode);
     QString su = unicode_from_text(text);
-    GetPainter()->drawText(QPointF(rc.left, y_base), su);
+    painter->drawText(QPointF(rc.left, y_base), su);
 }
 
 void Surface_impl::DrawTextClipped(
@@ -778,12 +886,16 @@ void Surface_impl::DrawTextTransparent(
     if (m_capture_only) {
         return;
     }
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
     SetFont(font);
     PenColour(fore);
 
-    GetPainter()->setBackgroundMode(Qt::TransparentMode);
+    painter->setBackgroundMode(Qt::TransparentMode);
     QString su = unicode_from_text(text);
-    GetPainter()->drawText(QPointF(rc.left, y_base), su);
+    painter->drawText(QPointF(rc.left, y_base), su);
 }
 
 void Surface_impl::SetClip(PRectangle rc)
@@ -791,8 +903,12 @@ void Surface_impl::SetClip(PRectangle rc)
     if (m_capture_only) {
         return;
     }
-    GetPainter()->save();
-    GetPainter()->setClipRect(QRectFFromPRect(rc));
+    QPainter* painter = GetPainter();
+    if (!painter) {
+        return;
+    }
+    painter->save();
+    painter->setClipRect(QRectFFromPRect(rc));
 }
 
 void Surface_impl::PopClip()
@@ -800,7 +916,9 @@ void Surface_impl::PopClip()
     if (m_capture_only) {
         return;
     }
-    GetPainter()->restore();
+    if (QPainter* painter = GetPainter()) {
+        painter->restore();
+    }
 }
 
 void Surface_impl::MeasureWidths(
@@ -809,7 +927,8 @@ void Surface_impl::MeasureWidths(
     XYPOSITION*      positions)
 {
     SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths");
-    if (!font) {
+    QFont* qfont = font_pointer(font);
+    if (!qfont || !positions) {
         return;
     }
 
@@ -834,7 +953,7 @@ void Surface_impl::MeasureWidths(
         SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.to_qstring");
         su = unicode_from_text(text);
     }
-    QTextLayout tlay(su, *font_pointer(font), paint_device);
+    QTextLayout tlay(su, *qfont, paint_device);
     QTextLine tl;
     {
         SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.layout_text");
@@ -861,26 +980,13 @@ void Surface_impl::MeasureWidths(
 
         SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions.cursor_walk");
         if (m_mode.codePage == SC_CP_UTF8) {
-            int fit = su.size();
-            int ui = 0;
-            size_t i = 0;
-            while (ui < fit) {
-                const unsigned char uch = text[i];
-                const unsigned int byte_count = UTF8BytesOfLead[uch];
-                const int code_units = UTF16LengthFromUTF8ByteCount(byte_count);
-                qreal x_position = tl.cursorToX(ui + code_units);
-                for (size_t byte_pos = 0; (byte_pos < byte_count) && (i < text.length()); byte_pos++) {
-                    positions[i++] = x_position;
-                }
-                ui += code_units;
-            }
-            XYPOSITION lastPos = 0;
-            if (i > 0) {
-                lastPos = positions[i - 1];
-            }
-            while (i < text.length()) {
-                positions[i++] = lastPos;
-            }
+            fill_utf8_cursor_positions_from_cursor(
+                text,
+                su.size(),
+                positions,
+                [&tl](int cursor_position) {
+                    return tl.cursorToX(cursor_position);
+                });
         }
         else
         if (m_mode.codePage) {
@@ -906,7 +1012,11 @@ void Surface_impl::MeasureWidths(
 
 XYPOSITION Surface_impl::WidthText(const Font* font, std::string_view text)
 {
-    QFontMetricsF metrics(*font_pointer(font), m_device);
+    QFont* qfont = font_pointer(font);
+    if (!qfont) {
+        return 0;
+    }
+    QFontMetricsF metrics(*qfont, GetPaintDevice());
     QString su = unicode_from_text(text);
     return metrics.horizontalAdvance(su);
 }
@@ -948,52 +1058,52 @@ void Surface_impl::MeasureWidthsUTF8(
     std::string_view text,
     XYPOSITION*      positions)
 {
-    if (!font) {
+    QFont* qfont = font_pointer(font);
+    if (!qfont || !positions) {
         return;
     }
     QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
-    QTextLayout tlay(su, *font_pointer(font), GetPaintDevice());
+    QTextLayout tlay(su, *qfont, GetPaintDevice());
     tlay.beginLayout();
     QTextLine tl = tlay.createLine();
     tlay.endLayout();
-    int fit  = su.size();
-    int ui   = 0;
-    size_t i = 0;
-    while (ui < fit) {
-        const unsigned char uch       = text[i];
-        const unsigned int byte_count = UTF8BytesOfLead[uch];
-        const int code_units          = UTF16LengthFromUTF8ByteCount(byte_count);
-        qreal x_position              = tl.cursorToX(ui + code_units);
-        for (size_t byte_pos = 0; (byte_pos < byte_count) && (i < text.length()); byte_pos++) {
-            positions[i++] = x_position;
-        }
-        ui += code_units;
-    }
-    XYPOSITION lastPos = 0;
-    if (i > 0) {
-        lastPos = positions[i - 1];
-    }
-    while (i < text.length()) {
-        positions[i++] = lastPos;
-    }
+    fill_utf8_cursor_positions_from_cursor(
+        text,
+        su.size(),
+        positions,
+        [&tl](int cursor_position) {
+            return tl.cursorToX(cursor_position);
+        });
 }
 
 XYPOSITION Surface_impl::WidthTextUTF8(const Font* font, std::string_view text)
 {
-    QFontMetricsF metrics(*font_pointer(font), m_device);
+    QFont* qfont = font_pointer(font);
+    if (!qfont) {
+        return 0;
+    }
+    QFontMetricsF metrics(*qfont, GetPaintDevice());
     QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
     return metrics.horizontalAdvance(su);
 }
 
 XYPOSITION Surface_impl::Ascent(const Font* font)
 {
-    QFontMetricsF metrics(*font_pointer(font), m_device);
+    QFont* qfont = font_pointer(font);
+    if (!qfont) {
+        return 0;
+    }
+    QFontMetricsF metrics(*qfont, GetPaintDevice());
     return metrics.ascent();
 }
 
 XYPOSITION Surface_impl::Descent(const Font* font)
 {
-    QFontMetricsF metrics(*font_pointer(font), m_device);
+    QFont* qfont = font_pointer(font);
+    if (!qfont) {
+        return 0;
+    }
+    QFontMetricsF metrics(*qfont, GetPaintDevice());
     // Qt reports a descent value that is 1 px short here, so compensate
     // to keep the ascent/descent pair consistent with the rendered line
     // height on the platforms this backend targets.
@@ -1007,21 +1117,32 @@ XYPOSITION Surface_impl::InternalLeading(const Font* /* font */)
 
 XYPOSITION Surface_impl::Height(const Font* font)
 {
-    QFontMetricsF metrics(*font_pointer(font), m_device);
+    QFont* qfont = font_pointer(font);
+    if (!qfont) {
+        return 0;
+    }
+    QFontMetricsF metrics(*qfont, GetPaintDevice());
     return metrics.height();
 }
 
 XYPOSITION Surface_impl::AverageCharWidth(const Font* font)
 {
-    QFontMetricsF metrics(*font_pointer(font), m_device);
+    QFont* qfont = font_pointer(font);
+    if (!qfont) {
+        return 0;
+    }
+    QFontMetricsF metrics(*qfont, GetPaintDevice());
     return metrics.averageCharWidth();
 }
 
 void Surface_impl::FlushCachedState()
 {
-    if (m_device->paintingActive()) {
-        GetPainter()->setPen(QPen());
-        GetPainter()->setBrush(QBrush());
+    QPaintDevice* device = GetPaintDevice();
+    if (device && device->paintingActive()) {
+        if (QPainter* painter = GetPainter()) {
+            painter->setPen(QPen());
+            painter->setBrush(QBrush());
+        }
     }
 }
 
@@ -1035,12 +1156,22 @@ QPaintDevice* Surface_impl::GetPaintDevice()
 QPainter* Surface_impl::GetPainter()
 {
     if (!m_painter) {
-        if (m_device->paintingActive()) {
-            m_painter = m_device->paintEngine()->painter();
+        QPaintDevice* device = GetPaintDevice();
+        if (!device) {
+            return nullptr;
+        }
+
+        if (device->paintingActive()) {
+            QPaintEngine* paint_engine = device->paintEngine();
+            m_painter = paint_engine ? paint_engine->painter() : nullptr;
         }
         else {
             m_painter_owned = true;
-            m_painter = new QPainter(m_device);
+            m_painter = new QPainter(device);
+        }
+
+        if (!m_painter) {
+            return nullptr;
         }
 
         // Set text antialiasing unconditionally.
@@ -1067,9 +1198,133 @@ std::unique_ptr<Surface> Surface::Allocate(Technology)
 namespace
 {
 
-QQuickItem* window(WindowID wid) noexcept
+QQuickItem* raw_window_item(WindowID wid) noexcept
 {
     return static_cast<QQuickItem*>(wid);
+}
+
+struct Owned_window_record
+{
+    QPointer<QQuickItem> item;
+    Window* owner = nullptr;
+    Platform_owned_window_kind kind = Platform_owned_window_kind::CallTip;
+};
+
+QHash<WindowID, Owned_window_record>& owned_window_registry()
+{
+    static QHash<WindowID, Owned_window_record> registry;
+    return registry;
+}
+
+QHash<Window*, WindowID>& owned_window_owner_index()
+{
+    static QHash<Window*, WindowID> owners;
+    return owners;
+}
+
+QQuickItem* resolve_window_item_for_owner(const Window& owner) noexcept
+{
+    const WindowID handle = owner.GetID();
+    if (!handle) {
+        return nullptr;
+    }
+
+    const auto& registry = owned_window_registry();
+    const auto it = registry.constFind(handle);
+    const auto& owners = owned_window_owner_index();
+    const auto owner_it = owners.constFind(const_cast<Window*>(&owner));
+    const bool owner_tracks_handle = owner_it != owners.constEnd() && owner_it.value() == handle;
+
+    if (it != registry.constEnd()) {
+        if (it->owner == &owner) {
+            return it->item.data();
+        }
+        if (owner_tracks_handle) {
+            return nullptr;
+        }
+        return raw_window_item(handle);
+    }
+
+    if (owner_tracks_handle) {
+        return nullptr;
+    }
+
+    return raw_window_item(handle);
+}
+
+void mark_owned_window_destroyed(WindowID handle) noexcept
+{
+    auto& registry = owned_window_registry();
+    auto it = registry.find(handle);
+    if (it == registry.end()) {
+        return;
+    }
+
+    if (it->kind == Platform_owned_window_kind::CallTip) {
+        if (it->owner && it->owner->GetID() == handle) {
+            owned_window_owner_index().remove(it->owner);
+            *it->owner = nullptr;
+        }
+        registry.erase(it);
+        return;
+    }
+
+    // Preserve the owning Window's raw handle until Scintilla drives its
+    // normal Destroy()/Cancel() path. AutoComplete::Cancel() only clears its
+    // active flag when the list box still reports Created(), while all stale
+    // item access remains safe because resolution returns null for tombstones.
+    it->item = nullptr;
+}
+
+void detach_owned_window_owner(Window& owner) noexcept
+{
+    auto& owners = owned_window_owner_index();
+    auto owner_it = owners.find(&owner);
+    if (owner_it == owners.end()) {
+        return;
+    }
+
+    const WindowID handle = owner_it.value();
+    owners.erase(owner_it);
+
+    auto& registry = owned_window_registry();
+    auto record_it = registry.find(handle);
+    if (record_it != registry.end() && record_it->owner == &owner) {
+        record_it->owner = nullptr;
+    }
+}
+
+void destroy_or_clear_window(Window& owner) noexcept
+{
+    const WindowID handle = owner.GetID();
+    if (!handle) {
+        detach_owned_window_owner(owner);
+        return;
+    }
+
+    auto& registry = owned_window_registry();
+    auto record_it = registry.find(handle);
+    if (record_it == registry.end()) {
+        owned_window_owner_index().remove(&owner);
+        owner = nullptr;
+        return;
+    }
+
+    if (record_it->owner != &owner) {
+        owned_window_owner_index().remove(&owner);
+        owner = nullptr;
+        return;
+    }
+
+    QPointer<QQuickItem> item = record_it->item;
+    owned_window_owner_index().remove(&owner);
+    record_it->owner = nullptr;
+    owner = nullptr;
+    registry.erase(record_it);
+
+    if (item) {
+        delete item.data();
+    }
 }
 
 QRect ScreenRectangleForPoint(QPoint pos_global)
@@ -1083,37 +1338,81 @@ QRect ScreenRectangleForPoint(QPoint pos_global)
 
 } // namespace
 
-Window::~Window() noexcept = default;
+void register_owned_window(
+    Window& owner,
+    QQuickItem* item,
+    Platform_owned_window_kind kind) noexcept
+{
+    destroy_or_clear_window(owner);
+    if (!item) {
+        return;
+    }
+
+    const WindowID handle = item;
+    owner = handle;
+
+    auto& registry = owned_window_registry();
+    registry.insert(handle, Owned_window_record{QPointer<QQuickItem>(item), &owner, kind});
+    owned_window_owner_index().insert(&owner, handle);
+
+    QObject::connect(item, &QObject::destroyed, [handle](QObject*) {
+        mark_owned_window_destroyed(handle);
+    });
+}
+
+QQuickItem* resolve_window_item(WindowID wid) noexcept
+{
+    if (!wid) {
+        return nullptr;
+    }
+
+    const auto& registry = owned_window_registry();
+    const auto it = registry.constFind(wid);
+    if (it != registry.constEnd()) {
+        return it->item.data();
+    }
+
+    return raw_window_item(wid);
+}
+
+Window::~Window() noexcept
+{
+    detach_owned_window_owner(*this);
+}
 
 void Window::Destroy() noexcept
 {
-    if (wid) {
-        delete window(wid);
-    }
-    wid = nullptr;
+    destroy_or_clear_window(*this);
 }
 PRectangle Window::GetPosition() const
 {
     // Before any size allocated pretend its 1000 wide so not scrolled
-    return wid
+    QQuickItem* item = resolve_window_item_for_owner(*this);
+    return item
         ? PRectangle(
-              window(wid)->x(),                        window(wid)->y(),
-              window(wid)->x() + window(wid)->width(), window(wid)->y() + window(wid)->height())
+              item->x(),                 item->y(),
+              item->x() + item->width(), item->y() + item->height())
         : PRectangle(0, 0, 1000, 1000);
 }
 
 void Window::SetPosition(PRectangle rc)
 {
-    if (wid) {
+    if (QQuickItem* item = resolve_window_item_for_owner(*this)) {
         QRect a_rect = QRectFromPRect(rc);
-        window(wid)->setPosition(QPointF(a_rect.x(), a_rect.y()));
-        window(wid)->setSize(QSizeF(a_rect.width(),  a_rect.height()));
+        item->setPosition(QPointF(a_rect.x(), a_rect.y()));
+        item->setSize(QSizeF(a_rect.width(),  a_rect.height()));
     }
 }
 
 void Window::SetPositionRelative(PRectangle rc, const Window* relativeTo)
 {
-    QPointF origin = window(relativeTo->wid)->mapToGlobal(QPointF(0, 0));
+    QQuickItem* target = resolve_window_item_for_owner(*this);
+    QQuickItem* relative = relativeTo ? resolve_window_item_for_owner(*relativeTo) : nullptr;
+    if (!target || !relative) {
+        return;
+    }
+
+    QPointF origin = relative->mapToGlobal(QPointF(0, 0));
     int ox = origin.x();
     int oy = origin.y();
     ox += rc.left;
@@ -1141,12 +1440,10 @@ void Window::SetPositionRelative(PRectangle rc, const Window* relativeTo)
         oy = rect_desk.top();
     }
 
-    Q_ASSERT(wid);
-    QQuickItem* target           = window(wid);
     QQuickItem* target_parent    = target->parentItem();
     const QPointF local_position = target_parent ? target_parent->mapFromGlobal(QPointF(ox, oy)) : QPointF(ox, oy);
     target->setPosition(local_position);
-    window(wid)->setSize(QSizeF(sizex, sizey));
+    target->setSize(QSizeF(sizex, sizey));
 }
 
 PRectangle Window::GetClientPosition() const
@@ -1157,19 +1454,19 @@ PRectangle Window::GetClientPosition() const
 
 void Window::Show(bool show)
 {
-    if (wid) {
-        window(wid)->setVisible(show);
+    if (QQuickItem* item = resolve_window_item_for_owner(*this)) {
+        item->setVisible(show);
     }
 }
 
 void Window::InvalidateAll()
 {
-    if (wid) {
-        if (auto* item = qobject_cast<ScintillaQuick_item*>(window(wid))) {
+    if (QQuickItem* window_item = resolve_window_item_for_owner(*this)) {
+        if (auto* item = qobject_cast<ScintillaQuick_item*>(window_item)) {
             item->request_scene_graph_update();
         }
         else {
-            window(wid)->update();
+            window_item->update();
         }
     }
 }
@@ -1177,19 +1474,19 @@ void Window::InvalidateAll()
 void Window::InvalidateRectangle(PRectangle rc)
 {
     Q_UNUSED(rc);
-    if (wid) {
-        if (auto* item = qobject_cast<ScintillaQuick_item*>(window(wid))) {
+    if (QQuickItem* window_item = resolve_window_item_for_owner(*this)) {
+        if (auto* item = qobject_cast<ScintillaQuick_item*>(window_item)) {
             item->request_scene_graph_update();
         }
         else {
-            window(wid)->update();
+            window_item->update();
         }
     }
 }
 
 void Window::SetCursor(Cursor curs)
 {
-    if (wid) {
+    if (QQuickItem* item = resolve_window_item_for_owner(*this)) {
         Qt::CursorShape shape;
 
         switch (curs) {
@@ -1206,7 +1503,7 @@ void Window::SetCursor(Cursor curs)
         QCursor cursor = QCursor(shape);
 
         if (curs != cursorLast) {
-            window(wid)->setCursor(cursor);
+            item->setCursor(cursor);
             cursorLast = curs;
         }
     }
@@ -1216,8 +1513,13 @@ void Window::SetCursor(Cursor curs)
    window coordinates */
 PRectangle Window::GetMonitorRect(Point pt)
 {
-    const QPointF origin_global = window(wid)->mapToGlobal(QPoint(0, 0));
-    const QPointF pos_global    = window(wid)->mapToGlobal(QPoint(pt.x, pt.y));
+    QQuickItem* item = resolve_window_item_for_owner(*this);
+    if (!item) {
+        return PRectangle(0, 0, 0, 0);
+    }
+
+    const QPointF origin_global = item->mapToGlobal(QPoint(0, 0));
+    const QPointF pos_global    = item->mapToGlobal(QPoint(pt.x, pt.y));
     QRect rect_screen           = ScreenRectangleForPoint( QPoint(pos_global.x(), pos_global.y()));
     rect_screen.translate(-origin_global.x(), -origin_global.y());
     return PRectFromQRect(rect_screen);
@@ -1686,7 +1988,11 @@ void List_box_impl::Create(
     Technology /*technology*/)
 {
     m_unicode_mode = unicode_mode;
-    QQuickItem* qparent = window(parent.GetID());
+    Destroy();
+
+    // Resolve through ownership tracking so a stale owned parent becomes
+    // null instead of falling back to a dangling borrowed handle.
+    QQuickItem* qparent = resolve_window_item_for_owner(parent);
     QQuickItem* overlay_parent =
         qparent && qparent->window()
             ? qparent->window()->contentItem()
@@ -1703,7 +2009,7 @@ void List_box_impl::Create(
     for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
         list->registerImage(it.key(), it.value());
     }
-    wid = list;
+    register_owned_window(*this, list, Platform_owned_window_kind::ListBox);
 }
 void List_box_impl::SetFont(const Font* font)
 {
@@ -1786,7 +2092,7 @@ std::string List_box_impl::GetValue(int n)
     Quick_list_box_item* list = GetWidget();
     QString str               = list ? list->valueAt(n) : QString();
     QByteArray bytes          = m_unicode_mode ? str.toUtf8() : str.toLocal8Bit();
-    return std::string(bytes.constData());
+    return std::string(bytes.constData(), static_cast<size_t>(bytes.size()));
 }
 
 void List_box_impl::RegisterQPixmapImage(int type, const QPixmap& pm)
@@ -1807,8 +2113,17 @@ void List_box_impl::RegisterImage(int type, const char* xpmData)
 
 void List_box_impl::RegisterRGBAImage(int type, int width, int height, const unsigned char* pixels_image)
 {
+    if (!is_valid_rgba_image(width, height, pixels_image)) {
+        return;
+    }
     std::vector<unsigned char> image_bytes = ImageByteSwapped(width, height, pixels_image);
-    QImage image(&image_bytes[0], width, height, QImage::Format_ARGB32);
+    if (image_bytes.empty()) {
+        return;
+    }
+    QImage image(image_bytes.data(), width, height, QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
     RegisterQPixmapImage(type, QPixmap::fromImage(image));
 }
 
@@ -1870,7 +2185,7 @@ void List_box_impl::SetOptions(ListOptions options)
 
 Quick_list_box_item* List_box_impl::GetWidget() const noexcept
 {
-    return static_cast<Quick_list_box_item*>(wid);
+    return dynamic_cast<Quick_list_box_item*>(resolve_window_item_for_owner(*this));
 }
 
 ListBox::ListBox()  noexcept = default;
@@ -1900,6 +2215,9 @@ void Menu::Destroy() noexcept
 
 void Menu::Show(Point pt, const Window& w)
 {
+    if (!mid) {
+        return;
+    }
     QList<QPair<QString, QPair<int, bool>>>* menu = static_cast<QList<QPair<QString, QPair<int, bool>>>*>(mid);
     ProcessScintillaContextMenu(pt, w, *menu);
     Destroy();

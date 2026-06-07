@@ -7,6 +7,7 @@
 #ifndef SCINTILLAQUICK_PLATQT_H
 #define SCINTILLAQUICK_PLATQT_H
 
+#include <algorithm>
 #include <cstddef>
 
 #include <string>
@@ -20,7 +21,6 @@
 #include "ScintillaTypes.h"
 #include "ScintillaMessages.h"
 #include "Platform.h"
-
 #include <QUrl>
 #include <QColor>
 #include <QPoint>
@@ -31,8 +31,92 @@
 #include <QPainter>
 #include <QHash>
 
+class QQuickItem;
+
 namespace Scintilla::Internal
 {
+
+struct Utf8_measure_step
+{
+    size_t byte_count = 1;
+    int code_units = 1;
+};
+
+constexpr size_t utf8_nominal_byte_count(unsigned char lead) noexcept
+{
+    if (lead < 0xc0) {
+        return 1;
+    }
+    if (lead < 0xe0) {
+        return 2;
+    }
+    if (lead < 0xf0) {
+        return 3;
+    }
+    if (lead < 0xf5) {
+        return 4;
+    }
+    return 1;
+}
+
+constexpr int utf16_code_units_from_utf8_byte_count(size_t byte_count) noexcept
+{
+    return byte_count < 4 ? 1 : 2;
+}
+
+inline Utf8_measure_step utf8_measure_step(std::string_view text, size_t byte_index, int remaining_code_units) noexcept
+{
+    if (byte_index >= text.length() || remaining_code_units <= 0) {
+        return {};
+    }
+
+    const size_t remaining_bytes = text.length() - byte_index;
+    if (remaining_bytes == 0) {
+        return {};
+    }
+
+    const unsigned char lead = static_cast<unsigned char>(text[byte_index]);
+    const size_t nominal_byte_count = utf8_nominal_byte_count(lead);
+    const size_t byte_count = std::clamp<size_t>(nominal_byte_count, 1, remaining_bytes);
+    const int code_units = std::clamp(
+        utf16_code_units_from_utf8_byte_count(byte_count),
+        1,
+        remaining_code_units);
+
+    return {byte_count, code_units};
+}
+
+template <typename CursorToX>
+void fill_utf8_cursor_positions_from_cursor(
+    std::string_view text,
+    int utf16_length,
+    XYPOSITION* positions,
+    CursorToX cursor_to_x)
+{
+    if (!positions) {
+        return;
+    }
+
+    int ui = 0;
+    size_t i = 0;
+    while (i < text.length() && ui < utf16_length) {
+        const Utf8_measure_step step = utf8_measure_step(text, i, utf16_length - ui);
+        const size_t next_i = std::min(text.length(), i + step.byte_count);
+        const XYPOSITION x_position = static_cast<XYPOSITION>(cursor_to_x(ui + step.code_units));
+        while (i < next_i) {
+            positions[i++] = x_position;
+        }
+        ui += step.code_units;
+    }
+
+    XYPOSITION lastPos = 0;
+    if (i > 0) {
+        lastPos = positions[i - 1];
+    }
+    while (i < text.length()) {
+        positions[i++] = lastPos;
+    }
+}
 
 inline QColor QColorFromColourRGBA(ColourRGBA ca)
 {
@@ -58,6 +142,18 @@ inline PRectangle PRectFromQRectF(QRectF qr)
 {
     return PRectangle(qr.x(), qr.y(), qr.x() + qr.width(), qr.y() + qr.height());
 }
+
+enum class Platform_owned_window_kind
+{
+    CallTip,
+    ListBox,
+};
+
+void register_owned_window(
+    Window& owner,
+    QQuickItem* item,
+    Platform_owned_window_kind kind) noexcept;
+QQuickItem* resolve_window_item(WindowID wid) noexcept;
 
 inline Point PointFromQPoint(QPoint qp)
 {

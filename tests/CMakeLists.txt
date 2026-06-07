@@ -24,13 +24,13 @@ function(scintillaquick_set_test_environment test_name target_name extra_environ
                 ";QT_PLUGIN_PATH=${scintillaquick_qt_plugin_dir}"
                 ";QT_QPA_PLATFORM_PLUGIN_PATH=${scintillaquick_qt_plugin_dir}/platforms")
             set(test_path_modification
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${target_name}>;PATH=path_list_prepend:${scintillaquick_qt_bin_dir}")
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${target_name}>;PATH=path_list_prepend:$<TARGET_FILE_DIR:ScintillaQuick>;PATH=path_list_prepend:${scintillaquick_qt_bin_dir}")
         else()
             string(APPEND test_environment
                 ";QT_PLUGIN_PATH=$<TARGET_FILE_DIR:${target_name}>"
                 ";QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${target_name}>/platforms")
             set(test_path_modification
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${target_name}>")
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${target_name}>;PATH=path_list_prepend:$<TARGET_FILE_DIR:ScintillaQuick>")
         endif()
 
         set_tests_properties(
@@ -76,12 +76,16 @@ function(scintillaquick_add_quick_test_target target_name source_file)
         ScintillaQuick::ScintillaQuick
         Qt6::Core
         Qt6::Gui
+        Qt6::Qml
         Qt6::Quick)
 endfunction()
 
 scintillaquick_add_quick_test_target(
     scintillaquick_smoke_test
-    smoke/main.cpp)
+    smoke/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/platform
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/render)
 
 scintillaquick_register_validation_test(
     scintillaquick_smoke_test
@@ -120,6 +124,25 @@ target_link_libraries(
 add_test(
     NAME scintillaquick_dispatch_table_test
     COMMAND scintillaquick_dispatch_table_test)
+
+# Audit-only Scintilla.iface inventory check. This does not compile or generate
+# dispatch code; it reports drift between the vendored iface inventory and the
+# checked-in manual rule table.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(
+        NAME scintillaquick_dispatch_iface_audit_test
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tools/dispatch/audit_dispatch_table.py
+            --check
+            --repo-root
+            ${CMAKE_CURRENT_SOURCE_DIR}/..)
+else()
+    message(WARNING
+        "Python3 interpreter not found; skipping "
+        "scintillaquick_dispatch_iface_audit_test")
+endif()
 
 # --- Review capture utility ---
 
