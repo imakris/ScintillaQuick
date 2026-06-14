@@ -1,5 +1,9 @@
 # ScintillaQuick
 
+[![CI Linux](https://github.com/imakris/ScintillaQuick/actions/workflows/ci-linux.yml/badge.svg?branch=master)](https://github.com/imakris/ScintillaQuick/actions/workflows/ci-linux.yml)
+[![CI macOS](https://github.com/imakris/ScintillaQuick/actions/workflows/ci-macos.yml/badge.svg?branch=master)](https://github.com/imakris/ScintillaQuick/actions/workflows/ci-macos.yml)
+[![CI Windows](https://github.com/imakris/ScintillaQuick/actions/workflows/ci-windows.yml/badge.svg?branch=master)](https://github.com/imakris/ScintillaQuick/actions/workflows/ci-windows.yml)
+
 `ScintillaQuick` is a Qt Quick-native integration of the
 [Scintilla](https://www.scintilla.org/) editing engine.
 
@@ -26,7 +30,7 @@ It is intended for applications that want Scintilla behavior inside a real
 | macOS | 🟢 | 🟢 | 🟢 | 🟢 | GitHub Actions runs dispatch-table, smoke, and frame-validation tests. |
 | Windows | 🟢 | 🟢 | 🟢 | 🟢 | Shared-build test jobs add `build/Release` to `PATH` so `ScintillaQuick.dll` is found at runtime. |
 
-Current `master` status: all GitHub Actions matrix jobs pass on Qt `6.7.2`.
+Current `master` status: all platform GitHub Actions jobs pass on Qt `6.7.2`.
 
 Current repository state:
 

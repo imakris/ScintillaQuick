@@ -1,4 +1,4 @@
-name: Build and test
+name: CI Windows
 
 on:
   push:
@@ -12,37 +12,13 @@ concurrency:
 
 jobs:
   build:
-    name: ${{ matrix.os }} / Qt ${{ matrix.qt-version }} / shared=${{ matrix.build-shared }}
+    name: Windows / Qt 6.7.2 / shared=${{ matrix.build-shared }}
+    runs-on: windows-latest
+
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            qt-version: 6.7.2
-            qt-arch: linux_gcc_64
-            build-shared: OFF
-          - os: windows-latest
-            qt-version: 6.7.2
-            qt-arch: win64_msvc2019_64
-            build-shared: OFF
-          - os: windows-latest
-            qt-version: 6.7.2
-            qt-arch: win64_msvc2019_64
-            build-shared: ON
-          - os: macos-latest
-            qt-version: 6.7.2
-            qt-arch: clang_64
-            build-shared: OFF
-          - os: macos-latest
-            qt-version: 6.7.2
-            qt-arch: clang_64
-            build-shared: ON
-          - os: ubuntu-latest
-            qt-version: 6.7.2
-            qt-arch: linux_gcc_64
-            build-shared: ON
-
-    runs-on: ${{ matrix.os }}
+        build-shared: [OFF, ON]
 
     steps:
       - uses: actions/checkout@v4
@@ -50,15 +26,9 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ matrix.qt-version }}
-          arch: ${{ matrix.qt-arch }}
+          version: 6.7.2
+          arch: win64_msvc2019_64
           cache: true
-
-      - name: Install offscreen platform dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxkbcommon0 libegl1 libgl1 libdbus-1-3 libfontconfig1
 
       - name: Configure
         run: >
@@ -73,8 +43,8 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Add built DLL directory to PATH (Windows shared)
-        if: runner.os == 'Windows' && matrix.build-shared == 'ON'
+      - name: Add built DLL directory to PATH (shared)
+        if: matrix.build-shared == 'ON'
         shell: pwsh
         run: |
           "$PWD/build/Release" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -114,8 +84,4 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PWD/build/_install"
           cmake --build build/_consumer/_build --config Release
           export PATH="$PWD/build/_install/bin:$PATH"
-          if [ -x ./build/_consumer/_build/consumer_smoke ]; then
-            ./build/_consumer/_build/consumer_smoke
-          else
-            ./build/_consumer/_build/Release/consumer_smoke.exe
-          fi
+          ./build/_consumer/_build/Release/consumer_smoke.exe
