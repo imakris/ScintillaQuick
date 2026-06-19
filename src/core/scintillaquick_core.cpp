@@ -4,7 +4,6 @@
 // @file ScintillaQuick_core.cpp - Qt specific subclass of ScintillaBase
 
 #include "scintillaquick_core.h"
-#include "scintillaquick_hierarchical_profiler.h"
 #include "scintillaquick_platqt.h"
 #include <scintillaquick/scintillaquick_item.h>
 
@@ -439,8 +438,6 @@ Render_frame ScintillaQuick_core::current_render_frame(
     bool scrolling,
     int extra_capture_lines)
 {
-    SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.current_render_frame");
-
     Render_frame frame;
 
     if (!m_owner) {
@@ -500,17 +497,13 @@ Render_frame ScintillaQuick_core::current_render_frame(
     const auto restore_buffered_draw =
         qScopeGuard([&] { view.bufferedDraw = buffered_draw_before_capture; });
 
-    {
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.current_render_frame.paint_text");
-        view.PaintText(surface, *this, capture_rect, client_rect, vs, &collector);
-    }
+    view.PaintText(surface, *this, capture_rect, client_rect, vs, &collector);
 
     PRectangle margin_rect = capture_rect;
     margin_rect.Move(0.0, -GetVisibleOriginInMain().y);
     margin_rect.left = 0.0;
     margin_rect.right = static_cast<XYPOSITION>(vs.fixedColumnWidth);
     if (capture_rect.Intersects(margin_rect)) {
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.current_render_frame.paint_margin");
         marginView.PaintMargin(surface, topLine, capture_rect, margin_rect, *this, vs, &collector);
     }
 

@@ -144,14 +144,6 @@ else()
         "scintillaquick_dispatch_iface_audit_test")
 endif()
 
-# --- Review capture utility ---
-
-scintillaquick_add_quick_test_target(
-    scintillaquick_review_capture
-    review_capture/main.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/render)
-
 # --- Benchmark-backed validation ---
 #
 # The embedded benchmark executable is declared at the top-level
@@ -159,7 +151,17 @@ scintillaquick_add_quick_test_target(
 # benchmarks are disabled, skip registering the test rather than
 # failing CMake with "target does not exist".
 if(TARGET scintillaquick_embedded_benchmark)
-    scintillaquick_register_validation_test(
+    add_test(
+        NAME scintillaquick_embedded_benchmark
+        COMMAND scintillaquick_embedded_benchmark
+            -s vertical_scroll_step_latency_64
+            -s vertical_scroll_page_step_latency_16
+            -s vertical_scroll_bounce_latency_48
+            -s vertical_wheel_bounce_latency_48
+            -s wrapped_wheel_bounce_latency_24
+            -s zoom_wheel_bounce_latency_24)
+
+    scintillaquick_set_test_environment(
         scintillaquick_embedded_benchmark
         scintillaquick_embedded_benchmark
         ";QT_FONT_DPI=96;QT_SCALE_FACTOR=1;QT_ENABLE_HIGHDPI_SCALING=0")

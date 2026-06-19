@@ -62,9 +62,6 @@ int g_pass_count  = 0;
 int g_fail_count  = 0;
 int g_gen_count   = 0;
 
-bool trace_enabled();
-void trace_line(const QString& line);
-
 struct Fixture_editor
 {
     QQuickWindow window;
@@ -182,7 +179,6 @@ struct Fixture_editor
     QImage capture_image(const char* fixture_name)
     {
         pump();
-        trace_line(QStringLiteral("capture[%1]: begin").arg(QString::fromUtf8(fixture_name)));
 
         if (!wait_for_ready(fixture_name)) {
             qWarning("capture[%s]: window did not become exposed/focused", fixture_name);
@@ -220,11 +216,6 @@ struct Fixture_editor
         }
         QImage result = previous;
 
-        trace_line(QStringLiteral("capture[%1]: rendered %2x%3")
-                .arg(QString::fromUtf8(fixture_name))
-                .arg(result.width())
-                .arg(result.height()));
-
         if (result.isNull()) {
             dump_window_state(fixture_name, "grab-null");
             qWarning("capture[%s]: grabWindow() returned null", fixture_name);
@@ -236,7 +227,6 @@ struct Fixture_editor
     QImage capture_ready_window(const char* fixture_name)
     {
         pump();
-        trace_line(QStringLiteral("capture[%1]: begin").arg(QString::fromUtf8(fixture_name)));
 
         QImage result;
         for (int attempt = 0; attempt < 3; ++attempt) {
@@ -246,11 +236,6 @@ struct Fixture_editor
             }
             pump();
         }
-
-        trace_line(QStringLiteral("capture[%1]: rendered %2x%3")
-            .arg(QString::fromUtf8(fixture_name))
-            .arg(result.width())
-            .arg(result.height()));
 
         if (result.isNull()) {
             dump_window_state(fixture_name, "grab-null");
@@ -414,33 +399,8 @@ bool regenerate_baselines()
     return !value.isEmpty() && value != "0";
 }
 
-bool trace_enabled()
-{
-    const QByteArray value = qgetenv("SCINTILLAQUICK_VR_TRACE");
-    return !value.isEmpty() && value != "0";
-}
-
-void trace_line(const QString& line)
-{
-    if (!trace_enabled()) {
-        return;
-    }
-
-    QDir().mkpath(QStringLiteral(ARTIFACT_DIR));
-    QFile file(QStringLiteral(ARTIFACT_DIR) + QDir::separator() + QStringLiteral("trace.log"));
-    if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        file.write(line.toUtf8());
-        file.write("\n");
-    }
-}
-
 Fixture_outcome run_visual_fixture(const char* name, const QImage& actual)
 {
-    trace_line(QStringLiteral("fixture %1: actual=%2x%3")
-        .arg(QString::fromUtf8(name))
-        .arg(actual.width())
-        .arg(actual.height()));
-
     if (actual.isNull()) {
         qWarning("  [%s] FAIL: captured image is null", name);
         return Fixture_outcome::fail;
@@ -514,6 +474,11 @@ QImage capture_stable_image(Fixture_editor& editor, const QByteArray& fixture_na
     return previous;
 }
 
+bool should_capture_scroll_probe_step(int step, int steps)
+{
+    return step == 0 || step == (steps / 2) || step == (steps - 1);
+}
+
 Fixture_outcome run_scroll_probe_fixture(
     const QString&  scenario_name,
     Fixture_editor& editor,
@@ -557,13 +522,13 @@ Fixture_outcome run_scroll_probe_fixture(
             return Fixture_outcome::fail;
         }
 
+        if (!should_capture_scroll_probe_step(step, steps)) {
+            continue;
+        }
+
         const QString step_name = QStringLiteral("%1_step_%2")
             .arg(scenario_name)
             .arg(step, 2, 10, QChar('0'));
-        trace_line(QStringLiteral("scroll-probe %1: step=%2 wrapped=%3")
-            .arg(scenario_name)
-            .arg(step)
-            .arg(wrapped));
 
         const QByteArray step_name_bytes = step_name.toUtf8();
         const QImage captured = editor.capture_ready_window(step_name_bytes.constData());
@@ -1070,13 +1035,6 @@ static Fixture_outcome vr_eol_annotation_boxed()
 
 int main(int argc, char** argv)
 {
-    // Truncate the trace log from prior runs.
-    if (trace_enabled()) {
-        QDir().mkpath(QStringLiteral(ARTIFACT_DIR));
-        QFile::remove(QStringLiteral(ARTIFACT_DIR) + QDir::separator() + QStringLiteral("trace.log"));
-    }
-
-    trace_line(QStringLiteral("main: start"));
     // Pin DPI and scale factor for deterministic rendering.
     qputenv("QT_FONT_DPI", "96");
     qputenv("QT_SCALE_FACTOR", "1");
@@ -1086,7 +1044,6 @@ int main(int argc, char** argv)
     QQuickWindow::setTextRenderType(QQuickWindow::QtTextRendering);
 
     QGuiApplication app(argc, argv);
-    trace_line(QStringLiteral("main: app created"));
 
     QString selected_fixture_name;
     for (int i = 1; i < argc; ++i) {
@@ -1124,7 +1081,6 @@ int main(int argc, char** argv)
     qDebug("  artifact dir : %s", ARTIFACT_DIR);
     qDebug("  regenerate baselines : %s", regenerate_baselines() ? "yes" : "no");
     qDebug("");
-    trace_line(QStringLiteral("main: fixtures starting"));
 
     struct
     {

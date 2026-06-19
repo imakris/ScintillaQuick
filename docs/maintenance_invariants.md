@@ -4,11 +4,6 @@ This document is for maintainers changing ScintillaQuick internals. It records
 contracts that are easy to break when editing dispatch, capture, rendering,
 input, or platform code.
 
-For remediation sequencing and validation gates, see
-[`review_remediation_plan.md`](review_remediation_plan.md). For platform-window
-ownership details, see
-[`platform_window_ownership.md`](platform_window_ownership.md).
-
 ## Source Map
 
 Use this map before starting a change.
@@ -21,8 +16,8 @@ Use this map before starting a change.
 | `src/platform/` | Qt implementation of Scintilla platform services: surfaces, fonts, menus, list boxes, call tips, platform `Window`. |
 | `src/render/` | `Render_frame` and Qt Quick scene-graph renderer. Renderer code consumes captured data and should not call back into Scintilla. |
 | `tests/` | Smoke, dispatch-table, frame-validation, visual-regression, and behavior tests. Add focused tests near the behavior changed. |
-| `benchmarks/` | Performance scenarios and profiling entry points. Use before and after changing render scheduling or renderer hot paths. |
-| `docs/` | Public docs plus maintainer contracts and remediation plans. Keep implementation contracts current with code changes. |
+| `benchmarks/` | Performance scenarios. Use before and after changing render scheduling or renderer hot paths. |
+| `docs/` | Public docs and maintainer contracts. Keep implementation contracts current with code changes. |
 | `third_party/scintilla/` | Vendored upstream Scintilla. Treat as a dependency boundary. Do not make local behavior changes there unless the task is explicitly to update or patch Scintilla. |
 
 ScintillaQuick-specific code lives in the top-level build files, `include`,
@@ -138,11 +133,6 @@ The item-level render state is intentionally conservative. Missing an
 invalidation is a correctness bug; extra invalidation is allowed only when it is
 measured and understood.
 
-For the reviewed Phase 3A migration design and implementation gates, see
-[`render_invalidation_state_design.md`](render_invalidation_state_design.md).
-For the required pre-implementation measurement gate, see
-[`render_invalidation_metrics_baseline.md`](render_invalidation_metrics_baseline.md).
-
 | State | Meaning | Set when |
 | --- | --- | --- |
 | `snapshot_dirty` | A polish/update pass must rebuild or refresh the render snapshot before rendering. | Any path schedules visible scene-graph work. |
@@ -240,9 +230,6 @@ Platform-created call-tip and list-box items are owned by ScintillaQuick's
 platform lifecycle. Raw `WindowID` values must be resolved through the ownership
 tracking policy before dereferencing or deleting.
 
-Use [`platform_window_ownership.md`](platform_window_ownership.md) as the
-source of truth for:
-
 - `wMain` borrowed ownership
 - call-tip and list-box owned item lifecycle
 - stale Qt deletion handling
@@ -250,8 +237,8 @@ source of truth for:
 - resolver behavior for `WindowID` consumers
 - `Surface_impl` owned versus borrowed device rules
 
-Do not make ad hoc platform-window deletion changes without updating that doc
-and its tests.
+Do not make ad hoc platform-window deletion changes without updating these
+rules and their tests.
 
 ## IME And Composition
 
@@ -306,15 +293,12 @@ direct synchronous delivery unless an additive value-based API explicitly says
 otherwise. Do not store such pointers, do not rely on queued delivery for them,
 and do not expose new pointer-bearing notification APIs without API review.
 
-Detailed compatibility decisions for notification signals belong to the Package
-2C notification API design. This document records only the current maintenance
-rule.
+Keep the compatibility rule here: value-based notification signals must own
+copied payloads, and raw pointer signals remain direct-only.
 
 ## Test And Benchmark Playbook
 
-Use fresh build directories for remediation work. The normal local gate is the
-CI-compatible subset from
-[`review_remediation_plan.md`](review_remediation_plan.md).
+Use fresh build directories for validation work.
 
 | Change area | Required checks |
 | --- | --- |

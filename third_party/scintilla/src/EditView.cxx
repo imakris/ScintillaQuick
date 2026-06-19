@@ -38,7 +38,6 @@
 #include "Debugging.h"
 #include "Geometry.h"
 #include "Platform.h"
-#include "../../../src/core/scintillaquick_hierarchical_profiler.h"
 
 #include "CharacterType.h"
 #include "CharacterCategoryMap.h"
@@ -462,17 +461,13 @@ void LayoutSegments(IPositionCache *pCache,
 	const std::vector<TextSegment> &segments,
 	std::atomic<uint32_t> &nextIndex,
 	const bool textUnicode,
-	const bool multiThreaded,
-	Hierarchical_profiler *hierarchicalProfiler) {
-	Active_hierarchical_profiler_binding hierarchicalProfilerBinding(hierarchicalProfiler);
-	(void)hierarchicalProfilerBinding;
+	const bool multiThreaded) {
 	while (true) {
 		const uint32_t i = nextIndex.fetch_add(1, std::memory_order_acq_rel);
 		if (i >= segments.size()) {
 			break;
 		}
 		const TextSegment &ts = segments[i];
-		SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame.paint_text.layout_line.measure_segment");
 		if (vstyle.styles[ll->styles[ts.start]].visible) {
 			if (ts.representation) {
 				XYPOSITION representationWidth = vstyle.controlCharWidth;
@@ -487,11 +482,9 @@ void LayoutSegments(IPositionCache *pCache,
 						// ts.representation->stringRep is UTF-8 which only matches cache if document is UTF-8
 						// or it only contains ASCII which is a subset of all currently supported encodings.
 						if (textUnicode || ViewIsASCII(ts.representation->stringRep)) {
-							SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame.paint_text.layout_line.measure_segment.measure_widths");
 							pCache->MeasureWidths(surface, vstyle, StyleControlChar, ts.representation->stringRep,
 								positionsRepr, multiThreaded);
 						} else {
-							SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame.paint_text.layout_line.measure_segment.measure_widths_utf8");
 							surface->MeasureWidthsUTF8(vstyle.styles[StyleControlChar].font.get(), ts.representation->stringRep, positionsRepr);
 						}
 						representationWidth = positionsRepr[ts.representation->stringRep.length() - 1];
@@ -508,7 +501,6 @@ void LayoutSegments(IPositionCache *pCache,
 					// Over half the segments are single characters and of these about half are space characters.
 					ll->positions[ts.start + 1] = vstyle.styles[ll->styles[ts.start]].spaceWidth;
 				} else {
-					SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame.paint_text.layout_line.measure_segment.measure_widths");
 					pCache->MeasureWidths(surface, vstyle, ll->styles[ts.start],
 						std::string_view(&ll->chars[ts.start], ts.length), &ll->positions[ts.start + 1], multiThreaded);
 				}
@@ -520,10 +512,8 @@ void LayoutSegments(IPositionCache *pCache,
 			// invisibleRepresentation is UTF-8 which only matches cache if document is UTF-8
 			// or it only contains ASCII which is a subset of all currently supported encodings.
 			if (textUnicode || ViewIsASCII(text)) {
-				SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame.paint_text.layout_line.measure_segment.measure_widths");
 				pCache->MeasureWidths(surface, vstyle, styleInvisible, text, positionsRepr, multiThreaded);
 			} else {
-				SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame.paint_text.layout_line.measure_segment.measure_widths_utf8");
 				surface->MeasureWidthsUTF8(vstyle.styles[styleInvisible].font.get(), text, positionsRepr);
 			}
 			const XYPOSITION representationWidth = positionsRepr[text.length() - 1];
@@ -542,7 +532,6 @@ void LayoutSegments(IPositionCache *pCache,
 * Also determine the x position at which each character starts.
 */
 void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewStyle &vstyle, LineLayout *ll, int width) {
-	SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("core.capture_current_frame.paint_text.layout_line");
 	if (!ll)
 		return;
 	const Sci::Line line = ll->LineNumber();
@@ -647,7 +636,6 @@ void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewSt
 			const bool textUnicode = CpUtf8 == model.pdoc->dbcsCodePage;
 			const bool multiThreaded = threads > 1;
 			IPositionCache *pCache = posCache.get();
-			Hierarchical_profiler *hierarchicalProfiler = active_hierarchical_profiler();
 
 			// If only 1 thread needed then use the main thread, else spin up multiple
 			const std::launch policy = (multiThreaded) ? std::launch::async : std::launch::deferred;
@@ -656,7 +644,7 @@ void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewSt
 			for (size_t th = 0; th < threads; th++) {
 				// Find relative positions of everything except for tabs
 				std::future<void> fut = std::async(policy,
-					[pCache, surface, &vstyle, &ll, &segments, &nextIndex, textUnicode, multiThreaded, hierarchicalProfiler]() {
+					[pCache, surface, &vstyle, &ll, &segments, &nextIndex, textUnicode, multiThreaded]() {
 					LayoutSegments(
 						pCache,
 						surface,
@@ -665,8 +653,7 @@ void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewSt
 						segments,
 						nextIndex,
 						textUnicode,
-						multiThreaded,
-						hierarchicalProfiler);
+						multiThreaded);
 				});
 				futures.push_back(std::move(fut));
 			}

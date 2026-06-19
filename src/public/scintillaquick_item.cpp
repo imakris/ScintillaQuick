@@ -6,10 +6,8 @@
 // scene-graph rendering. This is NOT a QWidget.
 
 #include <scintillaquick/scintillaquick_item.h>
-#include "../core/scintillaquick_hierarchical_profiler.h"
 #include "scintillaquick_core.h"
 #include "scintillaquick_dispatch_table.h"
-#include "scintillaquick_fonts.h"
 #include "scintillaquick_platqt.h"
 #include "scintillaquick_scene_graph_renderer.h"
 
@@ -22,19 +20,13 @@
 #include "Position.h"
 
 #include <QClipboard>
-#include <QDateTime>
-#include <QDir>
 #include <QGuiApplication>
 #include <QInputMethod>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QMetaMethod>
 #include <QMetaType>
 #include <QPalette>
 #include <QQuickWindow>
-#include <QSaveFile>
 #include <QSGNode>
-#include <QStandardPaths>
 #include <QTextFormat>
 #include <QVarLengthArray>
 #include <QTimer>
@@ -46,7 +38,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
 #include <limits>
 #include <string_view>
@@ -83,98 +74,17 @@ public:
     std::vector<Caret_primitive> captured_caret_primitives;
 };
 
-struct Profiling_metric
-{
-    std::atomic<uint64_t> count{0};
-    std::atomic<uint64_t> total_ns{0};
-    std::atomic<uint64_t> max_ns{0};
-
-    void clear()
-    {
-        count.store(0, std::memory_order_release);
-        total_ns.store(0, std::memory_order_release);
-        max_ns.store(0, std::memory_order_release);
-    }
-};
-
-class ScintillaQuick_item::Profiling_state
-{
-public:
-    explicit Profiling_state(ScintillaQuick_item* owner) : m_owner(owner)
-    {
-        timer.setSingleShot(true);
-        QObject::connect(&timer, &QTimer::timeout, owner, [owner]() {
-            owner->stopProfilingSession();
-        });
-    }
-
-    void reset()
-    {
-        update_requests.store(0, std::memory_order_release);
-        snapshot_build_count.store(0, std::memory_order_release);
-        snapshot_line_total.store(0, std::memory_order_release);
-        snapshot_line_max.store(0, std::memory_order_release);
-        wheel_event_count.store(0, std::memory_order_release);
-        horizontal_scroll_command_count.store(0, std::memory_order_release);
-        vertical_scroll_command_count.store(0, std::memory_order_release);
-        blink_only_update_count.store(0, std::memory_order_release);
-        overlay_only_update_count.store(0, std::memory_order_release);
-        full_update_count.store(0, std::memory_order_release);
-
-        update_polish.clear();
-        build_render_snapshot.clear();
-        update_paint_node.clear();
-        update_quick_view.clear();
-        wheel_event.clear();
-        scroll_horizontal.clear();
-        scroll_vertical.clear();
-        hierarchical_profiler.reset();
-    }
-
-    Scintilla::Internal::Hierarchical_profiler* hierarchical_profiler_if_active()
-    {
-        return active.load(std::memory_order_acquire) ? &hierarchical_profiler : nullptr;
-    }
-
-    ScintillaQuick_item* m_owner = nullptr;
-    QTimer timer;
-    QElapsedTimer elapsed;
-    QDateTime started_at_utc;
-    QString output_directory;
-    double requested_duration_seconds = 0.0;
-    std::atomic<bool> active{false};
-    std::atomic<uint64_t> update_requests{0};
-    std::atomic<uint64_t> snapshot_build_count{0};
-    std::atomic<uint64_t> snapshot_line_total{0};
-    std::atomic<uint64_t> snapshot_line_max{0};
-    std::atomic<uint64_t> wheel_event_count{0};
-    std::atomic<uint64_t> horizontal_scroll_command_count{0};
-    std::atomic<uint64_t> vertical_scroll_command_count{0};
-    std::atomic<uint64_t> blink_only_update_count{0};
-    std::atomic<uint64_t> overlay_only_update_count{0};
-    std::atomic<uint64_t> full_update_count{0};
-    Profiling_metric update_polish;
-    Profiling_metric build_render_snapshot;
-    Profiling_metric update_paint_node;
-    Profiling_metric update_quick_view;
-    Profiling_metric wheel_event;
-    Profiling_metric scroll_horizontal;
-    Profiling_metric scroll_vertical;
-    Scintilla::Internal::Hierarchical_profiler hierarchical_profiler;
-};
-
 namespace
 {
 
 constexpr int k_margin_count = SC_MAX_MARGIN + 1;
 constexpr int k_vertical_scroll_reuse_buffer_min_lines = 16;
 
-// `scene_graph_update_request`, `scene_graph_update_request_info_t` and
-// `tracked_scroll_width_should_reset` now live in
-// src/core/scintillaquick_dispatch_table.h (included above) so that they
-// can be covered by dedicated unit tests without spinning up a Qt Quick
-// window. They are reachable here via the file-scope
-// `using namespace Scintilla::Internal;` above.
+// `scene_graph_update_request` and `scene_graph_update_request_info_t` live in
+// src/core/scintillaquick_dispatch_table.h (included above) so that they can be
+// covered by dedicated unit tests without spinning up a Qt Quick window. They
+// are reachable here via the file-scope `using namespace Scintilla::Internal;`
+// above.
 
 void register_notification_metatypes()
 {
@@ -558,77 +468,6 @@ QColor margin_background_color_for(
     }
 }
 
-void record_profiling_metric(Profiling_metric& metric, uint64_t elapsed_ns)
-{
-    metric.count.fetch_add(1, std::memory_order_relaxed);
-    metric.total_ns.fetch_add(elapsed_ns, std::memory_order_relaxed);
-
-    uint64_t previous_max = metric.max_ns.load(std::memory_order_relaxed);
-    while (elapsed_ns > previous_max &&
-           !metric.max_ns.compare_exchange_weak(previous_max, elapsed_ns, std::memory_order_relaxed))
-    {}
-}
-
-class Profiling_scope
-{
-public:
-    explicit Profiling_scope(Profiling_metric* metric) : m_metric(metric)
-    {
-        if (m_metric) {
-            m_timer.start();
-        }
-    }
-
-    ~Profiling_scope()
-    {
-        if (m_metric) {
-            record_profiling_metric(*m_metric, static_cast<uint64_t>(m_timer.nsecsElapsed()));
-        }
-    }
-
-private:
-    Profiling_metric* m_metric = nullptr;
-    QElapsedTimer m_timer;
-};
-
-QJsonObject profiling_metric_to_json(const Profiling_metric& metric)
-{
-    const uint64_t count    = metric.count.load(std::memory_order_acquire);
-    const uint64_t total_ns = metric.total_ns.load(std::memory_order_acquire);
-    const uint64_t max_ns   = metric.max_ns.load(std::memory_order_acquire);
-    const double total_ms   = static_cast<double>(total_ns) / 1000000.0;
-    const double max_ms     = static_cast<double>(max_ns) / 1000000.0;
-    const double average_ms = count > 0 ? total_ms / static_cast<double>(count) : 0.0;
-
-    QJsonObject result;
-    result.insert("count", static_cast<qint64>(count));
-    result.insert("total_ms", total_ms);
-    result.insert("average_ms", average_ms);
-    result.insert("max_ms", max_ms);
-    return result;
-}
-
-QString profiling_output_directory(QString requested_directory)
-{
-    if (!requested_directory.trimmed().isEmpty()) {
-        return requested_directory;
-    }
-
-    QString fallback = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    if (fallback.trimmed().isEmpty()) {
-        fallback = QDir::tempPath();
-    }
-    return fallback;
-}
-
-QString profiling_report_path(const QString& directory_path)
-{
-    QDir directory(directory_path);
-    directory.mkpath(".");
-    const QString timestamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz");
-    return directory.filePath(QStringLiteral("text_editor_profile_%1.json").arg(timestamp));
-}
-
 }
 
 ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
@@ -638,7 +477,7 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
     , m_logical_height(0)
     , m_input_method_hints(Qt::ImhNone)
     , m_last_touch_press_time(-1)
-    , m_core((ensure_bundled_fonts_loaded(), new ScintillaQuick_core(this)))
+    , m_core(new ScintillaQuick_core(this))
     , m_preedit_pos(-1)
     , m_render_data(std::make_unique<Render_data>())
 {
@@ -691,16 +530,12 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
         }
     });
 
-    m_profiling_state = std::make_unique<Profiling_state>(this);
-
     send(SCI_SETLAYOUTCACHE, SC_CACHE_PAGE);
     send(SCI_SETSCROLLWIDTHTRACKING, 1);
 }
 
 ScintillaQuick_item::~ScintillaQuick_item()
 {
-    stopProfilingSession();
-
     // Tell the core to stop all of its timers and disconnect from the
     // clipboard before the ScintillaQuick_item subobject finishes
     // destructing. `m_core` is a child QObject (parented to `this`) and
@@ -714,69 +549,44 @@ ScintillaQuick_item::~ScintillaQuick_item()
     }
 }
 
+void ScintillaQuick_item::apply_scene_graph_update_request(
+    bool scroll_width_reset,
+    bool needed,
+    bool static_content_dirty,
+    bool needs_style_sync,
+    bool scrolling) const
+{
+    ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
+
+    if (scroll_width_reset) {
+        self->reset_tracked_scroll_width();
+    }
+    // Re-entry guard: `syncQuickViewProperties()` issues SCI_* queries through
+    // `send()`. A missed read-only classification should not recurse forever.
+    if (needed && !m_in_sync_quick_view_properties) {
+        const bool needs_property_sync = static_content_dirty || needs_style_sync || scrolling;
+        if (needs_property_sync) {
+            self->syncQuickViewProperties();
+            if (static_content_dirty && m_render_data) {
+                m_render_data->content_modified_since_last_capture = true;
+            }
+        }
+        self->request_scene_graph_update(static_content_dirty, needs_style_sync, scrolling);
+    }
+}
+
 sptr_t ScintillaQuick_item::send(
     unsigned int i_message,
     uptr_t       w_param,
     sptr_t       l_param) const
 {
-    // NOTE: `send()` is declared `const` because Qt's Q_PROPERTY READ getters
-    // in this class funnel through it for SCI_GET* queries and READ functions
-    // must be const. A subset of messages (SCI_SET*, mutators) do observably
-    // change editor state and will also schedule scene-graph updates here, so
-    // this method is not logically const for those messages. We cast `this`
-    // once, in a single, well-marked place.
-    ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
-
-    auto apply_update_request = [this, self](const scene_graph_update_request_info_t& update_request) {
-        if (update_request.scroll_width_reset) {
-            self->reset_tracked_scroll_width();
-        }
-        // Re-entry guard (defence-in-depth): `syncQuickViewProperties()`
-        // itself issues SCI_* queries through `send()`. If any of those
-        // queries is not in the read-only allow-list, the dispatch's
-        // "unknown -> full resync" default would call
-        // `syncQuickViewProperties()` again, recursing until the stack
-        // overflows. The primary defence is the allow-list
-        // (`scene_graph_message_is_known_read_only()` in
-        // scintillaquick_dispatch_table.h); this guard ensures that a
-        // future missed entry degrades into "no nested resync" rather than
-        // a crash.
-        if (update_request.needed && !m_in_sync_quick_view_properties) {
-            // `syncQuickViewProperties()` is only needed when the
-            // dispatch result reports that static content, style state
-            // or scroll position might have changed. Pure caret /
-            // selection mutators (SCI_CHARRIGHT, SCI_GOTOPOS,
-            // SCI_SETSEL, ...) leave every single property exposed
-            // through `syncQuickViewProperties` untouched, so calling it
-            // per-message just burns CPU issuing SCI_TEXTHEIGHT /
-            // SCI_GETLINECOUNT / SCI_GETSCROLLWIDTH / SCI_LINESONSCREEN
-            // / SCI_GETFIRSTVISIBLELINE getters and running the
-            // `emit_if_changed` comparison loop to conclude nothing
-            // changed. In `caret_move_right_5000` that is 5000 copies of
-            // a no-op sync per second, which dominated the scenario cost.
-            //
-            // If a caret movement does end up scrolling the view (e.g.
-            // SCI_CHARRIGHT falling off the end of a long line),
-            // Scintilla fires `Notification::UpdateUI` with
-            // `Update::VScroll` set, and `updateQuickView()` synchronously
-            // calls `syncQuickViewProperties()` from the notification
-            // handler, so we do not lose any property change coverage by
-            // skipping the redundant call here.
-            const bool needs_property_sync =
-                update_request.static_content_dirty ||
-                update_request.needs_style_sync     ||
-                update_request.scrolling;
-            if (needs_property_sync) {
-                self->syncQuickViewProperties();
-                if (update_request.static_content_dirty && m_render_data) {
-                    m_render_data->content_modified_since_last_capture = true;
-                }
-            }
-            self->request_scene_graph_update(
-                update_request.static_content_dirty,
-                update_request.needs_style_sync,
-                update_request.scrolling);
-        }
+    auto apply_update_request = [this](const scene_graph_update_request_info_t& request) {
+        apply_scene_graph_update_request(
+            request.scroll_width_reset,
+            request.needed,
+            request.static_content_dirty,
+            request.needs_style_sync,
+            request.scrolling);
     };
 
     return dispatch_scintilla_message(
@@ -794,28 +604,13 @@ sptr_t ScintillaQuick_item::sends(
     uptr_t       w_param,
     const char*  s) const
 {
-    ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
-
-    auto apply_update_request = [this, self](const scene_graph_update_request_info_t& update_request) {
-        if (update_request.scroll_width_reset) {
-            self->reset_tracked_scroll_width();
-        }
-        if (update_request.needed && !m_in_sync_quick_view_properties) {
-            const bool needs_property_sync =
-                update_request.static_content_dirty ||
-                update_request.needs_style_sync     ||
-                update_request.scrolling;
-            if (needs_property_sync) {
-                self->syncQuickViewProperties();
-                if (update_request.static_content_dirty && m_render_data) {
-                    m_render_data->content_modified_since_last_capture = true;
-                }
-            }
-            self->request_scene_graph_update(
-                update_request.static_content_dirty,
-                update_request.needs_style_sync,
-                update_request.scrolling);
-        }
+    auto apply_update_request = [this](const scene_graph_update_request_info_t& request) {
+        apply_scene_graph_update_request(
+            request.scroll_width_reset,
+            request.needed,
+            request.static_content_dirty,
+            request.needs_style_sync,
+            request.scrolling);
     };
 
     return dispatch_scintilla_message(
@@ -828,138 +623,6 @@ sptr_t ScintillaQuick_item::sends(
         apply_update_request);
 }
 
-bool ScintillaQuick_item::startProfilingSession(const QString& output_directory, double duration_seconds)
-{
-    if (!m_profiling_state) {
-        return false;
-    }
-
-    if (duration_seconds <= 0.0 || !std::isfinite(duration_seconds)) {
-        duration_seconds = 10.0;
-    }
-
-    if (m_profiling_state->active.exchange(true, std::memory_order_acq_rel)) {
-        stopProfilingSession();
-        m_profiling_state->active.store(true, std::memory_order_release);
-    }
-
-    m_profiling_state->reset();
-    m_profiling_state->requested_duration_seconds = duration_seconds;
-    m_profiling_state->output_directory           = profiling_output_directory(output_directory);
-    m_profiling_state->started_at_utc             = QDateTime::currentDateTimeUtc();
-    m_profiling_state->elapsed.start();
-    m_profiling_state->timer.start(static_cast<int>(duration_seconds * 1000.0));
-    qWarning().noquote()
-        << "ScintillaQuick profiling started."
-        << " output_dir=" << m_profiling_state->output_directory
-        << " duration_seconds=" << duration_seconds;
-    emit profilingActiveChanged();
-    return true;
-}
-
-void ScintillaQuick_item::stopProfilingSession()
-{
-    if (!m_profiling_state) {
-        return;
-    }
-
-    const bool was_active = m_profiling_state->active.exchange(false, std::memory_order_acq_rel);
-    if (!was_active) {
-        return;
-    }
-
-    m_profiling_state->timer.stop();
-
-    QJsonObject metadata;
-    metadata.insert("started_at_utc", m_profiling_state->started_at_utc.toString(Qt::ISODateWithMs));
-    metadata.insert("finished_at_utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
-    metadata.insert("requested_duration_seconds", m_profiling_state->requested_duration_seconds);
-    metadata.insert("actual_duration_ms", m_profiling_state->elapsed.elapsed());
-    metadata.insert("item_width", width());
-    metadata.insert("item_height", height());
-    metadata.insert("logical_width", m_logical_width);
-    metadata.insert("logical_height", m_logical_height);
-    metadata.insert("char_width", getCharWidth());
-    metadata.insert("char_height", getCharHeight());
-    metadata.insert("document_length_bytes", static_cast<qint64>(send(SCI_GETTEXTLENGTH)));
-    metadata.insert("total_lines", getTotalLines());
-    metadata.insert("visible_lines", getVisibleLines());
-    metadata.insert("first_visible_line", getFirstVisibleLine());
-    metadata.insert("total_columns", getTotalColumns());
-    metadata.insert("visible_columns", getVisibleColumns());
-    metadata.insert("first_visible_column", getFirstVisibleColumn());
-
-    QJsonObject counters;
-    counters.insert("update_requests",
-        static_cast<qint64>(m_profiling_state->update_requests.load(std::memory_order_acquire)));
-    counters.insert("snapshot_build_count",
-        static_cast<qint64>(m_profiling_state->snapshot_build_count.load(std::memory_order_acquire)));
-    counters.insert("snapshot_line_total",
-        static_cast<qint64>(m_profiling_state->snapshot_line_total.load(std::memory_order_acquire)));
-    counters.insert("snapshot_line_max",
-        static_cast<qint64>(m_profiling_state->snapshot_line_max.load(std::memory_order_acquire)));
-    counters.insert("wheel_event_count",
-        static_cast<qint64>(m_profiling_state->wheel_event_count.load(std::memory_order_acquire)));
-    counters.insert("horizontal_scroll_command_count",
-        static_cast<qint64>(m_profiling_state->horizontal_scroll_command_count.load(std::memory_order_acquire)));
-    counters.insert("vertical_scroll_command_count",
-        static_cast<qint64>(m_profiling_state->vertical_scroll_command_count.load(std::memory_order_acquire)));
-    counters.insert("blink_only_update_count",
-        static_cast<qint64>(m_profiling_state->blink_only_update_count.load(std::memory_order_acquire)));
-    counters.insert("overlay_only_update_count",
-        static_cast<qint64>(m_profiling_state->overlay_only_update_count.load(std::memory_order_acquire)));
-    counters.insert("full_update_count",
-        static_cast<qint64>(m_profiling_state->full_update_count.load(std::memory_order_acquire)));
-
-    QJsonObject metrics;
-    metrics.insert("update_polish", profiling_metric_to_json(m_profiling_state->update_polish));
-    metrics.insert("build_render_snapshot", profiling_metric_to_json(m_profiling_state->build_render_snapshot));
-    metrics.insert("update_paint_node", profiling_metric_to_json(m_profiling_state->update_paint_node));
-    metrics.insert("update_quick_view", profiling_metric_to_json(m_profiling_state->update_quick_view));
-    metrics.insert("wheel_event", profiling_metric_to_json(m_profiling_state->wheel_event));
-    metrics.insert("scroll_horizontal", profiling_metric_to_json(m_profiling_state->scroll_horizontal));
-    metrics.insert("scroll_vertical", profiling_metric_to_json(m_profiling_state->scroll_vertical));
-
-    QJsonObject report;
-    report.insert("tool", QStringLiteral("ScintillaQuick_item"));
-    report.insert("metadata", metadata);
-    report.insert("counters", counters);
-    report.insert("metrics", metrics);
-    report.insert("scope_tree", m_profiling_state->hierarchical_profiler.to_json());
-
-    const QString report_path = profiling_report_path(m_profiling_state->output_directory);
-    QSaveFile file(report_path);
-    bool write_ok = false;
-    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
-        write_ok = file.commit();
-    }
-    else {
-        qWarning().noquote()
-            << "ScintillaQuick profiling failed to open report file."
-            << " path=" << report_path;
-    }
-
-    if (write_ok) {
-        qWarning().noquote()
-            << "ScintillaQuick profiling finished."
-            << " report_path=" << report_path;
-    }
-    else {
-        qWarning().noquote()
-            << "ScintillaQuick profiling finished without report."
-            << " report_path=" << report_path;
-    }
-
-    emit profilingActiveChanged();
-    emit profilingFinished(report_path);
-}
-
-bool ScintillaQuick_item::profilingActive() const
-{
-    return m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire);
-}
-
 void ScintillaQuick_item::request_scene_graph_update(
     bool static_content_dirty,
     bool needs_style_sync,
@@ -967,10 +630,6 @@ void ScintillaQuick_item::request_scene_graph_update(
 {
     if (!m_render_data || !m_updates_enabled) {
         return;
-    }
-
-    if (m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)) {
-        m_profiling_state->update_requests.fetch_add(1, std::memory_order_relaxed);
     }
 
     m_render_data->snapshot_dirty        = true;
@@ -1019,15 +678,6 @@ void ScintillaQuick_item::enableUpdate(bool enable)
 
 void ScintillaQuick_item::scrollHorizontal(int value)
 {
-    Hierarchical_profiler* profiler =
-        m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(profiler);
-    (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.scroll_horizontal");
-
-    if (m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)) {
-        m_profiling_state->horizontal_scroll_command_count.fetch_add(1, std::memory_order_relaxed);
-    }
     m_core->HorizontalScrollTo(value);
     syncQuickViewProperties();
     request_scene_graph_update(true, false, false);
@@ -1035,15 +685,6 @@ void ScintillaQuick_item::scrollHorizontal(int value)
 
 void ScintillaQuick_item::scrollVertical(int value)
 {
-    Hierarchical_profiler* profiler =
-        m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(profiler);
-    (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.scroll_vertical");
-
-    if (m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)) {
-        m_profiling_state->vertical_scroll_command_count.fetch_add(1, std::memory_order_relaxed);
-    }
     m_core->ScrollTo(value);
     request_scene_graph_update(true, false, true);
 }
@@ -1075,16 +716,6 @@ int wheelEventYDelta(QWheelEvent* event)
 
 void ScintillaQuick_item::wheelEvent(QWheelEvent* event)
 {
-    Hierarchical_profiler* profiler =
-        m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(profiler);
-    (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.wheel_event");
-
-    if (m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)) {
-        m_profiling_state->wheel_event_count.fetch_add(1, std::memory_order_relaxed);
-    }
-
     if (isWheelEventHorizontal(event)) {
         QQuickItem::wheelEvent(event);
     }
@@ -1892,16 +1523,6 @@ void ScintillaQuick_item::touchEvent(QTouchEvent * event)
 
 void ScintillaQuick_item::updatePolish()
 {
-    Hierarchical_profiler* profiler =
-        m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(profiler);
-    (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.update_polish");
-
-    Profiling_scope scope(
-        m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)
-            ? &m_profiling_state->update_polish
-            : nullptr);
     if (m_render_data) {
         m_render_data->update_pending = false;
     }
@@ -1912,16 +1533,6 @@ void ScintillaQuick_item::updatePolish()
 
 QSGNode* ScintillaQuick_item::updatePaintNode(QSGNode * old_node, UpdatePaintNodeData * update_paint_node_data)
 {
-    Hierarchical_profiler* profiler =
-        m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(profiler);
-    (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.update_paint_node");
-
-    Profiling_scope scope(
-        m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)
-            ? &m_profiling_state->update_paint_node
-            : nullptr);
     Q_UNUSED(update_paint_node_data);
 
     if (!m_render_data) {
@@ -1934,16 +1545,6 @@ QSGNode* ScintillaQuick_item::updatePaintNode(QSGNode * old_node, UpdatePaintNod
 
 void ScintillaQuick_item::build_render_snapshot()
 {
-    Hierarchical_profiler* profiler =
-        m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(profiler);
-    (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.build_render_snapshot");
-
-    Profiling_scope scope(
-        m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)
-            ? &m_profiling_state->build_render_snapshot
-            : nullptr);
     if (!m_render_data) {
         return;
     }
@@ -1959,9 +1560,6 @@ void ScintillaQuick_item::build_render_snapshot()
             m_render_data->frame.caret_primitives.clear();
         }
         m_render_data->snapshot_dirty = false;
-        if (m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)) {
-            m_profiling_state->blink_only_update_count.fetch_add(1, std::memory_order_relaxed);
-        }
         return;
     }
 
@@ -2064,25 +1662,6 @@ void ScintillaQuick_item::build_render_snapshot()
     const int caret_width = static_cast<int>(send(SCI_GETCARETWIDTH));
     if (!(hasActiveFocus() && m_core && m_core->caret.active && m_caret_blink_visible && caret_width > 0)) {
         frame.caret_primitives.clear();
-    }
-
-    if (m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)) {
-        if (static_content_dirty && !can_reuse_vertical_scroll) {
-            m_profiling_state->full_update_count.fetch_add(1, std::memory_order_relaxed);
-        }
-        else {
-            m_profiling_state->overlay_only_update_count.fetch_add(1, std::memory_order_relaxed);
-        }
-        m_profiling_state->snapshot_build_count.fetch_add(1, std::memory_order_relaxed);
-        const uint64_t line_count = static_cast<uint64_t>(frame.visual_lines.size());
-        m_profiling_state->snapshot_line_total.fetch_add(line_count, std::memory_order_relaxed);
-
-        uint64_t previous_max = m_profiling_state->snapshot_line_max.load(std::memory_order_relaxed);
-        while (
-            line_count > previous_max &&
-            !m_profiling_state->snapshot_line_max.compare_exchange_weak(
-                previous_max, line_count, std::memory_order_relaxed))
-        {}
     }
 
     m_render_data->snapshot                            = std::move(snapshot);
@@ -2464,16 +2043,6 @@ void ScintillaQuick_item::setReadonly(bool value)
 
 void ScintillaQuick_item::updateQuickView(Update updated)
 {
-    Hierarchical_profiler* profiler =
-        m_profiling_state ? m_profiling_state->hierarchical_profiler_if_active() : nullptr;
-    Active_hierarchical_profiler_binding hierarchical_binding(profiler);
-    (void)hierarchical_binding;
-    SCINTILLAQUICK_PROFILE_SCOPE(profiler, "item.update_quick_view");
-
-    Profiling_scope scope(
-        m_profiling_state && m_profiling_state->active.load(std::memory_order_acquire)
-            ? &m_profiling_state->update_quick_view
-            : nullptr);
     const bool needs_property_sync =
         FlagSet(updated, Update::Content) ||
         FlagSet(updated, Update::VScroll) ||

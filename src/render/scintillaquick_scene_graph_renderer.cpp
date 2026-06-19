@@ -2,7 +2,6 @@
 // Licensed under the BSD 2-Clause License, see LICENSE file for details.
 
 #include "scintillaquick_scene_graph_renderer.h"
-#include "../core/scintillaquick_hierarchical_profiler.h"
 #include "render_frame.h"
 
 #include <ScintillaTypes.h>
@@ -1355,8 +1354,6 @@ public:
         const Visual_line_frame& visual_line,
         const QRectF&            viewport)
     {
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_visual_line");
-
         if (!window) {
             return;
         }
@@ -1369,7 +1366,6 @@ public:
         const bool same_viewport_size = m_cached_viewport.size() == viewport.size();
 
         {
-            SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_visual_line.reuse_check");
             if (same_key && same_viewport_size && layouts_match_content(visual_line)) {
                 if (positions_match(visual_line, viewport)) {
                     return;
@@ -1438,7 +1434,6 @@ public:
                 ++cached_idx;
             }
             if (uniform && cached_idx == m_backup.layout_positions.size()) {
-                SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_visual_line.restore_from_backup");
                 swap_active_with_backup();
                 m_text_node->setRenderType(map_render_type());
                 m_text_node->setColor(Qt::white);
@@ -1461,7 +1456,6 @@ public:
         evict_active_to_backup(window);
 
         {
-            SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_visual_line.rebuild");
             m_layouts.clear();
             m_cached_runs.clear();
             m_layout_positions.clear();
@@ -1478,13 +1472,9 @@ public:
                 continue;
             }
 
-            SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_visual_line.layout_run");
-
             std::unique_ptr<QTextLayout> layout;
             qreal line_ascent = 0.0;
             {
-                SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE(
-                    "renderer.text_node.update_from_visual_line.layout_run.create_layout");
                 layout = std::make_unique<QTextLayout>(run.text, run.font);
 
                 QTextOption option;
@@ -1513,7 +1503,6 @@ public:
             }
 
             {
-                SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_visual_line.layout_run.shape_text");
                 layout->beginLayout();
                 QTextLine line = layout->createLine();
                 if (line.isValid()) {
@@ -1532,20 +1521,14 @@ public:
             }
 
             {
-                SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE(
-                    "renderer.text_node.update_from_visual_line.layout_run.attach_node");
                 const QPointF pos(
                     run.position.x(),
                     run.position.y() - line_ascent);
 
                 {
-                    SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE(
-                        "renderer.text_node.update_from_visual_line.layout_run.attach_node.add_text_layout");
                     m_text_node->addTextLayout(pos, layout.get());
                 }
                 {
-                    SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE(
-                        "renderer.text_node.update_from_visual_line.layout_run.attach_node.cache_run");
                     m_layouts.push_back(std::move(layout));
                     m_cached_runs.push_back(run);
                     m_layout_positions.push_back(run.position);
@@ -1564,8 +1547,6 @@ public:
 
     void update_from_margin_text(QQuickWindow* window, const Margin_text_primitive& margin, const QRectF& viewport)
     {
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.text_node.update_from_margin_text");
-
         if (!window) {
             return;
         }
@@ -2376,8 +2357,6 @@ public:
         const Render_snapshot& snapshot,
         const Render_frame&    frame)
     {
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.update_from_frame");
-
         update_clip_node(m_text_clip_node, frame.text_rect);
 
         std::vector<Colored_rect> representation_blob_fill_rects;
@@ -2506,8 +2485,6 @@ public:
             });
 
         {
-            SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.update_from_frame.text");
-
             // Body text from frame visual lines (key-based reuse)
             sync_text_nodes_by_key(
                 window,
@@ -3044,16 +3021,16 @@ public:
                 node->setColor(annotation_box_rects[i].color);
             });
 
-        // Whitespace marks (index-based split: dots vs tabs)
-        std::vector<size_t> ws_dot_idx, ws_tab_idx;
-        ws_dot_idx.reserve(frame.whitespace_marks.size());
-        ws_tab_idx.reserve(frame.whitespace_marks.size());
-        for (size_t j = 0; j < frame.whitespace_marks.size(); ++j) {
-            if (frame.whitespace_marks[j].kind == Whitespace_mark_kind_t::space_dot) {
-                ws_dot_idx.push_back(j);
+        // Whitespace marks (dots vs rasterized tab arrows)
+        std::vector<Colored_rect> whitespace_dot_rects;
+        std::vector<Colored_rect> whitespace_tab_rects;
+        whitespace_dot_rects.reserve(frame.whitespace_marks.size());
+        for (const Whitespace_mark_primitive& mark : frame.whitespace_marks) {
+            if (mark.kind == Whitespace_mark_kind_t::space_dot) {
+                whitespace_dot_rects.push_back({mark.rect, mark.color});
             }
             else {
-                ws_tab_idx.push_back(j);
+                append_rasterized_tab_arrow_rects(whitespace_tab_rects, mark, window);
             }
         }
 
@@ -3061,17 +3038,12 @@ public:
             window,
             m_whitespace_group,
             m_whitespace_dot_nodes,
-            static_cast<qsizetype>(ws_dot_idx.size()),
+            static_cast<qsizetype>(whitespace_dot_rects.size()),
             [&](QSGRectangleNode* node, size_t i) {
-                const auto& ws = frame.whitespace_marks[ws_dot_idx[i]];
-                node->setRect(ws.rect);
-                node->setColor(ws.color);
+                node->setRect(whitespace_dot_rects[i].rect);
+                node->setColor(whitespace_dot_rects[i].color);
             });
 
-        std::vector<Colored_rect> whitespace_tab_rects;
-        for (size_t i = 0; i < ws_tab_idx.size(); ++i) {
-            append_rasterized_tab_arrow_rects(whitespace_tab_rects, frame.whitespace_marks[ws_tab_idx[i]], window);
-        }
         sync_rectangle_nodes(
             window,
             m_whitespace_group,
@@ -3217,8 +3189,6 @@ QSGNode* Scene_graph_renderer::update(
     const Render_snapshot&  snapshot,
     const Render_frame&     frame)
 {
-    SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("renderer.update");
-
     if (!window) {
         delete old_node;
         return nullptr;

@@ -42,11 +42,9 @@ so that consumers can find them without crawling history.
   The CI workflow skips `scintillaquick_visual_regression_test` on
   non-Linux hosts.
 
-- **The benchmark target is built in CI but not executed there.**
-  `scintillaquick_embedded_benchmark` is registered with CTest and
-  compiled by the GitHub Actions matrix, but the CI workflow excludes
-  it from the test run. Treat benchmark results as a local or
-  dedicated-runner concern rather than a normal CI signal.
+- **The benchmark target is opt-in.**
+  Build it with `-DSCINTILLAQUICK_BUILD_BENCHMARKS=ON`. Treat benchmark
+  results as a local or dedicated-runner concern rather than a normal CI signal.
 
 - **Windows visual tests require a desktop session.** The
   visual-regression runner uses the `windows` Qt platform plugin on
@@ -83,10 +81,9 @@ so that consumers can find them without crawling history.
 
 - **`send()` on `ScintillaQuick_item` is declared `const`** because
   Qt `Q_PROPERTY` READ getters funnel through it. Mutating Scintilla
-  messages routed through `send()` therefore cast `this` once, in a
-  well-marked place at the top of the method. Do not copy that
-  pattern blindly; the comment in the source explains the full
-  contract.
+  messages routed through `send()` therefore use a single private helper that
+  casts `this` when it needs to schedule updates. Do not copy that pattern
+  blindly.
 
 - **The scene-graph dispatch table has a re-entry guard.** The
   fast-path allow-list in `src/core/scintillaquick_dispatch_table.h`

@@ -10,9 +10,7 @@
 #include <limits>
 
 #include <scintillaquick/scintillaquick_item.h>
-#include "../core/scintillaquick_hierarchical_profiler.h"
 #include "scintillaquick_platqt.h"
-#include "scintillaquick_fonts.h"
 #include "Scintilla.h"
 #include "XPM.h"
 #include "UniConversion.h"
@@ -21,6 +19,7 @@
 #include <QGuiApplication>
 #include <QFont>
 #include <QFontDatabase>
+#include <QFontInfo>
 #include <QColor>
 #include <QCursor>
 #include <QList>
@@ -52,6 +51,7 @@
 #include <QVarLengthArray>
 #include <QLibrary>
 #include <QWindow>
+#include <QtGlobal>
 
 extern void ProcessScintillaContextMenu(Scintilla::Internal::Point pt, const Scintilla::Internal::Window& w,
     const QList<QPair<QString, QPair<int, bool>>>& menu);
@@ -60,6 +60,19 @@ namespace Scintilla::Internal
 {
 
 //----------------------------------------------------------------------
+
+QString default_fixed_font_family()
+{
+    const QString configured = qEnvironmentVariable("SCINTILLAQUICK_FIXED_FONT_FAMILY").trimmed();
+    if (!configured.isEmpty()) {
+        const QFontInfo info(QFont(configured, 11));
+        if (info.family().compare(configured, Qt::CaseInsensitive) == 0) {
+            return info.family();
+        }
+    }
+
+    return QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
+}
 
 bool is_ascii_text(std::string_view text)
 {
@@ -926,7 +939,6 @@ void Surface_impl::MeasureWidths(
     std::string_view text,
     XYPOSITION*      positions)
 {
-    SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths");
     QFont* qfont = font_pointer(font);
     if (!qfont || !positions) {
         return;
@@ -935,10 +947,7 @@ void Surface_impl::MeasureWidths(
     // Fast path: for printable-ASCII text against a font whose advance
     // cache is already populated, just sum the cached advances. This
     // avoids constructing a QTextLayout and enumerating glyph runs for
-    // what is by far the common case (code editing in a fixed-pitch
-    // font). No profile scope here: this path is called tens of
-    // thousands of times per benchmark run and the profiler's mutex
-    // lock would add more overhead than the fast path itself costs.
+    // what is by far the common case (code editing in a fixed-pitch font).
     const Font_and_character_set* font_wrapper = as_font_and_character_set(font);
     QPaintDevice* paint_device = GetPaintDevice();
     const bool ascii_text = is_simple_printable_ascii(text);
@@ -948,23 +957,14 @@ void Surface_impl::MeasureWidths(
         return;
     }
 
-    QString su;
-    {
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.to_qstring");
-        su = unicode_from_text(text);
-    }
+    QString su = unicode_from_text(text);
     QTextLayout tlay(su, *qfont, paint_device);
     QTextLine tl;
+    tlay.beginLayout();
+    tl = tlay.createLine();
+    tlay.endLayout();
     {
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.layout_text");
-        tlay.beginLayout();
-        tl = tlay.createLine();
-        tlay.endLayout();
-    }
-    {
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions");
         if (is_simple_printable_ascii(text)) {
-            SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions.simple_glyph_path");
             if (fill_simple_glyph_positions(tl, text, positions)) {
                 // Opportunistically populate the advance cache so that
                 // subsequent calls on the same font can take the fast
@@ -978,7 +978,6 @@ void Surface_impl::MeasureWidths(
             }
         }
 
-        SCINTILLAQUICK_PROFILE_ACTIVE_SCOPE("platform.measure_widths.cursor_positions.cursor_walk");
         if (m_mode.codePage == SC_CP_UTF8) {
             fill_utf8_cursor_positions_from_cursor(
                 text,
@@ -1836,12 +1835,7 @@ private:
             return m_font;
         }
 
-        QFont font(bundled_fixed_font_family());
-        if (font.family().compare(bundled_fixed_font_family(), Qt::CaseInsensitive) == 0) {
-            return font;
-        }
-
-        return QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        return QFont(default_fixed_font_family());
     }
 
     int rowHeight() const
@@ -2241,12 +2235,7 @@ const char* Platform::DefaultFont()
 {
     static char font_name_default[200] = "";
     if (!font_name_default[0]) {
-        const QString family = bundled_fixed_font_family();
-        QFont font(family);
-        if (font.family().compare(family, Qt::CaseInsensitive) != 0) {
-            font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-        }
-        const auto font_name = font.family().toUtf8();
+        const auto font_name = default_fixed_font_family().toUtf8();
         std::snprintf(font_name_default, sizeof(font_name_default), "%s", font_name.constData());
     }
     return font_name_default;

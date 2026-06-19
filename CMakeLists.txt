@@ -9,21 +9,13 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(CTest)
 
-# Project-level options. Each option has a deliberate default so that the
-# common in-tree case (configure -> build everything) still works without
-# the user having to know any of this exists.
+# Project-level options.
 option(SCINTILLAQUICK_BUILD_EXAMPLES
-    "Build the example applications (scintillaquick_minimal_editor)" ON)
+    "Build the example applications (scintillaquick_minimal_editor)" OFF)
 option(SCINTILLAQUICK_BUILD_BENCHMARKS
-    "Build the benchmark applications (scintillaquick_embedded_benchmark)" ON)
+    "Build the benchmark applications (scintillaquick_embedded_benchmark)" OFF)
 option(SCINTILLAQUICK_BUILD_TESTS
     "Build the test suite (gated on BUILD_TESTING as well)" ON)
-# Expose Scintilla's vendored sources as an OBJECT library instead of
-# dropping them into the main target. Set to OFF only if you want a
-# flatter single-target static build and are willing to inherit
-# Scintilla's compile warnings into the glue layer.
-option(SCINTILLAQUICK_USE_SCINTILLA_OBJECT_LIBRARY
-    "Compile the vendored Scintilla sources as a separate OBJECT library" ON)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -78,45 +70,28 @@ set(scintillaquick_scintilla_sources
     third_party/scintilla/src/ViewStyle.cxx
     third_party/scintilla/src/XPM.cxx)
 
-# Optionally compile Scintilla as an OBJECT library so we can apply
-# compile flags/warnings that should only affect the vendored code, not
-# the ScintillaQuick glue layer. The OBJECT target is a private
-# implementation detail (not exported, not installed).
-if(SCINTILLAQUICK_USE_SCINTILLA_OBJECT_LIBRARY)
-    add_library(scintillaquick_scintilla_objects OBJECT
-        ${scintillaquick_scintilla_sources})
-    if(BUILD_SHARED_LIBS)
-        set_target_properties(scintillaquick_scintilla_objects PROPERTIES
-            POSITION_INDEPENDENT_CODE ON)
-    endif()
-    # Scintilla relies on C++20.
-    target_compile_features(scintillaquick_scintilla_objects PUBLIC cxx_std_20)
-    target_include_directories(
-        scintillaquick_scintilla_objects
-        PUBLIC
-            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/include
-            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/src)
-    target_compile_definitions(
-        scintillaquick_scintilla_objects
-        PRIVATE
-            SCINTILLA_QT_QML=1
-            MAKING_LIBRARY=1
-            _CRT_SECURE_NO_DEPRECATE=1)
-    # Scintilla must see the Qt Core headers (used by its Qt platform
-    # bits in our glue layer) even though this OBJECT target itself
-    # does not link Qt.
-    target_link_libraries(scintillaquick_scintilla_objects
-        PUBLIC Qt6::Core Qt6::Gui)
-    if(MSVC)
-        target_compile_options(scintillaquick_scintilla_objects PRIVATE /FS)
-    endif()
-    set(scintillaquick_scintilla_sources_for_main_target "")
-    set(scintillaquick_scintilla_objects_for_main_target
-        $<TARGET_OBJECTS:scintillaquick_scintilla_objects>)
-else()
-    set(scintillaquick_scintilla_sources_for_main_target
-        ${scintillaquick_scintilla_sources})
-    set(scintillaquick_scintilla_objects_for_main_target "")
+add_library(scintillaquick_scintilla_objects OBJECT
+    ${scintillaquick_scintilla_sources})
+if(BUILD_SHARED_LIBS)
+    set_target_properties(scintillaquick_scintilla_objects PROPERTIES
+        POSITION_INDEPENDENT_CODE ON)
+endif()
+target_compile_features(scintillaquick_scintilla_objects PUBLIC cxx_std_20)
+target_include_directories(
+    scintillaquick_scintilla_objects
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/src)
+target_compile_definitions(
+    scintillaquick_scintilla_objects
+    PRIVATE
+        SCINTILLA_QT_QML=1
+        MAKING_LIBRARY=1
+        _CRT_SECURE_NO_DEPRECATE=1)
+target_link_libraries(scintillaquick_scintilla_objects
+    PUBLIC Qt6::Core Qt6::Gui)
+if(MSVC)
+    target_compile_options(scintillaquick_scintilla_objects PRIVATE /FS)
 endif()
 
 # BUILD_SHARED_LIBS (CMake built-in) switches the library between static
@@ -133,14 +108,10 @@ add_library(
     src/core/scintillaquick_core.h
     src/platform/scintillaquick_platqt.cpp
     src/platform/scintillaquick_platqt.h
-    src/platform/scintillaquick_fonts.cpp
-    src/platform/scintillaquick_fonts.h
-    src/platform/scintillaquick_fonts.qrc
     src/render/scintillaquick_scene_graph_renderer.cpp
     src/render/scintillaquick_scene_graph_renderer.h
     src/public/scintillaquick_item.cpp
-    ${scintillaquick_scintilla_sources_for_main_target}
-    ${scintillaquick_scintilla_objects_for_main_target})
+    $<TARGET_OBJECTS:scintillaquick_scintilla_objects>)
 
 add_library(ScintillaQuick::ScintillaQuick ALIAS ScintillaQuick)
 

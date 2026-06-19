@@ -7,7 +7,6 @@
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
-#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QGuiApplication>
@@ -18,12 +17,8 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QQuickWindow>
-#include <QRegularExpression>
-#include <QThread>
-#include <QTemporaryDir>
 #include <QEventLoop>
 #include <QTimer>
-#include <QUuid>
 
 #include <algorithm>
 #include <cmath>
@@ -59,89 +54,19 @@ namespace
 
 using Benchmark_editor = Paint_counted_editor;
 
-QString profiling_session_directory(QStringView scenario_name)
-{
-    const QString safe_name =
-        scenario_name.toString().replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_\\-]")), QStringLiteral("_"));
-    return QDir(QDir::tempPath()).filePath(
-        QStringLiteral("scintillaquick_bench_%1_%2")
-            .arg(safe_name, QUuid::createUuid().toString(QUuid::WithoutBraces)));
-}
-
-void cleanup_profiling_session_directory(const QString& directory_path)
-{
-    if (directory_path.isEmpty()) {
-        return;
-    }
-
-    const QString keep_reports = qEnvironmentVariable("SCINTILLAQUICK_KEEP_PROFILING_REPORTS").trimmed();
-    if (!keep_reports.isEmpty() && keep_reports != QStringLiteral("0")) {
-        return;
-    }
-
-    QDir directory(directory_path);
-    if (directory.exists()) {
-        directory.removeRecursively();
-    }
-}
-
-QJsonObject load_profiling_report(const QString& directory_path)
-{
-    QElapsedTimer wait_timer;
-    wait_timer.start();
-
-    while (wait_timer.elapsed() < 500) {
-        QDir directory(directory_path);
-        const QFileInfoList reports = directory.entryInfoList(
-            QStringList{QStringLiteral("*.json")},
-            QDir::Files,
-            QDir::Time);
-        if (!reports.isEmpty()) {
-            QFile file(reports.front().absoluteFilePath());
-            if (file.open(QIODevice::ReadOnly)) {
-                const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-                if (doc.isObject()) {
-                    return doc.object();
-                }
-            }
-        }
-
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
-        QThread::msleep(10);
-    }
-
-    return {};
-}
-
 template <typename Fn>
-QJsonObject measure_scenario(Benchmark_editor& editor, QStringView name, Fn&& fn)
+QJsonObject measure_scenario(QStringView name, Fn&& fn)
 {
-    const QString profiling_dir = profiling_session_directory(name);
-    QDir().mkpath(profiling_dir);
-    const bool profiling_started = editor.startProfilingSession(profiling_dir, 3600.0);
-
     QElapsedTimer timer;
     timer.start();
     fn();
     const double elapsed_ms = timer.nsecsElapsed() / 1'000'000.0;
 
-    if (profiling_started && editor.profilingActive()) {
-        editor.stopProfilingSession();
-    }
-
-    QJsonObject result{
+    return QJsonObject{
         {QStringLiteral("name"), name.toString()},
         {QStringLiteral("measurement_kind"), QStringLiteral("command_elapsed")},
         {QStringLiteral("elapsed_ms"), elapsed_ms},
     };
-    if (profiling_started) {
-        const QJsonObject profiling = load_profiling_report(profiling_dir);
-        if (!profiling.isEmpty()) {
-            result.insert(QStringLiteral("profiling"), profiling);
-        }
-    }
-    cleanup_profiling_session_directory(profiling_dir);
-    return result;
 }
 
 void pump_gui(int iterations = 3)
@@ -391,10 +316,6 @@ QJsonObject measure_paint_latency_scenario(
     StepFn &&step_fn,
     std::function<std::optional<Correctness_issue>(Benchmark_editor &, int)> verify_step = {})
 {
-    const QString profiling_dir = profiling_session_directory(name);
-    QDir().mkpath(profiling_dir);
-    const bool profiling_started = editor.startProfilingSession(profiling_dir, 3600.0);
-
     std::vector<double> latencies_ms;
     latencies_ms.reserve(static_cast<size_t>(steps));
     int timeout_count = 0;
@@ -427,18 +348,8 @@ QJsonObject measure_paint_latency_scenario(
         latencies_ms,
         timeout_count,
         total_timer.nsecsElapsed() / 1'000'000.0);
-    if (profiling_started && editor.profilingActive()) {
-        editor.stopProfilingSession();
-    }
 
     QJsonObject result = latency_stats_to_json(name, stats);
-    if (profiling_started) {
-        const QJsonObject profiling = load_profiling_report(profiling_dir);
-        if (!profiling.isEmpty()) {
-            result.insert(QStringLiteral("profiling"), profiling);
-        }
-    }
-    cleanup_profiling_session_directory(profiling_dir);
     if (!correctness_issues.empty()) {
         QJsonArray issues_json;
         for (const Correctness_issue& issue : correctness_issues) {
@@ -526,14 +437,14 @@ int main(int argc, char** argv)
 
     QJsonArray scenarios;
     if (should_run_scenario(QStringLiteral("load_large_document"))) {
-        scenarios.append(measure_scenario(editor, QStringLiteral("load_large_document"), [&]() {
+        scenarios.append(measure_scenario(QStringLiteral("load_large_document"), [&]() {
             editor.setProperty("text", large_document);
             pump_gui(10);
         }));
     }
 
     if (should_run_scenario(QStringLiteral("caret_move_right_5000"))) {
-        scenarios.append(measure_scenario(editor, QStringLiteral("caret_move_right_5000"), [&]() {
+        scenarios.append(measure_scenario(QStringLiteral("caret_move_right_5000"), [&]() {
             editor.send(SCI_GOTOPOS, 0);
             for (int i = 0; i < 5000; ++i) {
                 editor.send(SCI_CHARRIGHT);
@@ -543,7 +454,7 @@ int main(int argc, char** argv)
     }
 
     if (should_run_scenario(QStringLiteral("insert_character_2000"))) {
-        scenarios.append(measure_scenario(editor, QStringLiteral("insert_character_2000"), [&]() {
+        scenarios.append(measure_scenario(QStringLiteral("insert_character_2000"), [&]() {
             editor.send(SCI_GOTOPOS, editor.send(SCI_GETTEXTLENGTH));
             for (int i = 0; i < 2000; ++i) {
                 editor.send(SCI_ADDTEXT, 1, reinterpret_cast<sptr_t>(insert_text.constData()));
@@ -553,7 +464,7 @@ int main(int argc, char** argv)
     }
 
     if (should_run_scenario(QStringLiteral("page_down_250"))) {
-        scenarios.append(measure_scenario(editor, QStringLiteral("page_down_250"), [&]() {
+        scenarios.append(measure_scenario(QStringLiteral("page_down_250"), [&]() {
             editor.send(SCI_GOTOPOS, 0);
             for (int i = 0; i < 250; ++i) {
                 editor.send(SCI_PAGEDOWN);
@@ -563,7 +474,7 @@ int main(int argc, char** argv)
     }
 
     if (should_run_scenario(QStringLiteral("resize_window"))) {
-        scenarios.append(measure_scenario(editor, QStringLiteral("resize_window"), [&]() {
+        scenarios.append(measure_scenario(QStringLiteral("resize_window"), [&]() {
             window.resize(1200, 760);
             pump_gui(4);
             window.resize(1600, 900);

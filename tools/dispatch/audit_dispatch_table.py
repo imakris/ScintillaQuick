@@ -27,8 +27,7 @@ IFACE_ENTRY_RE = re.compile(
 TABLE_ENTRY_RE = re.compile(
     r"\{\s*(?P<macro>SCI_[A-Z0-9_]+)\s*,\s*"
     r"Dispatch_effect::(?P<effect>[A-Za-z_]+)\s*,\s*"
-    r"(?P<scroll_width_reset>true|false)\s*,\s*"
-    r"(?P<known_getter>true|false)\s*\}"
+    r"(?P<scroll_width_reset>true|false)\s*\}"
 )
 CATEGORY_RE = re.compile(r"^cat\s+(?P<category>.+?)\s*$")
 
@@ -108,7 +107,6 @@ class TableRule:
     macro: str
     effect: str
     scroll_width_reset: bool
-    known_getter: bool
     line: int
 
 
@@ -224,7 +222,6 @@ def parse_dispatch_table(path: Path) -> ParsedTable:
                 macro=match.group("macro"),
                 effect=match.group("effect"),
                 scroll_width_reset=match.group("scroll_width_reset") == "true",
-                known_getter=match.group("known_getter") == "true",
                 line=number,
             )
         )
@@ -258,8 +255,7 @@ def sorted_rule_lines(
 ) -> list[str]:
     return [
         f"  {sort_key_by_value(messages_by_macro, rule.macro)[0]:4d} {rule.macro:<36} "
-        f"{rule.effect:<24} scroll_width_reset={str(rule.scroll_width_reset).lower():<5} "
-        f"known_getter={str(rule.known_getter).lower():<5}"
+        f"{rule.effect:<24} scroll_width_reset={str(rule.scroll_width_reset).lower():<5}"
         for rule in sorted(rules, key=lambda item: sort_key_by_value(messages_by_macro, item.macro))
     ]
 
@@ -455,7 +451,6 @@ def build_audit(iface: ParsedIface, table: ParsedTable) -> Audit:
             "Manual-Table Coverage",
             "---------------------",
             f"  rule count: {len(table.rules)}",
-            f"  known_getter count: {sum(1 for rule in table.rules if rule.known_getter)}",
             f"  scroll_width_reset count: {sum(1 for rule in table.rules if rule.scroll_width_reset)}",
             "  by effect:",
         ]

@@ -66,9 +66,13 @@ cmake --build build
 This builds:
 
 - `ScintillaQuick` static library
-- `scintillaquick_minimal_editor`
-- `scintillaquick_embedded_benchmark`
 - test executables when `BUILD_TESTING=ON`
+
+Examples and benchmarks are opt-in:
+
+```bash
+cmake -S . -B build -DSCINTILLAQUICK_BUILD_EXAMPLES=ON -DSCINTILLAQUICK_BUILD_BENCHMARKS=ON
+```
 
 To install the package:
 
@@ -141,7 +145,7 @@ CTest currently registers:
 
 - `scintillaquick_smoke_test`
 - `scintillaquick_dispatch_table_test`
-- `scintillaquick_embedded_benchmark`
+- `scintillaquick_embedded_benchmark` when `SCINTILLAQUICK_BUILD_BENCHMARKS=ON`
 - `scintillaquick_frame_validation_test`
 - `scintillaquick_visual_regression_test`
 
@@ -179,8 +183,6 @@ or patching the dependency.
 - [Architecture](docs/architecture.md)
 - [Known Limitations](docs/limitations.md)
 - [Maintenance Invariants](docs/maintenance_invariants.md)
-- [Review Remediation Plan](docs/review_remediation_plan.md)
-- [Platform Window Ownership](docs/platform_window_ownership.md)
 
 ## License
 

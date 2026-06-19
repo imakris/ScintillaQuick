@@ -152,7 +152,7 @@ remains a Qt Quick control that can participate cleanly in a larger scene.
 ## Lifetime And Ownership
 
 - `ScintillaQuick_item` owns `ScintillaQuick_core`
-- `ScintillaQuick_item` also owns item-level render/profiling state
+- `ScintillaQuick_item` also owns item-level render state
 - `Scene_graph_renderer` updates transient `QSGNode` content owned by the item's
   paint tree
 - vendored Scintilla remains an implementation dependency, not a separate
@@ -200,8 +200,4 @@ What it is not intended to be:
 This document is intended to stay stable and public.
 
 Maintainer contracts that change with implementation details live in
-[`maintenance_invariants.md`](maintenance_invariants.md). Work packages and
-validation gates live in
-[`review_remediation_plan.md`](review_remediation_plan.md). Platform-window
-ownership rules live in
-[`platform_window_ownership.md`](platform_window_ownership.md).
+[`maintenance_invariants.md`](maintenance_invariants.md).

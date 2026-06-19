@@ -163,7 +163,6 @@ class SCINTILLAQUICK_EXPORT ScintillaQuick_item : public QQuickItem
     Q_PROPERTY(int visibleColumns READ getVisibleColumns NOTIFY visibleColumnsChanged)
     Q_PROPERTY(int firstVisibleLine READ getFirstVisibleLine WRITE setFirstVisibleLine NOTIFY firstVisibleLineChanged)
     Q_PROPERTY(int firstVisibleColumn READ getFirstVisibleColumn NOTIFY firstVisibleColumnChanged)
-    Q_PROPERTY(bool profilingActive READ profilingActive NOTIFY profilingActiveChanged)
     Q_PROPERTY(Qt::InputMethodHints inputMethodHints READ inputMethodHints WRITE setInputMethodHints
         NOTIFY inputMethodHintsChanged)
 
@@ -179,11 +178,6 @@ public:
     Q_INVOKABLE void scrollColumn(int delta_columns);
     Q_INVOKABLE void enableUpdate(bool enable);
     Q_INVOKABLE virtual void cmdContextMenu(int menu_id);
-    Q_INVOKABLE bool startProfilingSession(
-        const QString& output_directory = QString(),
-        double duration_seconds = 10.0);
-    Q_INVOKABLE void stopProfilingSession();
-    Q_INVOKABLE bool profilingActive() const;
     void request_scene_graph_update(
         bool static_content_dirty = false,
         bool needs_style_sync     = false,
@@ -260,8 +254,6 @@ signals:
     void textChanged();
     void fontChanged();
     void readonlyChanged();
-    void profilingActiveChanged();
-    void profilingFinished(const QString& reportPath);
     void logicalWidthChanged();
     void logicalHeightChanged();
     void charHeightChanged();
@@ -307,8 +299,6 @@ private:
 #endif
 
     class Render_data;
-    class Profiling_state;
-
     QString getText() const;
     void setText(const QString& txt);
     QFont getFont() const { return m_font; }
@@ -337,6 +327,12 @@ private:
     std::vector<Scintilla::Internal::Displayed_row_for_test> displayed_rows_for_test() const;
     const Scintilla::Internal::Render_frame& rendered_frame_for_test() const;
     void reset_tracked_scroll_width();
+    void apply_scene_graph_update_request(
+        bool scroll_width_reset,
+        bool needed,
+        bool static_content_dirty,
+        bool needs_style_sync,
+        bool scrolling) const;
 
     bool m_updates_enabled;
     int m_logical_width;
@@ -365,7 +361,6 @@ private:
 
     Scintilla::Position m_preedit_pos;
     std::unique_ptr<Render_data> m_render_data;
-    std::unique_ptr<Profiling_state> m_profiling_state;
     QTimer m_caret_blink_timer;
     bool m_caret_blink_visible = true;
     // Re-entry guard for `send()`'s dispatch -> `syncQuickViewProperties()`
@@ -380,8 +375,8 @@ private:
     // that a future missed entry degrades into "no resync for that one
     // nested call" instead of a crash.
     //
-    // Declared mutable because `send()` is const (see the long comment
-    // at the top of `send()` for why).
+    // Declared mutable because `send()` is const for Q_PROPERTY readers, even
+    // though mutating Scintilla messages can also flow through it.
     mutable bool m_in_sync_quick_view_properties = false;
 
     static bool IsHangul(const QChar qchar);

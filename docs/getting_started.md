@@ -17,14 +17,18 @@ cmake --build build
 Useful targets:
 
 - `ScintillaQuick`
-- `scintillaquick_minimal_editor`
-- `scintillaquick_embedded_benchmark`
 
 If `BUILD_TESTING` is enabled, test executables are built as well.
+Examples and benchmarks are opt-in:
+
+```bash
+cmake -S . -B build -DSCINTILLAQUICK_BUILD_EXAMPLES=ON -DSCINTILLAQUICK_BUILD_BENCHMARKS=ON
+cmake --build build
+```
 
 ## Run The Example
 
-After building, run:
+After building with `SCINTILLAQUICK_BUILD_EXAMPLES=ON`, run:
 
 ```bash
 ./build/scintillaquick_minimal_editor
@@ -81,8 +85,9 @@ Run the registered test suite with:
 ctest --test-dir build --output-on-failure
 ```
 
-Registered tests currently include smoke, frame-validation, visual-regression,
-and benchmark-backed coverage.
+Registered tests currently include smoke, frame-validation, and
+visual-regression coverage. Benchmark-backed coverage is registered when
+`SCINTILLAQUICK_BUILD_BENCHMARKS=ON`.
 
 On Windows, visual tests require a desktop session because they create and show
 a `QQuickWindow`.
