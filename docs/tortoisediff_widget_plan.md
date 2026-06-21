@@ -302,18 +302,25 @@ Build:
   - deleted: red-ish full-line background on the left
   - changed: yellow/orange full-line background on both sides
   - filler: neutral blank row
+- use native `SC_MARK_FULLRECT` markers on `SC_LAYER_UNDER_TEXT`
+  for row backgrounds
+- zero margin masks for these marker numbers so they paint in the text area
+- replace the Step 4 Qt Quick overlay with the native marker path in the
+  prototype
 - use hand-authored `DiffRow` fixtures first
 
 Test:
 
-- visual fixture for add/delete/change/filler rows
-- assert captured frame or render primitives match expected visible row
-  backgrounds
+- assert native marker bits follow the row side state
+- pixel-check native `SC_MARK_FULLRECT` as solid rectangles; sparse/diagonal
+  triangle-fan geometry is unacceptable
+- rely on the Step 8 captured-frame proof for marker visibility
 
 Human checkpoint:
 
-- accept when the color language is readable and the accepted deviations from
-  TortoiseDiff are documented
+- accept when visible row colors are readable and remain aligned through
+  scroll/zoom
+- document accepted deviations from TortoiseDiff
 
 ## Step 10: Inline Changed Text Highlighting
 

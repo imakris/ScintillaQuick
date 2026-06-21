@@ -34,6 +34,10 @@ constexpr int visible_row_tint_y = 48;
 constexpr int visible_filler_y = 78;
 constexpr int visible_tint_height = 18;
 constexpr int visible_filler_line = 12;
+constexpr int diff_marker_added = 0;
+constexpr int diff_marker_deleted = 1;
+constexpr int diff_marker_changed = 2;
+constexpr int diff_marker_filler = 3;
 
 enum class Scroll_axis
 {
@@ -71,6 +75,12 @@ struct DiffWidgetInput
     QString leftText;
     QString rightText;
     std::vector<DiffRow> rows;
+};
+
+struct GreenPixelCoverage
+{
+    int greenPixels = 0;
+    int totalPixels = 0;
 };
 
 enum class WidgetInputValidation
@@ -772,26 +782,40 @@ bool image_region_has_dark_pixels(const QImage& image, int x_start, int x_end)
     return false;
 }
 
-bool image_region_has_green_pixels(const QImage& image, int x_start, int x_end)
+bool pixel_is_green(QRgb pixel)
+{
+    return qAlpha(pixel) != 0 && qGreen(pixel) > 180 && qRed(pixel) < 120 && qBlue(pixel) < 120;
+}
+
+GreenPixelCoverage image_region_green_pixel_coverage(const QImage& image, int x_start, int x_end)
 {
     if (image.isNull()) {
-        return false;
+        return {};
+    }
+
+    const int start = std::max(0, x_start);
+    const int end = std::min(image.width(), x_end);
+    if (start >= end) {
+        return {};
     }
 
     const QImage converted = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    int green_pixels = 0;
+    GreenPixelCoverage coverage;
+    coverage.totalPixels = (end - start) * converted.height();
     for (int y = 0; y < converted.height(); ++y) {
         const QRgb* line = reinterpret_cast<const QRgb*>(converted.constScanLine(y));
-        for (int x = x_start; x < x_end; ++x) {
-            if (qAlpha(line[x]) != 0 && qGreen(line[x]) > 180 && qRed(line[x]) < 120 && qBlue(line[x]) < 120) {
-                ++green_pixels;
-                if (green_pixels >= 64) {
-                    return true;
-                }
+        for (int x = start; x < end; ++x) {
+            if (pixel_is_green(line[x])) {
+                ++coverage.greenPixels;
             }
         }
     }
-    return false;
+    return coverage;
+}
+
+bool image_region_has_green_pixels(const QImage& image, int x_start, int x_end)
+{
+    return image_region_green_pixel_coverage(image, x_start, x_end).greenPixels >= 64;
 }
 
 bool image_region_has_magenta_pixels(const QImage& image, int x_start, int x_end)
@@ -827,7 +851,96 @@ void configure_pane(ScintillaQuick_item& pane, const QString& text)
     pane.setProperty("readonly", true);
 }
 
-bool native_marker_line_has_green_pixels(int marker_symbol)
+void configure_native_diff_row_markers(ScintillaQuick_item& pane)
+{
+    const int margin_count = static_cast<int>(pane.send(SCI_GETMARGINS));
+    for (int margin = 0; margin < margin_count; ++margin) {
+        pane.send(SCI_SETMARGINMASKN, margin, 0);
+    }
+
+    auto configure_marker = [&](int marker_number, int color) {
+        pane.send(SCI_MARKERDEFINE, marker_number, SC_MARK_FULLRECT);
+        pane.send(SCI_MARKERSETBACK, marker_number, color);
+        pane.send(SCI_MARKERSETLAYER, marker_number, SC_LAYER_UNDER_TEXT);
+    };
+
+    configure_marker(diff_marker_added, 0xCCFFCC);
+    configure_marker(diff_marker_deleted, 0xCCCCFF);
+    configure_marker(diff_marker_changed, 0xCCFFFF);
+    configure_marker(diff_marker_filler, 0xEEEEEE);
+}
+
+int native_marker_for_state(DiffSideState state)
+{
+    switch (state) {
+        case DiffSideState::Added:
+            return diff_marker_added;
+        case DiffSideState::Deleted:
+            return diff_marker_deleted;
+        case DiffSideState::Changed:
+            return diff_marker_changed;
+        case DiffSideState::Filler:
+            return diff_marker_filler;
+        case DiffSideState::Equal:
+            return -1;
+    }
+
+    return -1;
+}
+
+void apply_native_diff_row_markers(ScintillaQuick_item& pane, const std::vector<DiffRow>& rows, DiffSide side)
+{
+    for (size_t row_index = 0; row_index < rows.size(); ++row_index) {
+        const DiffRow& row = rows[row_index];
+        const DiffSideState state = side == DiffSide::Left ? row.leftState : row.rightState;
+        const int marker = native_marker_for_state(state);
+        if (marker != -1) {
+            pane.send(SCI_MARKERADD, static_cast<int>(row_index), marker);
+        }
+    }
+}
+
+int native_marker_mask(int marker_number)
+{
+    return 1 << marker_number;
+}
+
+void expect_marker_bits(ScintillaQuick_item& pane, int display_row, int expected_mask)
+{
+    SQ_EXPECT(static_cast<int>(pane.send(SCI_MARKERGET, display_row)) == expected_mask);
+}
+
+void test_native_diff_row_markers_follow_side_state()
+{
+    const std::vector<DiffRow> rows{
+        {0, -1, 1, 1, DiffSideState::Equal, DiffSideState::Equal},
+        {1, 10, 2, -1, DiffSideState::Deleted, DiffSideState::Filler},
+        {1, 10, 3, 2, DiffSideState::Changed, DiffSideState::Changed},
+        {1, 10, -1, 3, DiffSideState::Filler, DiffSideState::Added},
+    };
+
+    ScintillaQuick_item left;
+    ScintillaQuick_item right;
+    left.setProperty("text", render_display_text(rows, DiffSide::Left));
+    right.setProperty("text", render_display_text(rows, DiffSide::Right));
+
+    configure_native_diff_row_markers(left);
+    configure_native_diff_row_markers(right);
+    apply_native_diff_row_markers(left, rows, DiffSide::Left);
+    apply_native_diff_row_markers(right, rows, DiffSide::Right);
+
+    expect_marker_bits(left, 0, 0);
+    expect_marker_bits(left, 1, native_marker_mask(diff_marker_deleted));
+    expect_marker_bits(left, 2, native_marker_mask(diff_marker_changed));
+    expect_marker_bits(left, 3, native_marker_mask(diff_marker_filler));
+
+    expect_marker_bits(right, 0, 0);
+    expect_marker_bits(right, 1, native_marker_mask(diff_marker_filler));
+    expect_marker_bits(right, 2, native_marker_mask(diff_marker_changed));
+    expect_marker_bits(right, 3, native_marker_mask(diff_marker_added));
+}
+
+GreenPixelCoverage native_marker_line_green_pixel_coverage(int marker_symbol)
 {
     QQuickWindow window;
     window.resize(360, 140);
@@ -872,21 +985,40 @@ bool native_marker_line_has_green_pixels(int marker_symbol)
     const int line_height = static_cast<int>(editor.send(SCI_TEXTHEIGHT, marked_line));
     const int scan_width = rendered.width() - text_x - 4;
 
+    constexpr int vertical_inset = 3;
     QImage marked_line_area;
-    if (!rendered.isNull() && scan_width > 0 && line_height > 4) {
-        marked_line_area = rendered.copy(text_x, line_y + 2, scan_width, line_height - 4);
+    if (!rendered.isNull() && scan_width > 0 && line_height > vertical_inset * 2) {
+        marked_line_area = rendered.copy(text_x, line_y + vertical_inset, scan_width, line_height - vertical_inset * 2);
     }
 
     SQ_EXPECT(!rendered.isNull());
     SQ_EXPECT(!marked_line_area.isNull());
-    return image_region_has_green_pixels(marked_line_area, 0, marked_line_area.width());
+    return image_region_green_pixel_coverage(marked_line_area, 0, marked_line_area.width());
+}
+
+bool native_marker_line_has_green_pixels(int marker_symbol)
+{
+    const GreenPixelCoverage coverage = native_marker_line_green_pixel_coverage(marker_symbol);
+    return coverage.greenPixels >= 64;
+}
+
+bool native_marker_line_is_mostly_green(int marker_symbol)
+{
+    constexpr int minimum_green_percent = 80;
+    const GreenPixelCoverage coverage = native_marker_line_green_pixel_coverage(marker_symbol);
+    const bool mostly_green =
+        coverage.totalPixels > 0 && coverage.greenPixels * 100 >= coverage.totalPixels * minimum_green_percent;
+    if (!mostly_green) {
+        std::fprintf(stderr, "native marker green coverage: %d/%d pixels\n", coverage.greenPixels, coverage.totalPixels);
+    }
+    return mostly_green;
 }
 
 void test_native_marker_line_highlight_candidates()
 {
     // TortoiseDiff needs text-area line tints; background markers are captured but not rendered by Quick today.
     SQ_EXPECT(!native_marker_line_has_green_pixels(SC_MARK_BACKGROUND));
-    SQ_EXPECT(native_marker_line_has_green_pixels(SC_MARK_FULLRECT));
+    SQ_EXPECT(native_marker_line_is_mostly_green(SC_MARK_FULLRECT));
 }
 
 class Tint_overlay final : public QQuickPaintedItem
@@ -1123,6 +1255,7 @@ int main(int argc, char** argv)
     test_live_command_diff_adapter_selection();
     test_widget_input_contract_validation();
     test_native_marker_line_highlight_candidates();
+    test_native_diff_row_markers_follow_side_state();
     test_two_readonly_panes_in_one_window();
 
     if (g_failures != 0) {

@@ -36,6 +36,15 @@ constexpr int k_editor_background = rgb(255, 255, 255);
 constexpr int k_margin_foreground = rgb(87, 96, 106);
 constexpr int k_margin_background = rgb(246, 248, 250);
 constexpr int k_selection_background = rgb(188, 214, 253);
+constexpr int k_marker_added = 0;
+constexpr int k_marker_deleted = 1;
+constexpr int k_marker_changed = 2;
+constexpr int k_marker_filler = 3;
+constexpr int k_added_background = rgb(205, 240, 209);
+constexpr int k_deleted_background = rgb(251, 207, 207);
+constexpr int k_changed_background = rgb(252, 239, 197);
+constexpr int k_filler_background = rgb(212, 219, 229);
+
 enum class DiffSideState
 {
     Equal,
@@ -144,62 +153,6 @@ class Scroll_button final : public QQuickPaintedItem
     Direction m_direction;
     std::function<void()> m_clicked;
     bool m_pressed = false;
-};
-
-class Row_tint_overlay final : public QQuickPaintedItem
-{
-  public:
-    Row_tint_overlay(
-        ScintillaQuick_item& pane, const DiffWidgetInput& input, bool left_side, QQuickItem* parent = nullptr)
-        : QQuickPaintedItem(parent), m_pane(pane), m_input(input), m_left_side(left_side)
-    {
-        setAcceptedMouseButtons(Qt::NoButton);
-        setAntialiasing(false);
-        setOpaquePainting(false);
-        setZ(2.0);
-    }
-
-    void paint(QPainter* painter) override
-    {
-        const int first_line = static_cast<int>(m_pane.send(SCI_GETFIRSTVISIBLELINE));
-        const int line_height = std::max(1, static_cast<int>(m_pane.send(SCI_TEXTHEIGHT, first_line)));
-        const int visible_rows = static_cast<int>(height() / line_height) + 2;
-        const int last_line = std::min<int>(static_cast<int>(m_input.rows.size()), first_line + visible_rows);
-
-        for (int row_index = std::max(0, first_line); row_index < last_line; ++row_index) {
-            const DiffRow& row = m_input.rows[static_cast<size_t>(row_index)];
-            const DiffSideState state = m_left_side ? row.leftState : row.rightState;
-            const QColor color = overlay_color(state);
-            if (!color.isValid()) {
-                continue;
-            }
-
-            painter->fillRect(QRectF(0.0, (row_index - first_line) * line_height, width(), line_height), color);
-        }
-    }
-
-  private:
-    static QColor overlay_color(DiffSideState state)
-    {
-        switch (state) {
-            case DiffSideState::Added:
-                return QColor(122, 216, 132, 96);
-            case DiffSideState::Deleted:
-                return QColor(245, 127, 127, 96);
-            case DiffSideState::Changed:
-                return QColor(245, 209, 86, 88);
-            case DiffSideState::Filler:
-                return QColor(136, 155, 183, 92);
-            case DiffSideState::Equal:
-                return {};
-        }
-
-        return {};
-    }
-
-    ScintillaQuick_item& m_pane;
-    const DiffWidgetInput& m_input;
-    bool m_left_side = false;
 };
 
 QStringList source_lines_from_text(const QString& text)
@@ -319,7 +272,7 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
 
         flush_change_block();
         if (hunk_left_seen != active_hunk.leftCount || hunk_right_seen != active_hunk.rightCount) {
-            qFatal("TortoiseDiff Step 7B fixture hunk has %d left/%d right lines, expected %d left/%d right.",
+            qFatal("TortoiseDiff Step 9 fixture hunk has %d left/%d right lines, expected %d left/%d right.",
                 hunk_left_seen, hunk_right_seen, active_hunk.leftCount, active_hunk.rightCount);
         }
         in_hunk = false;
@@ -361,7 +314,7 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
             }
             if (diff_line.startsWith(QStringLiteral("diff --git "))) {
                 if (saw_file_header || saw_hunk) {
-                    qFatal("TortoiseDiff Step 7B fixture supports one unified-diff file only.");
+                    qFatal("TortoiseDiff Step 9 fixture supports one unified-diff file only.");
                 }
                 saw_file_header = true;
                 continue;
@@ -372,7 +325,7 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
                 continue;
             }
 
-            qFatal("TortoiseDiff Step 7B fixture has an unexpected line outside a hunk: %s",
+            qFatal("TortoiseDiff Step 9 fixture has an unexpected line outside a hunk: %s",
                 qPrintable(diff_line));
         }
 
@@ -380,7 +333,7 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
             continue;
         }
         if (diff_line.isEmpty()) {
-            qFatal("TortoiseDiff Step 7B fixture has a hunk body line without a diff prefix.");
+            qFatal("TortoiseDiff Step 9 fixture has a hunk body line without a diff prefix.");
         }
 
         const QChar prefix = diff_line.at(0);
@@ -402,14 +355,14 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
             right_lines.append(text);
             ++hunk_right_seen;
         } else {
-            qFatal("TortoiseDiff Step 7B fixture has an unsupported hunk body prefix: %s",
+            qFatal("TortoiseDiff Step 9 fixture has an unsupported hunk body prefix: %s",
                 qPrintable(diff_line.left(1)));
         }
     }
 
     finish_hunk();
     if (!saw_hunk) {
-        qFatal("TortoiseDiff Step 7B fixture must contain at least one hunk.");
+        qFatal("TortoiseDiff Step 9 fixture must contain at least one hunk.");
     }
 
     return {left_lines.join(QStringLiteral("\n")), right_lines.join(QStringLiteral("\n")), std::move(rows)};
@@ -455,14 +408,14 @@ void validate_source_line_references(
         }
 
         if (source_line != expected_source_line || source_line > source_line_count) {
-            qFatal("TortoiseDiff Step 7B widget input has invalid %s source line %d; expected %d.", side, source_line,
+            qFatal("TortoiseDiff Step 9 widget input has invalid %s source line %d; expected %d.", side, source_line,
                 expected_source_line);
         }
         ++expected_source_line;
     }
 
     if (expected_source_line - 1 != source_line_count) {
-        qFatal("TortoiseDiff Step 7B widget input has %d %s source lines but references %d.", source_line_count, side,
+        qFatal("TortoiseDiff Step 9 widget input has %d %s source lines but references %d.", source_line_count, side,
             expected_source_line - 1);
     }
 }
@@ -470,7 +423,7 @@ void validate_source_line_references(
 void validate_diff_input(const DiffWidgetInput& input)
 {
     if (input.rows.empty()) {
-        qFatal("TortoiseDiff Step 7B widget input must not be empty.");
+        qFatal("TortoiseDiff Step 9 widget input must not be empty.");
     }
 
     validate_source_line_references(input.rows, true, display_row_count(input.leftText), "left");
@@ -480,7 +433,7 @@ void validate_diff_input(const DiffWidgetInput& input)
         if (!source_and_state_match(row.leftSourceLine, row.leftState) ||
             !source_and_state_match(row.rightSourceLine, row.rightState))
         {
-            qFatal("TortoiseDiff Step 7B widget input has filler state/source-line mismatch.");
+            qFatal("TortoiseDiff Step 9 widget input has filler state/source-line mismatch.");
         }
     }
 
@@ -488,10 +441,10 @@ void validate_diff_input(const DiffWidgetInput& input)
     const QString right_display_text = render_side_text(input, false);
     const int expected_rows = static_cast<int>(input.rows.size());
     if (display_row_count(left_display_text) != expected_rows || display_row_count(right_display_text) != expected_rows) {
-        qFatal("TortoiseDiff Step 7B widget input display buffers must have the same display row count as the row model.");
+        qFatal("TortoiseDiff Step 9 widget input display buffers must have the same display row count as the row model.");
     }
     if (left_display_text == right_display_text) {
-        qFatal("TortoiseDiff Step 7B widget input must render non-identical pane text.");
+        qFatal("TortoiseDiff Step 9 widget input must render non-identical pane text.");
     }
 }
 
@@ -537,7 +490,7 @@ QString sample_unified_diff_fixture()
         QStringLiteral("+\treturn label + separator + value.toString();"),
         QStringLiteral(" }"),
         QStringLiteral(" "),
-        QStringLiteral(" // This deliberately long line stays unwrapped in Step 7B so horizontal scrolling can be "
+        QStringLiteral(" // This deliberately long line stays unwrapped in Step 9 so horizontal scrolling can be "
                        "checked while left/right display rows are aligned with blank filler buffer lines.")};
 
     for (int row = 1; row <= 80; ++row) {
@@ -617,6 +570,57 @@ void configure_pane(ScintillaQuick_item& pane, const QFont& font, const QString&
     pane.setProperty("readonly", true);
 }
 
+void configure_diff_marker(ScintillaQuick_item& pane, int marker, int background)
+{
+    pane.send(SCI_MARKERDEFINE, marker, SC_MARK_FULLRECT);
+    pane.send(SCI_MARKERSETBACK, marker, background);
+    pane.send(SCI_MARKERSETLAYER, marker, SC_LAYER_UNDER_TEXT);
+}
+
+void configure_diff_markers(ScintillaQuick_item& pane)
+{
+    const int margin_count = static_cast<int>(pane.send(SCI_GETMARGINS));
+    for (int margin = 0; margin < margin_count; ++margin) {
+        pane.send(SCI_SETMARGINMASKN, margin, 0);
+    }
+
+    configure_diff_marker(pane, k_marker_added, k_added_background);
+    configure_diff_marker(pane, k_marker_deleted, k_deleted_background);
+    configure_diff_marker(pane, k_marker_changed, k_changed_background);
+    configure_diff_marker(pane, k_marker_filler, k_filler_background);
+}
+
+int marker_for_state(DiffSideState state)
+{
+    switch (state) {
+        case DiffSideState::Added:
+            return k_marker_added;
+        case DiffSideState::Deleted:
+            return k_marker_deleted;
+        case DiffSideState::Changed:
+            return k_marker_changed;
+        case DiffSideState::Filler:
+            return k_marker_filler;
+        case DiffSideState::Equal:
+            return -1;
+    }
+
+    return -1;
+}
+
+void apply_diff_markers(ScintillaQuick_item& pane, const DiffWidgetInput& input, bool left_side)
+{
+    configure_diff_markers(pane);
+    for (int row_index = 0; row_index < static_cast<int>(input.rows.size()); ++row_index) {
+        const DiffRow& row = input.rows[static_cast<size_t>(row_index)];
+        const DiffSideState state = left_side ? row.leftState : row.rightState;
+        const int marker = marker_for_state(state);
+        if (marker != -1) {
+            pane.send(SCI_MARKERADD, row_index, marker);
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -628,7 +632,7 @@ int main(int argc, char** argv)
     }
 
     QQuickWindow window;
-    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 7B - Live Git Diff"));
+    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 9 - Live Git Diff"));
     window.resize(1200, 720);
     window.setColor(QColor(214, 219, 225));
 
@@ -661,8 +665,6 @@ int main(int argc, char** argv)
     QQuickItem right_container;
     ScintillaQuick_item left;
     ScintillaQuick_item right;
-    Row_tint_overlay* left_overlay = nullptr;
-    Row_tint_overlay* right_overlay = nullptr;
     left_container.setParentItem(root);
     right_container.setParentItem(root);
     left.setParentItem(&left_container);
@@ -717,14 +719,6 @@ int main(int argc, char** argv)
         left.setSize(left_container.size());
         right.setPosition({0.0, 0.0});
         right.setSize(right_container.size());
-        if (left_overlay) {
-            left_overlay->setPosition({0.0, 0.0});
-            left_overlay->setSize(left_container.size());
-        }
-        if (right_overlay) {
-            right_overlay->setPosition({0.0, 0.0});
-            right_overlay->setSize(right_container.size());
-        }
 
         const qreal control_x = std::max<qreal>(0.0, root_width - control_inset - control_size);
         const qreal bottom_y = std::max<qreal>(0.0, root_height - control_inset - control_size);
@@ -748,56 +742,39 @@ int main(int argc, char** argv)
     const DiffWidgetInput input = sample_diff_input();
     configure_pane(left, pane_font, render_side_text(input, true));
     configure_pane(right, pane_font, render_side_text(input, false));
-    Row_tint_overlay left_overlay_item(left, input, true, &left_container);
-    Row_tint_overlay right_overlay_item(right, input, false, &right_container);
-    left_overlay = &left_overlay_item;
-    right_overlay = &right_overlay_item;
+    apply_diff_markers(left, input, true);
+    apply_diff_markers(right, input, false);
     layout_panes();
     const int expected_display_rows = static_cast<int>(input.rows.size());
     if (left.send(SCI_GETLINECOUNT) != expected_display_rows || right.send(SCI_GETLINECOUNT) != expected_display_rows) {
-        qFatal("TortoiseDiff Step 7B panes must keep display-buffer line numbers aligned.");
+        qFatal("TortoiseDiff Step 9 panes must keep display-buffer line numbers aligned.");
     }
-
-    const auto update_overlays = [&]() {
-        if (left_overlay) {
-            left_overlay->update();
-        }
-        if (right_overlay) {
-            right_overlay->update();
-        }
-    };
 
     QObject::connect(&left, &ScintillaQuick_item::verticalScrolled, &right, [&](int value) {
         mirror_scroll([&]() {
             right.scrollVertical(value);
         });
-        update_overlays();
     });
     QObject::connect(&right, &ScintillaQuick_item::verticalScrolled, &left, [&](int value) {
         mirror_scroll([&]() {
             left.scrollVertical(value);
         });
-        update_overlays();
     });
     QObject::connect(&left, &ScintillaQuick_item::horizontalScrolled, &right, [&](int value) {
         mirror_scroll([&]() {
             right.scrollHorizontal(value);
         });
-        update_overlays();
     });
     QObject::connect(&right, &ScintillaQuick_item::horizontalScrolled, &left, [&](int value) {
         mirror_scroll([&]() {
             left.scrollHorizontal(value);
         });
-        update_overlays();
     });
     QObject::connect(&left, &ScintillaQuick_item::zoom, &right, [&](int value) {
         mirror_zoom(right, value);
-        update_overlays();
     });
     QObject::connect(&right, &ScintillaQuick_item::zoom, &left, [&](int value) {
         mirror_zoom(left, value);
-        update_overlays();
     });
 
     window.show();

@@ -1223,27 +1223,25 @@ std::vector<QPointF> make_marker_bar_points(const QRectF& rect)
     const qreal bar_width = std::max<qreal>(2.0, rect.width() / 3.0);
     const qreal left      = rect.center().x() - bar_width     / 2.0;
     const QRectF bar_rect(left, rect.top(), bar_width, rect.height());
-    const QPointF center = bar_rect.center();
     return {
-        center,
         QPointF(bar_rect.left(),  bar_rect.top()),
         QPointF(bar_rect.right(), bar_rect.top()),
         QPointF(bar_rect.right(), bar_rect.bottom()),
-        QPointF(bar_rect.left(),  bar_rect.bottom()),
         QPointF(bar_rect.left(),  bar_rect.top()),
+        QPointF(bar_rect.right(), bar_rect.bottom()),
+        QPointF(bar_rect.left(),  bar_rect.bottom()),
     };
 }
 
 std::vector<QPointF> make_filled_rect_points(const QRectF& rect)
 {
-    const QPointF center = rect.center();
     return {
-        center,
         QPointF(rect.left(),  rect.top()),
         QPointF(rect.right(), rect.top()),
         QPointF(rect.right(), rect.bottom()),
-        QPointF(rect.left(),  rect.bottom()),
         QPointF(rect.left(),  rect.top()),
+        QPointF(rect.right(), rect.bottom()),
+        QPointF(rect.left(),  rect.bottom()),
     };
 }
 
@@ -2253,7 +2251,7 @@ std::vector<QPointF> indicator_geometry(
             return make_rect_outline_as_lines(rect.adjusted(0.0, 0.0, -pixel, -pixel));
         }
         case static_cast<int>(IndicatorStyle::FullBox):
-            mode = QSGGeometry::DrawTriangleFan;
+            mode = QSGGeometry::DrawTriangles;
             return make_filled_rect_points(rect);
         case static_cast<int>(IndicatorStyle::Gradient):
             return make_dashed_points(
@@ -2287,7 +2285,7 @@ std::vector<QPointF> indicator_geometry(
                 std::max(rect.top(), rect.bottom() - 3.0),
                 std::max<qreal>(1.0, rect.width()  - 2.0),
                 2.0);
-            mode = QSGGeometry::DrawTriangleFan;
+            mode = QSGGeometry::DrawTriangles;
             return make_filled_rect_points(strip);
         }
         case static_cast<int>(IndicatorStyle::CompositionThin):
@@ -2673,7 +2671,7 @@ public:
                 }
                 const QRectF rect = primitive.rect;
                 std::vector<QPointF> points;
-                QSGGeometry::DrawingMode mode = QSGGeometry::DrawTriangleFan;
+                QSGGeometry::DrawingMode mode = QSGGeometry::DrawTriangles;
 
                 switch (primitive.marker_type) {
                     case static_cast<int>(MarkerSymbol::Empty):
