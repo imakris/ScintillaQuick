@@ -436,6 +436,9 @@ Build:
 - active hunk follows the clicked row or selected display-row range
 - right-clicking inside the active range keeps it; right-clicking another
   changed block makes that block active before later context menu work
+- right-click shows merge choices: `use other`,
+  `use both (this one first)`, `use both (this one last)`, separator,
+  `use whole other file`
 - expose the resulting edited buffer outside the widget
 
 Test:

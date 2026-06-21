@@ -1070,6 +1070,100 @@ Rectangle {
     }
     hunk_toolbar->setParentItem(root);
 
+    QQmlComponent context_menu_component(&qml_engine);
+    context_menu_component.setData(R"qml(
+import QtQuick
+
+Rectangle {
+    id: menu
+    color: "#ffffff"
+    border.color: "#8c959f"
+    visible: false
+    z: 30
+    width: 232
+    height: menuColumn.implicitHeight + 2
+
+    function closeMenu() {
+        visible = false
+    }
+
+    Column {
+        id: menuColumn
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: 1
+
+        Repeater {
+            model: [
+                "use other",
+                "use both (this one first)",
+                "use both (this one last)"
+            ]
+
+            delegate: Rectangle {
+                width: menuColumn.width
+                height: 26
+                color: rowMouse.containsMouse ? "#0969da" : "#ffffff"
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
+                    color: rowMouse.containsMouse ? "#ffffff" : "#24292f"
+                    text: modelData
+                }
+
+                MouseArea {
+                    id: rowMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: menu.closeMenu()
+                }
+            }
+        }
+
+        Rectangle {
+            width: menuColumn.width
+            height: 1
+            color: "#d0d7de"
+        }
+
+        Rectangle {
+            width: menuColumn.width
+            height: 26
+            color: rowMouse.containsMouse ? "#0969da" : "#ffffff"
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                color: rowMouse.containsMouse ? "#ffffff" : "#24292f"
+                text: "use whole other file"
+            }
+
+            MouseArea {
+                id: rowMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: menu.closeMenu()
+            }
+        }
+    }
+}
+)qml",
+        QUrl());
+    std::unique_ptr<QObject> context_menu_object(context_menu_component.create());
+    if (!context_menu_object) {
+        qFatal("TortoiseDiff Step 14 context menu failed to load: %s",
+            qPrintable(context_menu_component.errorString()));
+    }
+    auto* context_menu = qobject_cast<QQuickItem*>(context_menu_object.get());
+    if (!context_menu) {
+        qFatal("TortoiseDiff Step 14 context menu is not a QQuickItem.");
+    }
+    context_menu->setParentItem(root);
+
     bool applying_mirrored_scroll = false;
     bool applying_mirrored_zoom = false;
     const auto mirror_scroll = [&](auto&& apply) {
@@ -1444,6 +1538,17 @@ Rectangle {
         }
         return static_cast<int>(pane.send(SCI_LINEFROMPOSITION, position));
     };
+    const auto hide_context_menu = [&]() {
+        context_menu->setVisible(false);
+    };
+    const auto show_context_menu = [&](ScintillaQuick_item& pane, QMouseEvent* event) {
+        const QPointF root_position = pane.mapToItem(root, event->position());
+        const qreal x = std::clamp(root_position.x(), 0.0, std::max<qreal>(0.0, root->width() - context_menu->width()));
+        const qreal y =
+            std::clamp(root_position.y(), 0.0, std::max<qreal>(0.0, root->height() - context_menu->height()));
+        context_menu->setPosition({x, y});
+        context_menu->setVisible(true);
+    };
     const auto selected_display_row_range = [](ScintillaQuick_item& pane) {
         const sptr_t selection_start = pane.send(SCI_GETSELECTIONSTART);
         const sptr_t selection_end = pane.send(SCI_GETSELECTIONEND);
@@ -1605,6 +1710,7 @@ Rectangle {
         auto* pane_ptr = &pane;
         QObject::connect(&pane, &ScintillaQuick_item::buttonPressed, &window, [&, pane_ptr](QMouseEvent* event) {
             if (event->button() != Qt::RightButton) {
+                hide_context_menu();
                 return;
             }
 
@@ -1613,6 +1719,7 @@ Rectangle {
             if (display_row >= 0) {
                 set_active_changed_block_from_display_row(display_row);
             }
+            show_context_menu(*pane_ptr, event);
         });
         QObject::connect(&pane, &ScintillaQuick_item::buttonReleased, &window, [&, pane_ptr](QMouseEvent* event) {
             if (event->button() == Qt::RightButton) {
@@ -1620,6 +1727,7 @@ Rectangle {
                 if (display_row >= 0) {
                     set_active_changed_block_from_display_row(display_row);
                 }
+                show_context_menu(*pane_ptr, event);
                 suppress_selection_tracking = false;
                 return;
             }
