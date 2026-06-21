@@ -42,10 +42,12 @@ constexpr int k_marker_added = 0;
 constexpr int k_marker_deleted = 1;
 constexpr int k_marker_changed = 2;
 constexpr int k_marker_filler = 3;
+constexpr int k_inline_changed_indicator = 0;
 constexpr int k_added_background = rgb(205, 240, 209);
 constexpr int k_deleted_background = rgb(251, 207, 207);
 constexpr int k_changed_background = rgb(252, 239, 197);
 constexpr int k_filler_background = rgb(212, 219, 229);
+constexpr int k_inline_changed_background = rgb(245, 192, 80);
 
 enum class DiffSideState
 {
@@ -73,9 +75,38 @@ struct DiffWidgetInput
     std::vector<DiffRow> rows;
 };
 
+struct InlineChangedSpan
+{
+    int begin;
+    int end;
+};
+
 QStringList source_lines_from_text(const QString& text)
 {
     return text.split(QLatin1Char('\n'), Qt::KeepEmptyParts);
+}
+
+std::pair<InlineChangedSpan, InlineChangedSpan> inline_changed_spans(const QString& left, const QString& right)
+{
+    const int shared_length = std::min(left.size(), right.size());
+    int prefix = 0;
+    while (prefix < shared_length && left[prefix] == right[prefix]) {
+        ++prefix;
+    }
+
+    int left_end = left.size();
+    int right_end = right.size();
+    while (left_end > prefix && right_end > prefix && left[left_end - 1] == right[right_end - 1]) {
+        --left_end;
+        --right_end;
+    }
+
+    return {InlineChangedSpan{prefix, left_end}, InlineChangedSpan{prefix, right_end}};
+}
+
+int utf8_size(const QString& text, int length)
+{
+    return text.left(length).toUtf8().size();
 }
 
 void append_change_block(std::vector<DiffRow>& rows, int& next_hunk_id, int& next_group_id, int left_begin,
@@ -539,6 +570,53 @@ void apply_diff_markers(ScintillaQuick_item& pane, const DiffWidgetInput& input,
     }
 }
 
+void configure_inline_changed_text_highlights(ScintillaQuick_item& pane)
+{
+    pane.send(SCI_INDICSETSTYLE, k_inline_changed_indicator, INDIC_FULLBOX);
+    pane.send(SCI_INDICSETFORE, k_inline_changed_indicator, k_inline_changed_background);
+    pane.send(SCI_INDICSETUNDER, k_inline_changed_indicator, 1);
+    pane.send(SCI_INDICSETALPHA, k_inline_changed_indicator, 90);
+    pane.send(SCI_INDICSETOUTLINEALPHA, k_inline_changed_indicator, 120);
+}
+
+void apply_inline_changed_text_highlight(
+    ScintillaQuick_item& pane, int row_index, const QString& line, const InlineChangedSpan& span)
+{
+    if (span.end <= span.begin) {
+        return;
+    }
+
+    const int start_position =
+        static_cast<int>(pane.send(SCI_POSITIONFROMLINE, row_index)) + utf8_size(line, span.begin);
+    const int length = utf8_size(line.mid(span.begin, span.end - span.begin), span.end - span.begin);
+    pane.send(SCI_SETINDICATORCURRENT, k_inline_changed_indicator);
+    pane.send(SCI_INDICATORFILLRANGE, start_position, length);
+}
+
+void apply_inline_changed_text_highlights(
+    ScintillaQuick_item& left, ScintillaQuick_item& right, const DiffWidgetInput& input)
+{
+    configure_inline_changed_text_highlights(left);
+    configure_inline_changed_text_highlights(right);
+
+    const QStringList left_lines = source_lines_from_text(input.leftText);
+    const QStringList right_lines = source_lines_from_text(input.rightText);
+    for (int row_index = 0; row_index < static_cast<int>(input.rows.size()); ++row_index) {
+        const DiffRow& row = input.rows[static_cast<size_t>(row_index)];
+        if (row.leftState != DiffSideState::Changed || row.rightState != DiffSideState::Changed ||
+            row.leftSourceLine == -1 || row.rightSourceLine == -1)
+        {
+            continue;
+        }
+
+        const QString& left_line = left_lines[row.leftSourceLine - 1];
+        const QString& right_line = right_lines[row.rightSourceLine - 1];
+        const auto [left_span, right_span] = inline_changed_spans(left_line, right_line);
+        apply_inline_changed_text_highlight(left, row_index, left_line, left_span);
+        apply_inline_changed_text_highlight(right, row_index, right_line, right_span);
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -550,7 +628,7 @@ int main(int argc, char** argv)
     }
 
     QQuickWindow window;
-    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 10 - Scrollbars"));
+    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 11 - Inline Changed Text"));
     window.resize(1200, 720);
     window.setColor(QColor(214, 219, 225));
 
@@ -824,6 +902,7 @@ ScrollBar {
     update_shared_horizontal_scroll_width();
     apply_diff_markers(left, input, true);
     apply_diff_markers(right, input, false);
+    apply_inline_changed_text_highlights(left, right, input);
     layout_panes();
     const int expected_display_rows = static_cast<int>(input.rows.size());
     if (left.send(SCI_GETLINECOUNT) != expected_display_rows || right.send(SCI_GETLINECOUNT) != expected_display_rows) {

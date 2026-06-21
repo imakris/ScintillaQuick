@@ -348,14 +348,26 @@ Human checkpoint:
 
 ## Step 11: Inline Changed Text Highlighting
 
+Status:
+
+- next implementation slice after Step 10 scrollbars; some notes may call this
+  user-called 10.2, but keep it numbered Step 11 to avoid renumbering later
+  plan entries
+
 Build:
 
-- optional after line highlighting
-- first pass uses common-prefix/common-suffix spans for simple ASCII changed
-  lines
-- return Scintilla document-position spans for each side
-- defer Unicode grapheme correctness, deletion ghosts, and more complex inline
-  matching until the simple version is judged too noisy
+- simple changed-text highlighting pass for changed-line pairs/groups
+- compute side-specific spans with common-prefix/common-suffix trimming
+- convert spans to Scintilla document positions for each side
+- render spans with native Scintilla indicators, not a Qt Quick overlay
+
+Known limitations:
+
+- ASCII/simple code-unit spans only; no Unicode grapheme correctness yet
+- no token-aware, moved-text, or semantic matching
+- repeated text may highlight a larger or less intuitive middle span
+- no deletion ghosts or inserted placeholders on the opposite side
+- line-count-mismatched changed groups may get only best-effort inline spans
 
 Test:
 

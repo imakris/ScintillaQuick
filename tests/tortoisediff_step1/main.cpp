@@ -99,6 +99,18 @@ struct HorizontalScrollbarModel
     double size = 1.0;
 };
 
+struct ChangedTextSpan
+{
+    qsizetype start = 0;
+    qsizetype length = 0;
+};
+
+struct ChangedTextSpans
+{
+    ChangedTextSpan left;
+    ChangedTextSpan right;
+};
+
 enum class WidgetInputValidation
 {
     Accepted,
@@ -261,6 +273,24 @@ HorizontalScrollbarModel horizontal_scrollbar_model_for_panes(
 {
     return horizontal_scrollbar_model(
         std::max(left_content_width, right_content_width), std::min(left_viewport_width, right_viewport_width), x_offset);
+}
+
+ChangedTextSpans inline_changed_text_spans(const QString& left_text, const QString& right_text)
+{
+    qsizetype prefix = 0;
+    const qsizetype max_prefix = std::min(left_text.size(), right_text.size());
+    while (prefix < max_prefix && left_text[prefix] == right_text[prefix]) {
+        ++prefix;
+    }
+
+    qsizetype suffix = 0;
+    while (prefix + suffix < left_text.size() && prefix + suffix < right_text.size() &&
+           left_text[left_text.size() - suffix - 1] == right_text[right_text.size() - suffix - 1])
+    {
+        ++suffix;
+    }
+
+    return {{prefix, left_text.size() - prefix - suffix}, {prefix, right_text.size() - prefix - suffix}};
 }
 
 std::vector<DiffRow> raw_text_diff_rows(const QString& left_text, const QString& right_text)
@@ -808,6 +838,40 @@ void test_raw_text_line_diff_adapter()
             {0, -1, 1, 2, DiffSideState::Equal, DiffSideState::Equal},
             {2, 2, 2, -1, DiffSideState::Deleted, DiffSideState::Filler},
         });
+}
+
+void test_inline_changed_text_spans()
+{
+    const ChangedTextSpans changed_words =
+        inline_changed_text_spans(QStringLiteral("abc def ghi"), QStringLiteral("abc xyz ghi"));
+    SQ_EXPECT(changed_words.left.start == 4);
+    SQ_EXPECT(changed_words.left.length == 3);
+    SQ_EXPECT(changed_words.right.start == 4);
+    SQ_EXPECT(changed_words.right.length == 3);
+    SQ_EXPECT(QStringLiteral("abc def ghi").mid(changed_words.left.start, changed_words.left.length) ==
+              QStringLiteral("def"));
+    SQ_EXPECT(QStringLiteral("abc xyz ghi").mid(changed_words.right.start, changed_words.right.length) ==
+              QStringLiteral("xyz"));
+
+    const ChangedTextSpans inserted =
+        inline_changed_text_spans(QStringLiteral("abcghi"), QStringLiteral("abcxyzghi"));
+    SQ_EXPECT(inserted.left.start == 3);
+    SQ_EXPECT(inserted.left.length == 0);
+    SQ_EXPECT(inserted.right.start == 3);
+    SQ_EXPECT(inserted.right.length == 3);
+    SQ_EXPECT(QStringLiteral("abcghi").mid(inserted.left.start, inserted.left.length).isEmpty());
+    SQ_EXPECT(QStringLiteral("abcxyzghi").mid(inserted.right.start, inserted.right.length) ==
+              QStringLiteral("xyz"));
+
+    const ChangedTextSpans repeated_token =
+        inline_changed_text_spans(QStringLiteral("foo bar foo"), QStringLiteral("foo foo bar foo"));
+    SQ_EXPECT(repeated_token.left.start == 4);
+    SQ_EXPECT(repeated_token.left.length == 0);
+    SQ_EXPECT(repeated_token.right.start == 4);
+    SQ_EXPECT(repeated_token.right.length == 4);
+    SQ_EXPECT(QStringLiteral("foo bar foo").mid(repeated_token.left.start, repeated_token.left.length).isEmpty());
+    SQ_EXPECT(QStringLiteral("foo foo bar foo").mid(repeated_token.right.start, repeated_token.right.length) ==
+              QStringLiteral("foo "));
 }
 
 void test_display_row_model_changed_blocks()
@@ -1413,6 +1477,7 @@ int main(int argc, char** argv)
 
     test_display_row_model_changed_blocks();
     test_raw_text_line_diff_adapter();
+    test_inline_changed_text_spans();
     test_stored_unified_diff_adapter();
     test_live_command_diff_adapter_selection();
     test_widget_input_contract_validation();
