@@ -252,11 +252,21 @@ Human checkpoint:
 
 ## Step 7B: Live Git Diff Command Adapter
 
+Build:
+
+- add a demo-grade live command adapter for one hardcoded text file
+- run `git diff --no-color --unified=100000` and parse stdout into
+  `DiffWidgetInput`
+- keep live command execution outside the widget
+- if git is unavailable, exits nonzero, or returns empty output, fall back to the
+  stored fixture so the demo remains launchable
+
 Future work:
 
-- add a live `git diff --no-color` command adapter after Step 7A passes
-- keep live command execution outside the widget and feed parsed output into
-  `DiffWidgetInput`
+- file selection
+- real old/new full-file content handling
+- multi-file rejection UX
+- typed errors surfaced to UI
 
 ## Step 8: Line Highlight Primitive Spike
 

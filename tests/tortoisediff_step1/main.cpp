@@ -494,6 +494,13 @@ bool stored_unified_diff_input(const QString& diff_text, DiffWidgetInput& input)
     return validate_diff_widget_input(input) == WidgetInputValidation::Accepted;
 }
 
+bool live_or_fallback_unified_diff_input(
+    bool command_succeeded, const QString& stdout_text, const QString& fallback_diff_text, DiffWidgetInput& input)
+{
+    const QString& diff_text = command_succeeded && !stdout_text.isEmpty() ? stdout_text : fallback_diff_text;
+    return stored_unified_diff_input(diff_text, input);
+}
+
 void test_stored_unified_diff_adapter()
 {
     DiffWidgetInput input;
@@ -535,6 +542,32 @@ void test_stored_unified_diff_adapter()
                                                         " one\n"
                                                         "diff --git a/two.txt b/two.txt\n"),
         input));
+}
+
+void test_live_command_diff_adapter_selection()
+{
+    const QString live_diff = QStringLiteral("diff --git a/file.txt b/file.txt\n"
+                                             "--- a/file.txt\n"
+                                             "+++ b/file.txt\n"
+                                             "@@ -1,1 +1,1 @@\n"
+                                             "-fallback loses\n"
+                                             "+live wins\n");
+    const QString fallback_diff = QStringLiteral("diff --git a/file.txt b/file.txt\n"
+                                                 "--- a/file.txt\n"
+                                                 "+++ b/file.txt\n"
+                                                 "@@ -1,1 +1,1 @@\n"
+                                                 "-old fallback\n"
+                                                 "+fallback wins\n");
+
+    DiffWidgetInput input;
+    SQ_EXPECT(live_or_fallback_unified_diff_input(true, live_diff, fallback_diff, input));
+    SQ_EXPECT(input.rightText == QStringLiteral("live wins"));
+
+    SQ_EXPECT(live_or_fallback_unified_diff_input(true, QString(), fallback_diff, input));
+    SQ_EXPECT(input.rightText == QStringLiteral("fallback wins"));
+
+    SQ_EXPECT(live_or_fallback_unified_diff_input(false, live_diff, fallback_diff, input));
+    SQ_EXPECT(input.rightText == QStringLiteral("fallback wins"));
 }
 
 void expect_side_has_blank_fillers_only(
@@ -1025,6 +1058,7 @@ int main(int argc, char** argv)
     test_display_row_model_changed_blocks();
     test_raw_text_line_diff_adapter();
     test_stored_unified_diff_adapter();
+    test_live_command_diff_adapter_selection();
     test_widget_input_contract_validation();
     test_two_readonly_panes_in_one_window();
 

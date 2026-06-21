@@ -9,10 +9,12 @@
 #include <vector>
 
 #include <QColor>
+#include <QDir>
 #include <QGuiApplication>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPolygonF>
+#include <QProcess>
 #include <QQuickItem>
 #include <QQuickPaintedItem>
 #include <QQuickWindow>
@@ -317,7 +319,7 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
 
         flush_change_block();
         if (hunk_left_seen != active_hunk.leftCount || hunk_right_seen != active_hunk.rightCount) {
-            qFatal("TortoiseDiff Step 7 fixture hunk has %d left/%d right lines, expected %d left/%d right.",
+            qFatal("TortoiseDiff Step 7B fixture hunk has %d left/%d right lines, expected %d left/%d right.",
                 hunk_left_seen, hunk_right_seen, active_hunk.leftCount, active_hunk.rightCount);
         }
         in_hunk = false;
@@ -334,7 +336,14 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
     };
 
     for (int line_index = 0; line_index < diff_lines.size(); ++line_index) {
-        const QString& diff_line = diff_lines[line_index];
+        QString diff_line = diff_lines[line_index];
+        if (diff_line.endsWith(QLatin1Char('\r'))) {
+            diff_line.chop(1);
+        }
+        if (line_index == diff_lines.size() - 1 && diff_line.isEmpty()) {
+            break;
+        }
+
         DiffHunkHeader parsed_hunk = {};
         if (parse_hunk_header(diff_line, parsed_hunk)) {
             finish_hunk();
@@ -352,7 +361,7 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
             }
             if (diff_line.startsWith(QStringLiteral("diff --git "))) {
                 if (saw_file_header || saw_hunk) {
-                    qFatal("TortoiseDiff Step 7 fixture supports one unified-diff file only.");
+                    qFatal("TortoiseDiff Step 7B fixture supports one unified-diff file only.");
                 }
                 saw_file_header = true;
                 continue;
@@ -363,7 +372,7 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
                 continue;
             }
 
-            qFatal("TortoiseDiff Step 7 fixture has an unexpected line outside a hunk: %s",
+            qFatal("TortoiseDiff Step 7B fixture has an unexpected line outside a hunk: %s",
                 qPrintable(diff_line));
         }
 
@@ -371,7 +380,7 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
             continue;
         }
         if (diff_line.isEmpty()) {
-            qFatal("TortoiseDiff Step 7 fixture has a hunk body line without a diff prefix.");
+            qFatal("TortoiseDiff Step 7B fixture has a hunk body line without a diff prefix.");
         }
 
         const QChar prefix = diff_line.at(0);
@@ -393,14 +402,14 @@ DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
             right_lines.append(text);
             ++hunk_right_seen;
         } else {
-            qFatal("TortoiseDiff Step 7 fixture has an unsupported hunk body prefix: %s",
+            qFatal("TortoiseDiff Step 7B fixture has an unsupported hunk body prefix: %s",
                 qPrintable(diff_line.left(1)));
         }
     }
 
     finish_hunk();
     if (!saw_hunk) {
-        qFatal("TortoiseDiff Step 7 fixture must contain at least one hunk.");
+        qFatal("TortoiseDiff Step 7B fixture must contain at least one hunk.");
     }
 
     return {left_lines.join(QStringLiteral("\n")), right_lines.join(QStringLiteral("\n")), std::move(rows)};
@@ -446,14 +455,14 @@ void validate_source_line_references(
         }
 
         if (source_line != expected_source_line || source_line > source_line_count) {
-            qFatal("TortoiseDiff Step 7 widget input has invalid %s source line %d; expected %d.", side, source_line,
+            qFatal("TortoiseDiff Step 7B widget input has invalid %s source line %d; expected %d.", side, source_line,
                 expected_source_line);
         }
         ++expected_source_line;
     }
 
     if (expected_source_line - 1 != source_line_count) {
-        qFatal("TortoiseDiff Step 7 widget input has %d %s source lines but references %d.", source_line_count, side,
+        qFatal("TortoiseDiff Step 7B widget input has %d %s source lines but references %d.", source_line_count, side,
             expected_source_line - 1);
     }
 }
@@ -461,7 +470,7 @@ void validate_source_line_references(
 void validate_diff_input(const DiffWidgetInput& input)
 {
     if (input.rows.empty()) {
-        qFatal("TortoiseDiff Step 7 widget input must not be empty.");
+        qFatal("TortoiseDiff Step 7B widget input must not be empty.");
     }
 
     validate_source_line_references(input.rows, true, display_row_count(input.leftText), "left");
@@ -471,7 +480,7 @@ void validate_diff_input(const DiffWidgetInput& input)
         if (!source_and_state_match(row.leftSourceLine, row.leftState) ||
             !source_and_state_match(row.rightSourceLine, row.rightState))
         {
-            qFatal("TortoiseDiff Step 7 widget input has filler state/source-line mismatch.");
+            qFatal("TortoiseDiff Step 7B widget input has filler state/source-line mismatch.");
         }
     }
 
@@ -479,10 +488,10 @@ void validate_diff_input(const DiffWidgetInput& input)
     const QString right_display_text = render_side_text(input, false);
     const int expected_rows = static_cast<int>(input.rows.size());
     if (display_row_count(left_display_text) != expected_rows || display_row_count(right_display_text) != expected_rows) {
-        qFatal("TortoiseDiff Step 7 widget input display buffers must have the same display row count as the row model.");
+        qFatal("TortoiseDiff Step 7B widget input display buffers must have the same display row count as the row model.");
     }
     if (left_display_text == right_display_text) {
-        qFatal("TortoiseDiff Step 7 widget input must render non-identical pane text.");
+        qFatal("TortoiseDiff Step 7B widget input must render non-identical pane text.");
     }
 }
 
@@ -528,7 +537,7 @@ QString sample_unified_diff_fixture()
         QStringLiteral("+\treturn label + separator + value.toString();"),
         QStringLiteral(" }"),
         QStringLiteral(" "),
-        QStringLiteral(" // This deliberately long line stays unwrapped in Step 7 so horizontal scrolling can be "
+        QStringLiteral(" // This deliberately long line stays unwrapped in Step 7B so horizontal scrolling can be "
                        "checked while left/right display rows are aligned with blank filler buffer lines.")};
 
     for (int row = 1; row <= 80; ++row) {
@@ -540,9 +549,35 @@ QString sample_unified_diff_fixture()
     return lines.join(QStringLiteral("\n"));
 }
 
+QString live_unified_diff_or_fixture()
+{
+    QProcess git;
+    git.setProgram(QStringLiteral("git"));
+    git.setWorkingDirectory(QDir::currentPath());
+    // ponytail: one hardcoded full-context file keeps this demo deterministic until real file selection exists.
+    git.setArguments({QStringLiteral("diff"), QStringLiteral("--no-color"), QStringLiteral("--unified=100000"),
+        QStringLiteral("--"), QStringLiteral("examples/tortoisediff_baseline/main.cpp")});
+
+    git.start();
+    if (!git.waitForStarted(1000)) {
+        return sample_unified_diff_fixture();
+    }
+    if (!git.waitForFinished(3000)) {
+        git.kill();
+        git.waitForFinished();
+        return sample_unified_diff_fixture();
+    }
+    if (git.exitStatus() != QProcess::NormalExit || git.exitCode() != 0) {
+        return sample_unified_diff_fixture();
+    }
+
+    const QString stdout_diff = QString::fromUtf8(git.readAllStandardOutput());
+    return stdout_diff.isEmpty() ? sample_unified_diff_fixture() : stdout_diff;
+}
+
 DiffWidgetInput sample_diff_input()
 {
-    DiffWidgetInput input = diff_input_from_unified_diff(sample_unified_diff_fixture());
+    DiffWidgetInput input = diff_input_from_unified_diff(live_unified_diff_or_fixture());
     validate_diff_input(input);
     return input;
 }
@@ -593,7 +628,7 @@ int main(int argc, char** argv)
     }
 
     QQuickWindow window;
-    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 7 - Unified Diff Fixture"));
+    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 7B - Live Git Diff"));
     window.resize(1200, 720);
     window.setColor(QColor(214, 219, 225));
 
@@ -720,7 +755,7 @@ int main(int argc, char** argv)
     layout_panes();
     const int expected_display_rows = static_cast<int>(input.rows.size());
     if (left.send(SCI_GETLINECOUNT) != expected_display_rows || right.send(SCI_GETLINECOUNT) != expected_display_rows) {
-        qFatal("TortoiseDiff Step 7 panes must keep display-buffer line numbers aligned.");
+        qFatal("TortoiseDiff Step 7B panes must keep display-buffer line numbers aligned.");
     }
 
     const auto update_overlays = [&]() {
