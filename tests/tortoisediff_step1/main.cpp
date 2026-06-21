@@ -359,6 +359,14 @@ int previous_hunk_index(int current_index, int hunk_count)
     return std::min(current_index - 1, hunk_count - 1);
 }
 
+int centered_hunk_first_visible_line(int hunk_row, int total_rows, int visible_rows)
+{
+    const int bounded_total_rows = std::max(1, total_rows);
+    const int bounded_visible_rows = std::clamp(visible_rows, 1, bounded_total_rows);
+    const int max_first_line = std::max(0, bounded_total_rows - bounded_visible_rows);
+    return std::clamp(hunk_row - bounded_visible_rows / 2, 0, max_first_line);
+}
+
 ChangedTextSpans inline_changed_text_spans(const QString& left_text, const QString& right_text)
 {
     qsizetype prefix = 0;
@@ -1060,6 +1068,9 @@ void test_hunk_navigation_model()
     SQ_EXPECT(previous_hunk_index(0, static_cast<int>(targets.size())) == 0);
     SQ_EXPECT(next_hunk_index(0, 0) == -1);
     SQ_EXPECT(previous_hunk_index(0, 0) == -1);
+    SQ_EXPECT(centered_hunk_first_visible_line(30, 100, 20) == 20);
+    SQ_EXPECT(centered_hunk_first_visible_line(3, 100, 20) == 0);
+    SQ_EXPECT(centered_hunk_first_visible_line(95, 100, 20) == 80);
 }
 
 void test_active_hunk_boundary_thickness_model()

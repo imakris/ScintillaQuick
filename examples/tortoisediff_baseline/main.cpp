@@ -1187,6 +1187,12 @@ Rectangle {
         }
         return static_cast<int>((it - hunk_start_rows.begin()) - 1);
     };
+    const auto centered_hunk_first_visible_line = [&](int hunk_row) {
+        const int line_count = std::max(1, static_cast<int>(left.send(SCI_GETLINECOUNT)));
+        const int lines_on_screen = std::clamp(static_cast<int>(left.send(SCI_LINESONSCREEN)), 1, line_count);
+        const int max_first_line = std::max(0, line_count - lines_on_screen);
+        return std::clamp(hunk_row - lines_on_screen / 2, 0, max_first_line);
+    };
     const auto navigate_hunk = [&](int direction) {
         const int target_index = hunk_navigation_target(direction);
         if (target_index < 0) {
@@ -1195,9 +1201,10 @@ Rectangle {
 
         selected_hunk_index = target_index;
         const int target_row = hunk_start_rows[static_cast<size_t>(selected_hunk_index)];
+        const int first_visible_line = centered_hunk_first_visible_line(target_row);
         mirror_scroll([&]() {
-            left.scrollVertical(target_row);
-            right.scrollVertical(target_row);
+            left.scrollVertical(first_visible_line);
+            right.scrollVertical(first_visible_line);
         });
         refresh_vertical_scrollbar();
         update_hunk_controls();

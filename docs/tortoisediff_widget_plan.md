@@ -386,7 +386,8 @@ Build:
 
 - first slice: previous/next hunk controls and shortcuts
 - current hunk index as needed for navigation
-- scroll both panes to the selected hunk
+- scroll both panes so the selected hunk starts near the middle of the
+  viewport when document edges allow it
 - Step 12.1 active hunk marker: draw TortoiseDiff-style black horizontal
   lines at the top and bottom of the selected hunk, updated on navigation,
   scroll, resize, and zoom before moving to Step 13 copy hygiene
