@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -655,6 +656,31 @@ std::vector<int> hunk_start_display_rows(const DiffWidgetInput& input)
     return hunk_rows;
 }
 
+std::pair<int, int> hunk_display_row_range(const DiffWidgetInput& input, int hunk_start_row)
+{
+    if (hunk_start_row < 0 || hunk_start_row >= static_cast<int>(input.rows.size())) {
+        return {-1, -1};
+    }
+
+    const int hunk_id = input.rows[static_cast<size_t>(hunk_start_row)].hunkId;
+    if (hunk_id <= 0) {
+        return {-1, -1};
+    }
+
+    int first_row = hunk_start_row;
+    while (first_row > 0 && input.rows[static_cast<size_t>(first_row - 1)].hunkId == hunk_id) {
+        --first_row;
+    }
+
+    int end_row = hunk_start_row + 1;
+    while (end_row < static_cast<int>(input.rows.size()) &&
+           input.rows[static_cast<size_t>(end_row)].hunkId == hunk_id)
+    {
+        ++end_row;
+    }
+    return {first_row, end_row};
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -794,11 +820,47 @@ Rectangle {
     ScintillaQuick_item right;
     left_container.setParentItem(root);
     right_container.setParentItem(root);
+    left_container.setClip(true);
+    right_container.setClip(true);
     left.setParentItem(&left_container);
     right.setParentItem(&right_container);
     QString left_text;
     QString right_text;
     int shared_horizontal_scroll_width = 1;
+
+    QQmlComponent active_hunk_boundary_component(&qml_engine);
+    active_hunk_boundary_component.setData(R"qml(
+import QtQuick
+
+Rectangle {
+    color: "black"
+    visible: false
+    z: 5
+}
+)qml",
+        QUrl());
+    const auto create_active_hunk_boundary = [&](QQuickItem& parent) {
+        std::unique_ptr<QObject> boundary_object(active_hunk_boundary_component.create());
+        if (!boundary_object) {
+            qFatal("TortoiseDiff Step 12.1 hunk boundary failed to load: %s",
+                qPrintable(active_hunk_boundary_component.errorString()));
+        }
+
+        auto* boundary = qobject_cast<QQuickItem*>(boundary_object.get());
+        if (!boundary) {
+            qFatal("TortoiseDiff Step 12.1 hunk boundary is not a QQuickItem.");
+        }
+        boundary->setParentItem(&parent);
+        return boundary_object;
+    };
+    std::unique_ptr<QObject> left_top_hunk_boundary_object = create_active_hunk_boundary(left_container);
+    std::unique_ptr<QObject> left_bottom_hunk_boundary_object = create_active_hunk_boundary(left_container);
+    std::unique_ptr<QObject> right_top_hunk_boundary_object = create_active_hunk_boundary(right_container);
+    std::unique_ptr<QObject> right_bottom_hunk_boundary_object = create_active_hunk_boundary(right_container);
+    auto* left_top_hunk_boundary = qobject_cast<QQuickItem*>(left_top_hunk_boundary_object.get());
+    auto* left_bottom_hunk_boundary = qobject_cast<QQuickItem*>(left_bottom_hunk_boundary_object.get());
+    auto* right_top_hunk_boundary = qobject_cast<QQuickItem*>(right_top_hunk_boundary_object.get());
+    auto* right_bottom_hunk_boundary = qobject_cast<QQuickItem*>(right_bottom_hunk_boundary_object.get());
 
     const auto vertical_scrollbar_metrics = [&left]() {
         const int line_count = std::max(1, static_cast<int>(left.send(SCI_GETLINECOUNT)));
@@ -1015,6 +1077,53 @@ Rectangle {
 
     const std::vector<int> hunk_start_rows = hunk_start_display_rows(input);
     int selected_hunk_index = -1;
+    const auto update_active_hunk_boundaries = [&]() {
+        const auto hide_boundaries = [&]() {
+            for (QQuickItem* boundary : std::array{left_top_hunk_boundary, left_bottom_hunk_boundary,
+                     right_top_hunk_boundary, right_bottom_hunk_boundary}) {
+                boundary->setVisible(false);
+            }
+        };
+        if (selected_hunk_index < 0 || selected_hunk_index >= static_cast<int>(hunk_start_rows.size())) {
+            hide_boundaries();
+            return;
+        }
+
+        const auto [first_row, end_row] =
+            hunk_display_row_range(input, hunk_start_rows[static_cast<size_t>(selected_hunk_index)]);
+        if (first_row < 0 || end_row <= first_row) {
+            hide_boundaries();
+            return;
+        }
+
+        const qreal dpr = std::max<qreal>(1.0, window.effectiveDevicePixelRatio());
+        constexpr qreal line_height_physical_pixels = 2.0;
+        const qreal line_height = line_height_physical_pixels / dpr;
+        const auto snap_y = [dpr](qreal y) {
+            return std::round(y * dpr) / dpr;
+        };
+        const auto update_pane_boundaries =
+            [&](ScintillaQuick_item& pane, QQuickItem* top_boundary, QQuickItem* bottom_boundary) {
+                const int last_row = end_row - 1;
+                const sptr_t top_position = pane.send(SCI_POSITIONFROMLINE, first_row);
+                const sptr_t bottom_position = pane.send(SCI_POSITIONFROMLINE, last_row);
+                const qreal top_y = snap_y(static_cast<qreal>(pane.send(SCI_POINTYFROMPOSITION, 0, top_position)));
+                const qreal bottom_y = snap_y(
+                    static_cast<qreal>(pane.send(SCI_POINTYFROMPOSITION, 0, bottom_position)) +
+                    static_cast<qreal>(std::max(1, static_cast<int>(pane.send(SCI_TEXTHEIGHT, last_row)))));
+                const qreal width = std::max<qreal>(0.0, pane.width());
+
+                top_boundary->setPosition({0.0, top_y});
+                top_boundary->setSize({width, line_height});
+                top_boundary->setVisible(true);
+
+                bottom_boundary->setPosition({0.0, bottom_y - line_height});
+                bottom_boundary->setSize({width, line_height});
+                bottom_boundary->setVisible(true);
+            };
+        update_pane_boundaries(left, left_top_hunk_boundary, left_bottom_hunk_boundary);
+        update_pane_boundaries(right, right_top_hunk_boundary, right_bottom_hunk_boundary);
+    };
     const auto update_hunk_controls = [&]() {
         const bool has_hunks = !hunk_start_rows.empty();
         hunk_status->setProperty("text", has_hunks && selected_hunk_index >= 0 ?
@@ -1068,6 +1177,7 @@ Rectangle {
         });
         refresh_vertical_scrollbar();
         update_hunk_controls();
+        update_active_hunk_boundaries();
     };
     const auto handle_hunk_shortcut = [&](QKeyEvent* event) {
         if (event->key() != Qt::Key_F7) {
@@ -1089,16 +1199,19 @@ Rectangle {
     next_hunk_button->installEventFilter(&next_hunk_click_filter);
     previous_hunk_button->installEventFilter(&previous_hunk_click_filter);
     update_hunk_controls();
+    update_active_hunk_boundaries();
 
     QObject::connect(&left, &ScintillaQuick_item::verticalScrolled, &right, [&](int value) {
         mirror_scroll([&]() {
             right.scrollVertical(value);
         });
+        update_active_hunk_boundaries();
     });
     QObject::connect(&right, &ScintillaQuick_item::verticalScrolled, &left, [&](int value) {
         mirror_scroll([&]() {
             left.scrollVertical(value);
         });
+        update_active_hunk_boundaries();
     });
     QObject::connect(&left, &ScintillaQuick_item::horizontalScrolled, &right, [&](int value) {
         mirror_scroll([&]() {
@@ -1112,6 +1225,7 @@ Rectangle {
     });
     QObject::connect(&left, &ScintillaQuick_item::verticalScrolled, vertical_scrollbar, [&](int) {
         refresh_vertical_scrollbar();
+        update_active_hunk_boundaries();
     });
     QObject::connect(&left, &ScintillaQuick_item::horizontalScrolled, horizontal_scrollbar, [&](int) {
         refresh_horizontal_scrollbar();
@@ -1121,10 +1235,22 @@ Rectangle {
     });
     QObject::connect(&right, &ScintillaQuick_item::zoom, &left, [&](int value) {
         mirror_zoom(left, value);
+        update_shared_horizontal_scroll_width();
+        layout_panes();
+        update_active_hunk_boundaries();
     });
     QObject::connect(&left, &ScintillaQuick_item::zoom, vertical_scrollbar, [&](int) {
         update_shared_horizontal_scroll_width();
         layout_panes();
+        update_active_hunk_boundaries();
+    });
+    QObject::connect(root, &QQuickItem::widthChanged, &window, update_active_hunk_boundaries);
+    QObject::connect(root, &QQuickItem::heightChanged, &window, update_active_hunk_boundaries);
+    QObject::connect(&left, &ScintillaQuick_item::verticalRangeChanged, &window, [&](int, int) {
+        update_active_hunk_boundaries();
+    });
+    QObject::connect(&right, &ScintillaQuick_item::verticalRangeChanged, &window, [&](int, int) {
+        update_active_hunk_boundaries();
     });
 
     window.show();

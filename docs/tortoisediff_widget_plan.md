@@ -387,7 +387,11 @@ Build:
 - first slice: previous/next hunk controls and shortcuts
 - current hunk index as needed for navigation
 - scroll both panes to the selected hunk
-- defer a visible active-hunk marker unless it is cheap
+- Step 12.1 active hunk marker: draw TortoiseDiff-style black horizontal
+  lines at the top and bottom of the selected hunk, updated on navigation,
+  scroll, resize, and zoom before moving to Step 13 copy hygiene
+- keep the active-hunk boundary thickness device-pixel-snapped: target two
+  physical pixels and convert that to logical height from the window DPR
 
 Test:
 

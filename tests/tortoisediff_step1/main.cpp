@@ -99,6 +99,12 @@ struct HorizontalScrollbarModel
     double size = 1.0;
 };
 
+struct HunkRowRange
+{
+    int startRow = -1;
+    int endRow = -1;
+};
+
 struct ChangedTextSpan
 {
     qsizetype start = 0;
@@ -293,6 +299,42 @@ std::vector<int> hunk_target_rows(const std::vector<DiffRow>& rows)
     }
 
     return target_rows;
+}
+
+HunkRowRange hunk_row_range_for_target_index(
+    const std::vector<DiffRow>& rows, const std::vector<int>& target_rows, int target_index)
+{
+    if (target_index < 0 || target_index >= static_cast<int>(target_rows.size())) {
+        return {};
+    }
+
+    const int target_row = target_rows[static_cast<size_t>(target_index)];
+    if (target_row < 0 || target_row >= static_cast<int>(rows.size())) {
+        return {};
+    }
+
+    const int hunk_id = rows[static_cast<size_t>(target_row)].hunkId;
+    if (hunk_id <= 0) {
+        return {};
+    }
+
+    int start_row = target_row;
+    while (start_row > 0 && rows[static_cast<size_t>(start_row - 1)].hunkId == hunk_id) {
+        --start_row;
+    }
+
+    int end_row = target_row + 1;
+    while (end_row < static_cast<int>(rows.size()) && rows[static_cast<size_t>(end_row)].hunkId == hunk_id) {
+        ++end_row;
+    }
+
+    return {start_row, end_row};
+}
+
+double active_hunk_boundary_logical_thickness(double device_pixel_ratio)
+{
+    constexpr double boundary_physical_pixels = 2.0;
+    return boundary_physical_pixels / std::max(1.0, device_pixel_ratio);
 }
 
 int next_hunk_index(int current_index, int hunk_count)
@@ -964,12 +1006,36 @@ void test_hunk_navigation_model()
     const std::vector<int> targets = hunk_target_rows(rows);
 
     SQ_EXPECT(targets == std::vector<int>({1, 5, 7}));
+    const HunkRowRange first_range = hunk_row_range_for_target_index(rows, targets, 0);
+    SQ_EXPECT(first_range.startRow == 1);
+    SQ_EXPECT(first_range.endRow == 3);
+    const HunkRowRange second_range = hunk_row_range_for_target_index(rows, targets, 1);
+    SQ_EXPECT(second_range.startRow == 5);
+    SQ_EXPECT(second_range.endRow == 6);
+    const HunkRowRange third_range = hunk_row_range_for_target_index(rows, targets, 2);
+    SQ_EXPECT(third_range.startRow == 7);
+    SQ_EXPECT(third_range.endRow == 8);
+    const HunkRowRange invalid_range = hunk_row_range_for_target_index(rows, targets, -1);
+    SQ_EXPECT(invalid_range.startRow == -1);
+    SQ_EXPECT(invalid_range.endRow == -1);
+    const HunkRowRange no_hunk_range = hunk_row_range_for_target_index(rows, {0}, 0);
+    SQ_EXPECT(no_hunk_range.startRow == -1);
+    SQ_EXPECT(no_hunk_range.endRow == -1);
     SQ_EXPECT(next_hunk_index(0, static_cast<int>(targets.size())) == 1);
     SQ_EXPECT(next_hunk_index(2, static_cast<int>(targets.size())) == 2);
     SQ_EXPECT(previous_hunk_index(2, static_cast<int>(targets.size())) == 1);
     SQ_EXPECT(previous_hunk_index(0, static_cast<int>(targets.size())) == 0);
     SQ_EXPECT(next_hunk_index(0, 0) == -1);
     SQ_EXPECT(previous_hunk_index(0, 0) == -1);
+}
+
+void test_active_hunk_boundary_thickness_model()
+{
+    SQ_EXPECT(nearly_equal(active_hunk_boundary_logical_thickness(0.0), 2.0));
+    SQ_EXPECT(nearly_equal(active_hunk_boundary_logical_thickness(1.0), 2.0));
+    SQ_EXPECT(nearly_equal(active_hunk_boundary_logical_thickness(1.25), 1.6));
+    SQ_EXPECT(nearly_equal(active_hunk_boundary_logical_thickness(2.0), 1.0));
+    SQ_EXPECT(nearly_equal(active_hunk_boundary_logical_thickness(3.0), 2.0 / 3.0));
 }
 
 void test_vertical_scrollbar_model_mapping()
@@ -1542,6 +1608,7 @@ int main(int argc, char** argv)
 
     test_display_row_model_changed_blocks();
     test_hunk_navigation_model();
+    test_active_hunk_boundary_thickness_model();
     test_raw_text_line_diff_adapter();
     test_inline_changed_text_spans();
     test_stored_unified_diff_adapter();
