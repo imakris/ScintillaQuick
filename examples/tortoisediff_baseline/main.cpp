@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -12,6 +13,7 @@
 #include <QColor>
 #include <QDir>
 #include <QGuiApplication>
+#include <QKeyEvent>
 #include <QProcess>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -27,6 +29,24 @@
 
 namespace
 {
+
+class CallbackEventFilter : public QObject
+{
+public:
+    explicit CallbackEventFilter(std::function<void()> callback) : callback_(std::move(callback)) {}
+
+protected:
+    bool eventFilter(QObject*, QEvent* event) override
+    {
+        if (event->type() == QEvent::MouseButtonRelease) {
+            callback_();
+        }
+        return false;
+    }
+
+private:
+    std::function<void()> callback_;
+};
 
 constexpr int rgb(int red, int green, int blue)
 {
@@ -617,6 +637,24 @@ void apply_inline_changed_text_highlights(
     }
 }
 
+std::vector<int> hunk_start_display_rows(const DiffWidgetInput& input)
+{
+    std::vector<int> hunk_rows;
+    std::vector<int> seen_hunk_ids;
+    for (int row_index = 0; row_index < static_cast<int>(input.rows.size()); ++row_index) {
+        const DiffRow& row = input.rows[static_cast<size_t>(row_index)];
+        if (row.hunkId <= 0 ||
+            std::find(seen_hunk_ids.begin(), seen_hunk_ids.end(), row.hunkId) != seen_hunk_ids.end())
+        {
+            continue;
+        }
+
+        seen_hunk_ids.push_back(row.hunkId);
+        hunk_rows.push_back(row_index);
+    }
+    return hunk_rows;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -628,7 +666,7 @@ int main(int argc, char** argv)
     }
 
     QQuickWindow window;
-    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 11 - Inline Changed Text"));
+    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 12 - Hunk Navigation"));
     window.resize(1200, 720);
     window.setColor(QColor(214, 219, 225));
 
@@ -668,6 +706,64 @@ ScrollBar {
     std::unique_ptr<QObject> horizontal_scrollbar_object = create_scrollbar(Qt::Horizontal);
     auto* vertical_scrollbar = qobject_cast<QQuickItem*>(vertical_scrollbar_object.get());
     auto* horizontal_scrollbar = qobject_cast<QQuickItem*>(horizontal_scrollbar_object.get());
+
+    QQmlComponent hunk_toolbar_component(&qml_engine);
+    hunk_toolbar_component.setData(R"qml(
+import QtQuick
+import QtQuick.Controls
+
+Rectangle {
+    color: "#f6f8fa"
+    border.color: "#d0d7de"
+    z: 20
+
+    Row {
+        anchors.centerIn: parent
+        spacing: 8
+
+        Button {
+            objectName: "nextHunkButton"
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Next hunk"
+        }
+
+        Button {
+            objectName: "previousHunkButton"
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Previous hunk"
+        }
+
+        Label {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "F7 / Shift+F7"
+        }
+
+        Label {
+            objectName: "hunkStatus"
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Hunk -/0"
+        }
+    }
+}
+)qml",
+        QUrl());
+    std::unique_ptr<QObject> hunk_toolbar_object(hunk_toolbar_component.create());
+    if (!hunk_toolbar_object) {
+        qFatal("TortoiseDiff Step 12 hunk toolbar failed to load: %s",
+            qPrintable(hunk_toolbar_component.errorString()));
+    }
+
+    auto* hunk_toolbar = qobject_cast<QQuickItem*>(hunk_toolbar_object.get());
+    if (!hunk_toolbar) {
+        qFatal("TortoiseDiff Step 12 hunk toolbar is not a QQuickItem.");
+    }
+    auto* hunk_status = hunk_toolbar->findChild<QObject*>(QStringLiteral("hunkStatus"));
+    auto* next_hunk_button = hunk_toolbar->findChild<QObject*>(QStringLiteral("nextHunkButton"));
+    auto* previous_hunk_button = hunk_toolbar->findChild<QObject*>(QStringLiteral("previousHunkButton"));
+    if (!hunk_status || !next_hunk_button || !previous_hunk_button) {
+        qFatal("TortoiseDiff Step 12 hunk toolbar controls were not found.");
+    }
+    hunk_toolbar->setParentItem(root);
 
     bool applying_mirrored_scroll = false;
     bool applying_mirrored_zoom = false;
@@ -824,22 +920,28 @@ ScrollBar {
     });
 
     const auto apply_pane_geometry = [&]() {
+        constexpr qreal hunk_toolbar_height = 40.0;
         constexpr qreal separator_width = 8.0;
         constexpr qreal scrollbar_extent = 16.0;
         const qreal root_width = std::max<qreal>(root->width(), 0.0);
         const qreal root_height = std::max<qreal>(root->height(), 0.0);
         const qreal vertical_extent = vertical_scrollbar->isVisible() ? scrollbar_extent : 0.0;
         const qreal horizontal_extent = horizontal_scrollbar->isVisible() ? scrollbar_extent : 0.0;
+        const qreal toolbar_height = root_height > hunk_toolbar_height ? hunk_toolbar_height : 0.0;
         const qreal content_width = std::max<qreal>(0.0, root_width - vertical_extent);
-        const qreal content_height = std::max<qreal>(0.0, root_height - horizontal_extent);
+        const qreal content_height = std::max<qreal>(0.0, root_height - toolbar_height - horizontal_extent);
         const qreal actual_separator_width = content_width > separator_width ? separator_width : 0.0;
         const qreal panes_width = content_width - actual_separator_width;
         const qreal left_width = panes_width / 2.0;
         const qreal right_width = panes_width - left_width;
 
-        left_container.setPosition({0.0, 0.0});
+        hunk_toolbar->setPosition({0.0, 0.0});
+        hunk_toolbar->setSize({root_width, toolbar_height});
+        hunk_toolbar->setVisible(toolbar_height > 0.0);
+
+        left_container.setPosition({0.0, toolbar_height});
         left_container.setSize({left_width, content_height});
-        right_container.setPosition({left_width + actual_separator_width, 0.0});
+        right_container.setPosition({left_width + actual_separator_width, toolbar_height});
         right_container.setSize({right_width, content_height});
 
         left.setPosition({0.0, 0.0});
@@ -847,9 +949,9 @@ ScrollBar {
         right.setPosition({0.0, 0.0});
         right.setSize(right_container.size());
 
-        vertical_scrollbar->setPosition({content_width, 0.0});
+        vertical_scrollbar->setPosition({content_width, toolbar_height});
         vertical_scrollbar->setSize({scrollbar_extent, content_height});
-        horizontal_scrollbar->setPosition({0.0, content_height});
+        horizontal_scrollbar->setPosition({0.0, toolbar_height + content_height});
         horizontal_scrollbar->setSize({content_width, scrollbar_extent});
     };
 
@@ -910,6 +1012,83 @@ ScrollBar {
     }
     refresh_vertical_scrollbar();
     refresh_horizontal_scrollbar();
+
+    const std::vector<int> hunk_start_rows = hunk_start_display_rows(input);
+    int selected_hunk_index = -1;
+    const auto update_hunk_controls = [&]() {
+        const bool has_hunks = !hunk_start_rows.empty();
+        hunk_status->setProperty("text", has_hunks && selected_hunk_index >= 0 ?
+                QStringLiteral("Hunk %1/%2").arg(selected_hunk_index + 1).arg(hunk_start_rows.size()) :
+                QStringLiteral("Hunk -/%1").arg(hunk_start_rows.size()));
+    };
+    const auto selected_hunk_is_visible = [&]() {
+        if (selected_hunk_index < 0 || selected_hunk_index >= static_cast<int>(hunk_start_rows.size())) {
+            return false;
+        }
+
+        const int first_visible_line = static_cast<int>(left.send(SCI_GETFIRSTVISIBLELINE));
+        const int lines_on_screen = std::max(1, static_cast<int>(left.send(SCI_LINESONSCREEN)));
+        const int hunk_row = hunk_start_rows[static_cast<size_t>(selected_hunk_index)];
+        return hunk_row >= first_visible_line && hunk_row < first_visible_line + lines_on_screen;
+    };
+    const auto hunk_navigation_target = [&](int direction) {
+        if (hunk_start_rows.empty()) {
+            return -1;
+        }
+
+        if (selected_hunk_is_visible()) {
+            const int count = static_cast<int>(hunk_start_rows.size());
+            return std::clamp(selected_hunk_index + direction, 0, count - 1);
+        }
+
+        const int first_visible_line = static_cast<int>(left.send(SCI_GETFIRSTVISIBLELINE));
+        if (direction > 0) {
+            const auto it = std::lower_bound(hunk_start_rows.begin(), hunk_start_rows.end(), first_visible_line);
+            return it == hunk_start_rows.end() ? static_cast<int>(hunk_start_rows.size()) - 1 :
+                                                 static_cast<int>(it - hunk_start_rows.begin());
+        }
+
+        const auto it = std::upper_bound(hunk_start_rows.begin(), hunk_start_rows.end(), first_visible_line);
+        if (it == hunk_start_rows.begin()) {
+            return 0;
+        }
+        return static_cast<int>((it - hunk_start_rows.begin()) - 1);
+    };
+    const auto navigate_hunk = [&](int direction) {
+        const int target_index = hunk_navigation_target(direction);
+        if (target_index < 0) {
+            return;
+        }
+
+        selected_hunk_index = target_index;
+        const int target_row = hunk_start_rows[static_cast<size_t>(selected_hunk_index)];
+        mirror_scroll([&]() {
+            left.scrollVertical(target_row);
+            right.scrollVertical(target_row);
+        });
+        refresh_vertical_scrollbar();
+        update_hunk_controls();
+    };
+    const auto handle_hunk_shortcut = [&](QKeyEvent* event) {
+        if (event->key() != Qt::Key_F7) {
+            return;
+        }
+
+        const Qt::KeyboardModifiers allowed_modifiers = Qt::ShiftModifier | Qt::KeypadModifier;
+        if (event->modifiers() & ~allowed_modifiers) {
+            return;
+        }
+
+        navigate_hunk(event->modifiers() & Qt::ShiftModifier ? -1 : 1);
+        event->accept();
+    };
+    QObject::connect(&left, &ScintillaQuick_item::keyPressed, &window, handle_hunk_shortcut);
+    QObject::connect(&right, &ScintillaQuick_item::keyPressed, &window, handle_hunk_shortcut);
+    CallbackEventFilter next_hunk_click_filter([&]() { navigate_hunk(1); });
+    CallbackEventFilter previous_hunk_click_filter([&]() { navigate_hunk(-1); });
+    next_hunk_button->installEventFilter(&next_hunk_click_filter);
+    previous_hunk_button->installEventFilter(&previous_hunk_click_filter);
+    update_hunk_controls();
 
     QObject::connect(&left, &ScintillaQuick_item::verticalScrolled, &right, [&](int value) {
         mirror_scroll([&]() {

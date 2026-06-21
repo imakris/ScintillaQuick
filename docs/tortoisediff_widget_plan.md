@@ -384,16 +384,16 @@ Human checkpoint:
 
 Build:
 
-- `nextHunk()` and `previousHunk()`
-- current hunk index
+- first slice: previous/next hunk controls and shortcuts
+- current hunk index as needed for navigation
 - scroll both panes to the selected hunk
-- optional visible marker for the active hunk
+- defer a visible active-hunk marker unless it is cheap
 
 Test:
 
 - assert navigation order over a multi-hunk hand-authored model
 - assert `firstVisibleLine` moves to the selected hunk
-- manual keyboard/button test
+- manual previous/next control and shortcut test
 
 Human checkpoint:
 

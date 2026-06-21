@@ -275,6 +275,48 @@ HorizontalScrollbarModel horizontal_scrollbar_model_for_panes(
         std::max(left_content_width, right_content_width), std::min(left_viewport_width, right_viewport_width), x_offset);
 }
 
+std::vector<int> hunk_target_rows(const std::vector<DiffRow>& rows)
+{
+    std::vector<int> target_rows;
+    std::vector<int> seen_hunk_ids;
+
+    for (size_t row_index = 0; row_index < rows.size(); ++row_index) {
+        const int hunk_id = rows[row_index].hunkId;
+        if (hunk_id <= 0 ||
+            std::find(seen_hunk_ids.begin(), seen_hunk_ids.end(), hunk_id) != seen_hunk_ids.end())
+        {
+            continue;
+        }
+
+        seen_hunk_ids.push_back(hunk_id);
+        target_rows.push_back(static_cast<int>(row_index));
+    }
+
+    return target_rows;
+}
+
+int next_hunk_index(int current_index, int hunk_count)
+{
+    if (hunk_count <= 0) {
+        return -1;
+    }
+    if (current_index >= hunk_count - 1) {
+        return hunk_count - 1;
+    }
+    return std::max(0, current_index + 1);
+}
+
+int previous_hunk_index(int current_index, int hunk_count)
+{
+    if (hunk_count <= 0) {
+        return -1;
+    }
+    if (current_index <= 0) {
+        return 0;
+    }
+    return std::min(current_index - 1, hunk_count - 1);
+}
+
 ChangedTextSpans inline_changed_text_spans(const QString& left_text, const QString& right_text)
 {
     qsizetype prefix = 0;
@@ -907,6 +949,29 @@ void test_display_row_model_changed_blocks()
     expect_rendered_text_matches_row_model(many_to_many);
 }
 
+void test_hunk_navigation_model()
+{
+    const std::vector<DiffRow> rows{
+        {0, -1, 1, 1, DiffSideState::Equal, DiffSideState::Equal},
+        {10, 1, 2, 2, DiffSideState::Changed, DiffSideState::Changed},
+        {10, 1, -1, 3, DiffSideState::Filler, DiffSideState::Added},
+        {0, -1, 3, 4, DiffSideState::Equal, DiffSideState::Equal},
+        {10, 2, 4, 5, DiffSideState::Changed, DiffSideState::Changed},
+        {20, 3, 5, -1, DiffSideState::Deleted, DiffSideState::Filler},
+        {0, -1, 6, 6, DiffSideState::Equal, DiffSideState::Equal},
+        {30, 4, 7, 7, DiffSideState::Changed, DiffSideState::Changed},
+    };
+    const std::vector<int> targets = hunk_target_rows(rows);
+
+    SQ_EXPECT(targets == std::vector<int>({1, 5, 7}));
+    SQ_EXPECT(next_hunk_index(0, static_cast<int>(targets.size())) == 1);
+    SQ_EXPECT(next_hunk_index(2, static_cast<int>(targets.size())) == 2);
+    SQ_EXPECT(previous_hunk_index(2, static_cast<int>(targets.size())) == 1);
+    SQ_EXPECT(previous_hunk_index(0, static_cast<int>(targets.size())) == 0);
+    SQ_EXPECT(next_hunk_index(0, 0) == -1);
+    SQ_EXPECT(previous_hunk_index(0, 0) == -1);
+}
+
 void test_vertical_scrollbar_model_mapping()
 {
     constexpr int total_rows = 100;
@@ -1476,6 +1541,7 @@ int main(int argc, char** argv)
     }
 
     test_display_row_model_changed_blocks();
+    test_hunk_navigation_model();
     test_raw_text_line_diff_adapter();
     test_inline_changed_text_spans();
     test_stored_unified_diff_adapter();
