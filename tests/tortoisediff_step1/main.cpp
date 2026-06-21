@@ -396,6 +396,11 @@ HunkRowRange changed_block_range_for_display_row(
                              exact_display_row_range(display_row, display_row + 1, static_cast<int>(rows.size()));
 }
 
+bool display_row_in_range(int display_row, const HunkRowRange& range)
+{
+    return display_row >= range.startRow && display_row < range.endRow;
+}
+
 double active_hunk_boundary_logical_thickness(double device_pixel_ratio)
 {
     constexpr double boundary_physical_pixels = 2.0;
@@ -1319,6 +1324,9 @@ void test_active_hunk_from_display_rows()
     block = changed_block_range_for_display_row(rows, targets, 0);
     SQ_EXPECT(block.startRow == 0);
     SQ_EXPECT(block.endRow == 1);
+    SQ_EXPECT(display_row_in_range(2, HunkRowRange{2, 3}));
+    SQ_EXPECT(!display_row_in_range(1, HunkRowRange{2, 3}));
+    SQ_EXPECT(!display_row_in_range(3, HunkRowRange{2, 3}));
 }
 
 void test_active_hunk_boundary_thickness_model()

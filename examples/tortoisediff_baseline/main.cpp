@@ -1429,12 +1429,16 @@ Rectangle {
         update_active_hunk_boundaries();
     };
     const auto set_active_changed_block_from_display_row = [&](int display_row) {
+        if (display_row >= active_first_row && display_row < active_end_row) {
+            return;
+        }
+
         const auto [first_row, end_row] = changed_block_range_for_display_row(input, hunk_start_rows, display_row);
         set_active_display_row_range(first_row, end_row);
     };
     const auto display_row_from_mouse_event = [](ScintillaQuick_item& pane, QMouseEvent* event) {
         const QPoint point = event->pos();
-        const sptr_t position = pane.send(SCI_POSITIONFROMPOINTCLOSE, point.x(), point.y());
+        const sptr_t position = pane.send(SCI_POSITIONFROMPOINT, point.x(), point.y());
         if (position < 0) {
             return -1;
         }

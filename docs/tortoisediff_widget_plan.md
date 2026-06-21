@@ -434,8 +434,8 @@ Build:
 - copy selected hunk left-to-right
 - copy selected hunk right-to-left
 - active hunk follows the clicked row or selected display-row range
-- right-clicking a changed block makes that block active before later context
-  menu work
+- right-clicking inside the active range keeps it; right-clicking another
+  changed block makes that block active before later context menu work
 - expose the resulting edited buffer outside the widget
 
 Test:
