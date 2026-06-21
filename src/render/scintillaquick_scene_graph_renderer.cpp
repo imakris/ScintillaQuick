@@ -2333,9 +2333,9 @@ public:
 
         appendChildNode(m_background_group);
         appendChildNode(m_current_line_group);
-        appendChildNode(m_selection_group);
         appendChildNode(m_marker_group);
         appendChildNode(m_indicator_under_group);
+        appendChildNode(m_selection_group);
         appendChildNode(m_text_clip_node);
         m_text_clip_node->appendChildNode(m_representation_group);
         m_text_clip_node->appendChildNode(m_representation_text_group);

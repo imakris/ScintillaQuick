@@ -58,7 +58,7 @@ constexpr int k_editor_foreground = rgb(31, 35, 40);
 constexpr int k_editor_background = rgb(255, 255, 255);
 constexpr int k_margin_foreground = rgb(87, 96, 106);
 constexpr int k_margin_background = rgb(246, 248, 250);
-constexpr int k_selection_background = rgb(188, 214, 253);
+constexpr int k_selection_background = rgb(72, 118, 205);
 constexpr int k_marker_added = 0;
 constexpr int k_marker_deleted = 1;
 constexpr int k_marker_changed = 2;
@@ -533,6 +533,7 @@ void configure_pane(ScintillaQuick_item& pane, const QFont& font, const QString&
 
     pane.send(SCI_SETSELFORE, 1, k_editor_foreground);
     pane.send(SCI_SETSELBACK, 1, k_selection_background);
+    pane.send(SCI_SETSELALPHA, 80);
     pane.send(SCI_SETCARETFORE, k_editor_background);
     pane.send(SCI_SETCARETWIDTH, 0);
 
@@ -834,6 +835,7 @@ import QtQuick
 
 Rectangle {
     color: "black"
+    enabled: false
     visible: false
     z: 5
 }
@@ -850,6 +852,7 @@ Rectangle {
         if (!boundary) {
             qFatal("TortoiseDiff Step 12.1 hunk boundary is not a QQuickItem.");
         }
+        boundary->setAcceptedMouseButtons(Qt::NoButton);
         boundary->setParentItem(&parent);
         return boundary_object;
     };
