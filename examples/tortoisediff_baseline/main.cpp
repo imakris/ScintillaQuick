@@ -15,6 +15,7 @@
 #include <QDir>
 #include <QGuiApplication>
 #include <QKeyEvent>
+#include <QMimeData>
 #include <QProcess>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -362,6 +363,26 @@ QString render_side_text(const DiffWidgetInput& input, bool left_side)
     return text;
 }
 
+QString source_side_copy_text(
+    const QString& display_copy_text, const std::vector<DiffRow>& rows, bool left_side, int first_display_row)
+{
+    const QStringList copied_lines = display_copy_text.split(QLatin1Char('\n'), Qt::KeepEmptyParts);
+    QStringList source_lines;
+    for (int index = 0; index < copied_lines.size(); ++index) {
+        const int row_index = first_display_row + index;
+        if (row_index < 0 || row_index >= static_cast<int>(rows.size())) {
+            continue;
+        }
+
+        const DiffRow& row = rows[static_cast<size_t>(row_index)];
+        const int source_line = left_side ? row.leftSourceLine : row.rightSourceLine;
+        if (source_line != -1) {
+            source_lines.append(copied_lines[index]);
+        }
+    }
+    return source_lines.join(QLatin1Char('\n'));
+}
+
 int display_row_count(const QString& text)
 {
     return text.count(QLatin1Char('\n')) + 1;
@@ -519,7 +540,7 @@ void configure_pane(ScintillaQuick_item& pane, const QFont& font, const QString&
     pane.send(SCI_STYLESETBACK, STYLE_LINENUMBER, k_margin_background);
 
     // Stock Scintilla number margins show display-buffer line numbers. Source
-    // gutters and copy filtering are intentionally left for later steps.
+    // gutters are intentionally left for later steps.
     const int margin_count = static_cast<int>(pane.send(SCI_GETMARGINS));
     for (int margin = 1; margin < margin_count; ++margin) {
         pane.send(SCI_SETMARGINWIDTHN, margin, 0);
@@ -1197,6 +1218,16 @@ Rectangle {
     };
     QObject::connect(&left, &ScintillaQuick_item::keyPressed, &window, handle_hunk_shortcut);
     QObject::connect(&right, &ScintillaQuick_item::keyPressed, &window, handle_hunk_shortcut);
+    const auto install_source_side_copy = [&](ScintillaQuick_item& pane, bool left_side) {
+        auto* pane_ptr = &pane;
+        QObject::connect(&pane, &ScintillaQuick_item::aboutToCopy, &window, [&, pane_ptr, left_side](QMimeData* data) {
+            const int first_display_row =
+                static_cast<int>(pane_ptr->send(SCI_LINEFROMPOSITION, pane_ptr->send(SCI_GETSELECTIONSTART)));
+            data->setText(source_side_copy_text(data->text(), input.rows, left_side, first_display_row));
+        });
+    };
+    install_source_side_copy(left, true);
+    install_source_side_copy(right, false);
     CallbackEventFilter next_hunk_click_filter([&]() { navigate_hunk(1); });
     CallbackEventFilter previous_hunk_click_filter([&]() { navigate_hunk(-1); });
     next_hunk_button->installEventFilter(&next_hunk_click_filter);

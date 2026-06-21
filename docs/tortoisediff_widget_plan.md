@@ -407,16 +407,20 @@ Human checkpoint:
 
 Build:
 
-- decide whether copied text should include filler rows
-- if not, use source-line mapping to strip filler rows from copy output
-- prototype the public `aboutToCopy(QMimeData*)` hook before changing
+- copied text uses source-side behavior: filler rows are layout only and are
+  not copied
+- copy from the left pane copies only left source text; copy from the right
+  pane copies only right source text
+- use source-line mapping to strip filler rows from copy output
+- use the existing public `aboutToCopy(QMimeData*)` hook before changing
   `ScintillaQuick`
 
 Test:
 
 - select across an inserted/deleted block
 - copy from each pane
-- assert copied text matches the accepted source-side behavior
+- assert copied text strips filler rows and matches the accepted source-side
+  behavior
 
 Human checkpoint:
 

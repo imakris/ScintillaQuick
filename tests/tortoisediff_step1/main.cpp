@@ -474,6 +474,26 @@ QString render_display_text(const DiffWidgetInput& input, DiffSide side)
     return display_lines.join(QLatin1Char('\n'));
 }
 
+QString source_side_copy_text(
+    const QString& display_copy_text, const std::vector<DiffRow>& rows, DiffSide side, int first_display_row)
+{
+    const QStringList copied_lines = display_lines_from_text(display_copy_text);
+    QStringList source_lines;
+    for (int index = 0; index < copied_lines.size(); ++index) {
+        const int row_index = first_display_row + index;
+        if (row_index < 0 || row_index >= static_cast<int>(rows.size())) {
+            continue;
+        }
+
+        const DiffRow& row = rows[static_cast<size_t>(row_index)];
+        const int source_line = side == DiffSide::Left ? row.leftSourceLine : row.rightSourceLine;
+        if (source_line != -1) {
+            source_lines.append(copied_lines[index]);
+        }
+    }
+    return source_lines.join(QLatin1Char('\n'));
+}
+
 bool source_and_state_match(int source_line, DiffSideState state)
 {
     return (source_line == -1) == (state == DiffSideState::Filler);
@@ -879,6 +899,19 @@ void test_widget_input_contract_validation()
     DiffWidgetInput invalid_right_reference = valid;
     invalid_right_reference.rows[1].rightSourceLine = 3;
     SQ_EXPECT(validate_diff_widget_input(invalid_right_reference) == WidgetInputValidation::InvalidRightSourceLine);
+}
+
+void test_source_side_copy_strips_filler_rows()
+{
+    const DiffWidgetInput input = valid_widget_input_fixture();
+    const QString left_display_copy = render_display_text(input, DiffSide::Left);
+    const QString right_display_copy = render_display_text(input, DiffSide::Right);
+
+    SQ_EXPECT(source_side_copy_text(left_display_copy, input.rows, DiffSide::Left, 0) ==
+              QStringLiteral("left source line 1\nleft source line 2"));
+    SQ_EXPECT(source_side_copy_text(right_display_copy, input.rows, DiffSide::Right, 0) ==
+              QStringLiteral("right source line 1\nright source line 2"));
+    SQ_EXPECT(source_side_copy_text(QString(), input.rows, DiffSide::Left, 1).isEmpty());
 }
 
 void test_raw_text_line_diff_adapter()
@@ -1614,6 +1647,7 @@ int main(int argc, char** argv)
     test_stored_unified_diff_adapter();
     test_live_command_diff_adapter_selection();
     test_widget_input_contract_validation();
+    test_source_side_copy_strips_filler_rows();
     test_vertical_scrollbar_model_mapping();
     test_horizontal_scrollbar_model_mapping();
     test_native_marker_line_highlight_candidates();
