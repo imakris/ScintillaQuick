@@ -178,6 +178,10 @@ set(scintillaquick_example_common_include_dir
     ${CMAKE_CURRENT_SOURCE_DIR}/examples/common)
 
 if(SCINTILLAQUICK_BUILD_EXAMPLES)
+    find_package(
+        Qt6 ${scintillaquick_qt6_minimum_version} REQUIRED
+        COMPONENTS QuickControls2)
+
     add_executable(
         scintillaquick_minimal_editor
         examples/minimal_editor/main.cpp)
@@ -210,7 +214,9 @@ if(SCINTILLAQUICK_BUILD_EXAMPLES)
             ScintillaQuick::ScintillaQuick
             Qt6::Core
             Qt6::Gui
-            Qt6::Quick)
+            Qt6::Quick
+            Qt6::Qml
+            Qt6::QuickControls2)
 endif()
 
 if(SCINTILLAQUICK_BUILD_BENCHMARKS)

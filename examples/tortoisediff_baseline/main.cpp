@@ -4,21 +4,23 @@
 #include <scintillaquick/scintillaquick_item.h>
 
 #include <algorithm>
-#include <functional>
+#include <array>
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include <QColor>
 #include <QDir>
 #include <QGuiApplication>
-#include <QMouseEvent>
-#include <QPainter>
-#include <QPolygonF>
 #include <QProcess>
 #include <QQuickItem>
-#include <QQuickPaintedItem>
 #include <QQuickWindow>
+#include <QQmlComponent>
+#include <QQmlEngine>
+#include <QSignalBlocker>
 #include <QStringList>
+#include <QTimer>
+#include <QUrl>
 
 #include "scintillaquick_font.h"
 #include "Scintilla.h"
@@ -69,90 +71,6 @@ struct DiffWidgetInput
     QString leftText;
     QString rightText;
     std::vector<DiffRow> rows;
-};
-
-class Scroll_button final : public QQuickPaintedItem
-{
-  public:
-    enum class Direction
-    {
-        Up,
-        Down,
-        Left,
-        Right
-    };
-
-    Scroll_button(Direction direction, std::function<void()> clicked, QQuickItem* parent = nullptr)
-        : QQuickPaintedItem(parent), m_direction(direction), m_clicked(std::move(clicked))
-    {
-        setAcceptedMouseButtons(Qt::LeftButton);
-        setAntialiasing(false);
-        setOpaquePainting(true);
-        setZ(10.0);
-    }
-
-    void paint(QPainter* painter) override
-    {
-        painter->fillRect(boundingRect(), m_pressed ? QColor(54, 63, 74) : QColor(72, 83, 96));
-        painter->setPen(QColor(218, 225, 232));
-        painter->drawRect(boundingRect().adjusted(0.5, 0.5, -0.5, -0.5));
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(255, 255, 255));
-        painter->drawPolygon(arrow_shape());
-    }
-
-  protected:
-    void mousePressEvent(QMouseEvent* event) override
-    {
-        if (event->button() != Qt::LeftButton) {
-            event->ignore();
-            return;
-        }
-
-        m_pressed = true;
-        update();
-        if (m_clicked) {
-            m_clicked();
-        }
-        event->accept();
-    }
-
-    void mouseReleaseEvent(QMouseEvent* event) override
-    {
-        if (event->button() == Qt::LeftButton) {
-            m_pressed = false;
-            update();
-            event->accept();
-            return;
-        }
-
-        event->ignore();
-    }
-
-  private:
-    QPolygonF arrow_shape() const
-    {
-        const qreal edge = std::min(width(), height()) * 0.28;
-        const qreal cx = width() / 2.0;
-        const qreal cy = height() / 2.0;
-
-        switch (m_direction) {
-            case Direction::Up:
-                return {{cx, cy - edge}, {cx - edge, cy + edge}, {cx + edge, cy + edge}};
-            case Direction::Down:
-                return {{cx, cy + edge}, {cx - edge, cy - edge}, {cx + edge, cy - edge}};
-            case Direction::Left:
-                return {{cx - edge, cy}, {cx + edge, cy - edge}, {cx + edge, cy + edge}};
-            case Direction::Right:
-                return {{cx + edge, cy}, {cx - edge, cy - edge}, {cx - edge, cy + edge}};
-        }
-
-        return {};
-    }
-
-    Direction m_direction;
-    std::function<void()> m_clicked;
-    bool m_pressed = false;
 };
 
 QStringList source_lines_from_text(const QString& text)
@@ -632,11 +550,35 @@ int main(int argc, char** argv)
     }
 
     QQuickWindow window;
-    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 9 - Live Git Diff"));
+    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 10 - Vertical Scrollbar"));
     window.resize(1200, 720);
     window.setColor(QColor(214, 219, 225));
 
     auto* root = window.contentItem();
+
+    QQmlEngine qml_engine;
+    QQmlComponent scrollbar_component(&qml_engine);
+    scrollbar_component.setData(R"qml(
+import QtQuick
+import QtQuick.Controls
+
+ScrollBar {
+    orientation: Qt.Vertical
+    policy: ScrollBar.AlwaysOn
+    active: true
+    z: 10
+}
+)qml",
+        QUrl());
+    std::unique_ptr<QObject> vertical_scrollbar_object(scrollbar_component.create());
+    if (!vertical_scrollbar_object) {
+        qFatal("TortoiseDiff Step 10 ScrollBar failed to load: %s", qPrintable(scrollbar_component.errorString()));
+    }
+    auto* vertical_scrollbar = qobject_cast<QQuickItem*>(vertical_scrollbar_object.get());
+    if (!vertical_scrollbar) {
+        qFatal("TortoiseDiff Step 10 ScrollBar is not a QQuickItem.");
+    }
+    vertical_scrollbar->setParentItem(root);
 
     bool applying_mirrored_scroll = false;
     bool applying_mirrored_zoom = false;
@@ -670,43 +612,49 @@ int main(int argc, char** argv)
     left.setParentItem(&left_container);
     right.setParentItem(&right_container);
 
-    const auto scroll_vertical_by = [&left](int delta_lines) {
-        const int current_line = static_cast<int>(left.send(SCI_GETFIRSTVISIBLELINE));
-        left.scrollVertical(std::max(0, current_line + delta_lines));
-    };
-    const auto scroll_horizontal_by = [&left](int delta_columns) {
-        const int char_width =
-            std::max(1, static_cast<int>(left.send(SCI_TEXTWIDTH, STYLE_DEFAULT, reinterpret_cast<sptr_t>("X"))));
-        const int current_x = static_cast<int>(left.send(SCI_GETXOFFSET));
-        left.scrollHorizontal(std::max(0, current_x + delta_columns * char_width));
+    const auto vertical_scrollbar_metrics = [&left]() {
+        const int line_count = std::max(1, static_cast<int>(left.send(SCI_GETLINECOUNT)));
+        const int lines_on_screen = std::clamp(static_cast<int>(left.send(SCI_LINESONSCREEN)), 1, line_count);
+        const int max_first_line = std::max(0, line_count - lines_on_screen);
+        const int first_visible_line =
+            std::clamp(static_cast<int>(left.send(SCI_GETFIRSTVISIBLELINE)), 0, max_first_line);
+        return std::array{first_visible_line, line_count, lines_on_screen, max_first_line};
     };
 
-    Scroll_button scroll_up(Scroll_button::Direction::Up, [&]() {
-        scroll_vertical_by(-3);
+    const auto refresh_vertical_scrollbar = [&]() {
+        const auto [first_visible_line, line_count, lines_on_screen, max_first_line] = vertical_scrollbar_metrics();
+        const QSignalBlocker block_scrollbar_signals(vertical_scrollbar);
+        vertical_scrollbar->setProperty("size", static_cast<double>(lines_on_screen) / line_count);
+        vertical_scrollbar->setProperty("position", static_cast<double>(first_visible_line) / line_count);
+        vertical_scrollbar->setEnabled(max_first_line > 0);
+    };
+
+    QTimer vertical_scrollbar_position_timer;
+    vertical_scrollbar_position_timer.setInterval(0);
+    vertical_scrollbar_position_timer.setSingleShot(true);
+    QObject::connect(vertical_scrollbar, SIGNAL(positionChanged()), &vertical_scrollbar_position_timer, SLOT(start()));
+    QObject::connect(&vertical_scrollbar_position_timer, &QTimer::timeout, &window, [&]() {
+        const auto [first_visible_line, line_count, lines_on_screen, max_first_line] = vertical_scrollbar_metrics();
+        if (max_first_line <= 0) {
+            return;
+        }
+
+        const int target_line =
+            std::clamp(static_cast<int>(vertical_scrollbar->property("position").toDouble() * line_count + 0.5), 0,
+                max_first_line);
+        if (target_line != first_visible_line) {
+            left.scrollVertical(target_line);
+        }
     });
-    Scroll_button scroll_down(Scroll_button::Direction::Down, [&]() {
-        scroll_vertical_by(3);
-    });
-    Scroll_button scroll_left(Scroll_button::Direction::Left, [&]() {
-        scroll_horizontal_by(-8);
-    });
-    Scroll_button scroll_right(Scroll_button::Direction::Right, [&]() {
-        scroll_horizontal_by(8);
-    });
-    scroll_up.setParentItem(root);
-    scroll_down.setParentItem(root);
-    scroll_left.setParentItem(root);
-    scroll_right.setParentItem(root);
 
     const auto layout_panes = [&]() {
         constexpr qreal separator_width = 8.0;
-        constexpr qreal control_size = 24.0;
-        constexpr qreal control_gap = 4.0;
-        constexpr qreal control_inset = 10.0;
+        constexpr qreal scrollbar_width = 16.0;
         const qreal root_width = std::max<qreal>(root->width(), 0.0);
         const qreal root_height = std::max<qreal>(root->height(), 0.0);
-        const qreal actual_separator_width = root_width > separator_width ? separator_width : 0.0;
-        const qreal panes_width = root_width - actual_separator_width;
+        const qreal content_width = std::max<qreal>(0.0, root_width - scrollbar_width);
+        const qreal actual_separator_width = content_width > separator_width ? separator_width : 0.0;
+        const qreal panes_width = content_width - actual_separator_width;
         const qreal left_width = panes_width / 2.0;
         const qreal right_width = panes_width - left_width;
 
@@ -720,18 +668,9 @@ int main(int argc, char** argv)
         right.setPosition({0.0, 0.0});
         right.setSize(right_container.size());
 
-        const qreal control_x = std::max<qreal>(0.0, root_width - control_inset - control_size);
-        const qreal bottom_y = std::max<qreal>(0.0, root_height - control_inset - control_size);
-
-        scroll_up.setPosition({control_x, control_inset});
-        scroll_down.setPosition({control_x, control_inset + control_size + control_gap});
-        scroll_left.setPosition({std::max<qreal>(0.0, control_x - control_size - control_gap), bottom_y});
-        scroll_right.setPosition({control_x, bottom_y});
-
-        scroll_up.setSize({control_size, control_size});
-        scroll_down.setSize({control_size, control_size});
-        scroll_left.setSize({control_size, control_size});
-        scroll_right.setSize({control_size, control_size});
+        vertical_scrollbar->setPosition({content_width, 0.0});
+        vertical_scrollbar->setSize({scrollbar_width, root_height});
+        refresh_vertical_scrollbar();
     };
 
     QObject::connect(root, &QQuickItem::widthChanged, &window, layout_panes);
@@ -749,6 +688,7 @@ int main(int argc, char** argv)
     if (left.send(SCI_GETLINECOUNT) != expected_display_rows || right.send(SCI_GETLINECOUNT) != expected_display_rows) {
         qFatal("TortoiseDiff Step 9 panes must keep display-buffer line numbers aligned.");
     }
+    refresh_vertical_scrollbar();
 
     QObject::connect(&left, &ScintillaQuick_item::verticalScrolled, &right, [&](int value) {
         mirror_scroll([&]() {
@@ -770,11 +710,17 @@ int main(int argc, char** argv)
             left.scrollHorizontal(value);
         });
     });
+    QObject::connect(&left, &ScintillaQuick_item::verticalScrolled, vertical_scrollbar, [&](int) {
+        refresh_vertical_scrollbar();
+    });
     QObject::connect(&left, &ScintillaQuick_item::zoom, &right, [&](int value) {
         mirror_zoom(right, value);
     });
     QObject::connect(&right, &ScintillaQuick_item::zoom, &left, [&](int value) {
         mirror_zoom(left, value);
+    });
+    QObject::connect(&left, &ScintillaQuick_item::zoom, vertical_scrollbar, [&](int) {
+        refresh_vertical_scrollbar();
     });
 
     window.show();

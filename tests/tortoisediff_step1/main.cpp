@@ -16,6 +16,7 @@
 #include <QThread>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <initializer_list>
 #include <vector>
@@ -81,6 +82,13 @@ struct GreenPixelCoverage
 {
     int greenPixels = 0;
     int totalPixels = 0;
+};
+
+struct VerticalScrollbarModel
+{
+    int maxFirstVisibleLine = 0;
+    double position = 0.0;
+    double size = 1.0;
 };
 
 enum class WidgetInputValidation
@@ -173,6 +181,41 @@ QStringList display_lines_from_text(const QString& text)
 int display_row_count(const QString& text)
 {
     return text.count(QLatin1Char('\n')) + 1;
+}
+
+bool nearly_equal(double left, double right)
+{
+    return std::abs(left - right) <= 0.000001;
+}
+
+VerticalScrollbarModel vertical_scrollbar_model(int total_rows, int visible_rows, int first_visible_line)
+{
+    const int bounded_total_rows = std::max(0, total_rows);
+    const int bounded_visible_rows = std::max(0, visible_rows);
+    const int max_first_visible_line = std::max(0, bounded_total_rows - bounded_visible_rows);
+    if (bounded_total_rows == 0 || max_first_visible_line == 0) {
+        return {};
+    }
+
+    const double size = std::clamp(static_cast<double>(bounded_visible_rows) / bounded_total_rows, 0.0, 1.0);
+    const int bounded_first_visible_line = std::clamp(first_visible_line, 0, max_first_visible_line);
+    const double position =
+        std::clamp(static_cast<double>(bounded_first_visible_line) / bounded_total_rows, 0.0, 1.0 - size);
+
+    return {max_first_visible_line, position, size};
+}
+
+int first_visible_line_for_vertical_scrollbar_position(int total_rows, int visible_rows, double position)
+{
+    const VerticalScrollbarModel top_model = vertical_scrollbar_model(total_rows, visible_rows, 0);
+    if (top_model.maxFirstVisibleLine == 0) {
+        return 0;
+    }
+
+    const int bounded_total_rows = std::max(0, total_rows);
+    const double bounded_position = std::clamp(position, 0.0, 1.0 - top_model.size);
+    const int first_visible_line = static_cast<int>(std::llround(bounded_position * bounded_total_rows));
+    return std::clamp(first_visible_line, 0, top_model.maxFirstVisibleLine);
 }
 
 std::vector<DiffRow> raw_text_diff_rows(const QString& left_text, const QString& right_text)
@@ -755,6 +798,38 @@ void test_display_row_model_changed_blocks()
     expect_rendered_text_matches_row_model(many_to_many);
 }
 
+void test_vertical_scrollbar_model_mapping()
+{
+    constexpr int total_rows = 100;
+    constexpr int visible_rows = 20;
+    constexpr int max_first_visible_line = total_rows - visible_rows;
+
+    const VerticalScrollbarModel equal_rows = vertical_scrollbar_model(visible_rows, visible_rows, 8);
+    SQ_EXPECT(equal_rows.maxFirstVisibleLine == 0);
+    SQ_EXPECT(nearly_equal(equal_rows.size, 1.0));
+    SQ_EXPECT(nearly_equal(equal_rows.position, 0.0));
+
+    const VerticalScrollbarModel fewer_rows = vertical_scrollbar_model(visible_rows - 1, visible_rows, 8);
+    SQ_EXPECT(fewer_rows.maxFirstVisibleLine == 0);
+    SQ_EXPECT(nearly_equal(fewer_rows.size, 1.0));
+    SQ_EXPECT(nearly_equal(fewer_rows.position, 0.0));
+
+    const VerticalScrollbarModel middle =
+        vertical_scrollbar_model(total_rows, visible_rows, max_first_visible_line / 2);
+    const double max_normalized_travel = 1.0 - middle.size;
+    SQ_EXPECT(middle.maxFirstVisibleLine == max_first_visible_line);
+    SQ_EXPECT(middle.position > 0.0);
+    SQ_EXPECT(middle.position < max_normalized_travel);
+
+    const VerticalScrollbarModel bottom = vertical_scrollbar_model(total_rows, visible_rows, max_first_visible_line);
+    SQ_EXPECT(nearly_equal(bottom.position, 1.0 - bottom.size));
+
+    SQ_EXPECT(first_visible_line_for_vertical_scrollbar_position(total_rows, visible_rows, 1.0 - bottom.size - 0.001) ==
+              max_first_visible_line);
+    SQ_EXPECT(first_visible_line_for_vertical_scrollbar_position(total_rows, visible_rows, 1.0) ==
+              max_first_visible_line);
+}
+
 bool image_region_has_dark_pixels(const QImage& image, int x_start, int x_end)
 {
     if (image.isNull()) {
@@ -1254,6 +1329,7 @@ int main(int argc, char** argv)
     test_stored_unified_diff_adapter();
     test_live_command_diff_adapter_selection();
     test_widget_input_contract_validation();
+    test_vertical_scrollbar_model_mapping();
     test_native_marker_line_highlight_candidates();
     test_native_diff_row_markers_follow_side_state();
     test_two_readonly_panes_in_one_window();

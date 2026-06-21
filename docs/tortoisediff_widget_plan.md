@@ -111,8 +111,6 @@ Human checkpoint:
 
 Build:
 
-- external Qt Quick scrollbars or controls wired to `scrollVertical(int)` and
-  `scrollHorizontal(int)`
 - connect left `verticalScrolled` to right `scrollVertical`
 - connect right `verticalScrolled` to left `scrollVertical`
 - connect horizontal scroll signals the same way
@@ -123,12 +121,12 @@ Test:
 - programmatically set `SCI_SETFIRSTVISIBLELINE` on the left and assert the
   right pane follows
 - call `scrollHorizontal` and assert the peer follows
-- manually scroll from either pane and from the external controls
+- manually scroll from either pane
 
 Human checkpoint:
 
 - accept when both panes stay locked vertically and horizontally from either
-  side and from the external controls
+  side
 
 ## Step 4: Display Row Model And Filler Policy
 
@@ -322,7 +320,28 @@ Human checkpoint:
   scroll/zoom
 - document accepted deviations from TortoiseDiff
 
-## Step 10: Inline Changed Text Highlighting
+## Step 10: Scrollbar Prototype
+
+Build:
+
+- `ScintillaQuick` does not embed widget scrollbars
+- replace the old arrow buttons with a Qt Quick Controls `ScrollBar`, not a
+  hand-painted scrollbar
+- bind the vertical scrollbar to `scrollVertical(int)` and `verticalScrolled`
+- mirror the existing synchronized-scroll guard
+- keep the horizontal scrollbar later/optional unless it is cheap
+
+Test:
+
+- manually scroll from the thumb, track clicks, and each pane
+- verify thumb position follows both panes
+
+Human checkpoint:
+
+- accept when native-looking control behavior, thumb position, drag/click sync,
+  and both panes staying aligned are acceptable
+
+## Step 11: Inline Changed Text Highlighting
 
 Build:
 
@@ -344,7 +363,7 @@ Human checkpoint:
 - compare changed-line detail against TortoiseDiff
 - replace only the inline algorithm if the simple span finder is too noisy
 
-## Step 11: Hunk Navigation
+## Step 12: Hunk Navigation
 
 Build:
 
@@ -363,7 +382,7 @@ Human checkpoint:
 
 - accept when navigation lands on the expected display row for every hunk
 
-## Step 12: Copy And Selection Hygiene
+## Step 13: Copy And Selection Hygiene
 
 Build:
 
@@ -382,7 +401,7 @@ Human checkpoint:
 
 - accept when copy behavior is explicit and matches the intended viewer UX
 
-## Step 13: Optional Merge Actions
+## Step 14: Optional Merge Actions
 
 Build only if needed:
 
@@ -399,7 +418,7 @@ Human checkpoint:
 
 - decide whether this is still a viewer or has become a merge tool
 
-## Step 14: Large File Check
+## Step 15: Large File Check
 
 Build:
 
@@ -417,7 +436,7 @@ Human checkpoint:
 - accept if performance is good enough for real expected files
 - if not, optimize the row model or rendering calls before adding features
 
-## Step 15: Patch ScintillaQuick Only If Proven Necessary
+## Step 16: Patch ScintillaQuick Only If Proven Necessary
 
 Possible library changes, only after the external widget proves the need:
 
@@ -445,7 +464,7 @@ Milestone 1 is Steps 1 through 3:
 
 - two panes
 - readonly presentation
-- synchronized scrolling with external controls
+- synchronized pane scrolling
 
 Milestone 2 is Steps 4 and 5:
 
