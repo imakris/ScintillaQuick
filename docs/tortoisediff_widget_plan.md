@@ -272,22 +272,26 @@ Future work:
 
 Build:
 
-- before choosing the line-highlight primitive, add a small
-  frame-validation/visual fixture for `SC_MARK_BACKGROUND`
-- if `SC_MARK_BACKGROUND` is not rendered as a full-line background, use another
-  primitive for the widget prototype or patch `ScintillaQuick` with a focused
-  renderer test
-- compare the temporary Step 4 Qt Quick overlay against a Scintilla-native
-  primitive before choosing the final row-highlighting path
+- add a tiny captured-frame fixture that only proves whether
+  `SC_MARK_BACKGROUND` is currently usable for full-line row backgrounds
+- if `SC_MARK_BACKGROUND` captures but is not visible, try a no-margin
+  `SC_MARK_FULLRECT` marker on `SC_LAYER_UNDER_TEXT` before patching renderer
+  code
+- keep the Step 4 Qt Quick overlay in the prototype unless captured-frame proof
+  shows that native marker primitive is visible and correctly framed
+- treat renderer patching as a later explicit decision, not an automatic outcome
+  of this spike
 
 Test:
 
-- prove the chosen primitive renders added/deleted/changed/filler row
-  backgrounds in a captured frame
+- prove whether `SC_MARK_BACKGROUND` or no-margin under-text
+  `SC_MARK_FULLRECT` renders a usable full-line row background in a captured
+  frame
 
 Human checkpoint:
 
-- accept the primitive choice before implementing real row highlighting
+- accept the overlay, native primitive, or renderer-patch path before real row
+  highlighting
 
 ## Step 9: Line Highlighting
 

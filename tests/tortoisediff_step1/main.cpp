@@ -827,6 +827,68 @@ void configure_pane(ScintillaQuick_item& pane, const QString& text)
     pane.setProperty("readonly", true);
 }
 
+bool native_marker_line_has_green_pixels(int marker_symbol)
+{
+    QQuickWindow window;
+    window.resize(360, 140);
+
+    ScintillaQuick_item editor;
+    editor.setParentItem(window.contentItem());
+    editor.setPosition({0.0, 0.0});
+    editor.setWidth(360);
+    editor.setHeight(140);
+
+    window.show();
+    pump_events();
+
+    editor.setProperty("font", scintillaquick::shared::deterministic_test_font(11));
+    editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
+    editor.send(SCI_SETMARGINTYPEN, line_number_margin, SC_MARGIN_NUMBER);
+    editor.send(SCI_SETMARGINWIDTHN, line_number_margin, line_number_margin_width);
+    const int margin_count = static_cast<int>(editor.send(SCI_GETMARGINS));
+    for (int margin = 0; margin < margin_count; ++margin) {
+        editor.send(SCI_SETMARGINMASKN, margin, 0);
+    }
+    editor.send(SCI_STYLESETBACK, STYLE_DEFAULT, 0xFFFFFF);
+    editor.send(SCI_STYLECLEARALL);
+    editor.setProperty("text", QStringLiteral("before\nmarked line\nafter"));
+
+    constexpr int marker_number = 0;
+    constexpr int marked_line = 1;
+    editor.send(SCI_MARKERDEFINE, marker_number, marker_symbol);
+    editor.send(SCI_MARKERSETBACK, marker_number, 0x00FF00);
+    editor.send(SCI_MARKERSETLAYER, marker_number, SC_LAYER_UNDER_TEXT);
+    editor.send(SCI_MARKERADD, marked_line, marker_number);
+
+    pump_events();
+    QThread::msleep(20);
+    pump_events();
+
+    const QImage rendered = window.grabWindow();
+    const int line_start = static_cast<int>(editor.send(SCI_POSITIONFROMLINE, marked_line));
+    const int text_x =
+        std::max(line_number_margin_width + 4, static_cast<int>(editor.send(SCI_POINTXFROMPOSITION, 0, line_start)));
+    const int line_y = static_cast<int>(editor.send(SCI_POINTYFROMPOSITION, 0, line_start));
+    const int line_height = static_cast<int>(editor.send(SCI_TEXTHEIGHT, marked_line));
+    const int scan_width = rendered.width() - text_x - 4;
+
+    QImage marked_line_area;
+    if (!rendered.isNull() && scan_width > 0 && line_height > 4) {
+        marked_line_area = rendered.copy(text_x, line_y + 2, scan_width, line_height - 4);
+    }
+
+    SQ_EXPECT(!rendered.isNull());
+    SQ_EXPECT(!marked_line_area.isNull());
+    return image_region_has_green_pixels(marked_line_area, 0, marked_line_area.width());
+}
+
+void test_native_marker_line_highlight_candidates()
+{
+    // TortoiseDiff needs text-area line tints; background markers are captured but not rendered by Quick today.
+    SQ_EXPECT(!native_marker_line_has_green_pixels(SC_MARK_BACKGROUND));
+    SQ_EXPECT(native_marker_line_has_green_pixels(SC_MARK_FULLRECT));
+}
+
 class Tint_overlay final : public QQuickPaintedItem
 {
   public:
@@ -1060,6 +1122,7 @@ int main(int argc, char** argv)
     test_stored_unified_diff_adapter();
     test_live_command_diff_adapter_selection();
     test_widget_input_contract_validation();
+    test_native_marker_line_highlight_candidates();
     test_two_readonly_panes_in_one_window();
 
     if (g_failures != 0) {
