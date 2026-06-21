@@ -231,62 +231,179 @@ void append_change_block(std::vector<DiffRow>& rows, int& next_hunk_id, int& nex
     }
 }
 
-DiffWidgetInput diff_input_from_raw_text(QString left_text, QString right_text)
+struct DiffHunkHeader
 {
-    const QStringList left_lines = source_lines_from_text(left_text);
-    const QStringList right_lines = source_lines_from_text(right_text);
-    const int left_count = static_cast<int>(left_lines.size());
-    const int right_count = static_cast<int>(right_lines.size());
-    const int stride = right_count + 1;
-    std::vector<int> lcs(static_cast<size_t>((left_count + 1) * stride), 0);
-    const auto score = [&](int left_index, int right_index) -> int& {
-        return lcs[static_cast<size_t>(left_index * stride + right_index)];
-    };
+    int leftStart;
+    int leftCount;
+    int rightStart;
+    int rightCount;
+};
 
-    for (int left_index = left_count - 1; left_index >= 0; --left_index) {
-        for (int right_index = right_count - 1; right_index >= 0; --right_index) {
-            if (left_lines[left_index] == right_lines[right_index]) {
-                score(left_index, right_index) = score(left_index + 1, right_index + 1) + 1;
-            } else {
-                score(left_index, right_index) =
-                    std::max(score(left_index + 1, right_index), score(left_index, right_index + 1));
-            }
-        }
+bool parse_hunk_range(const QString& range, int& start, int& count)
+{
+    const int comma_index = range.indexOf(QLatin1Char(','));
+    bool ok = false;
+    if (comma_index == -1) {
+        start = range.toInt(&ok);
+        count = 1;
+        return ok && start >= 0;
     }
 
+    start = range.left(comma_index).toInt(&ok);
+    if (!ok || start < 0) {
+        return false;
+    }
+
+    count = range.mid(comma_index + 1).toInt(&ok);
+    return ok && count >= 0;
+}
+
+bool parse_hunk_header(const QString& line, DiffHunkHeader& header)
+{
+    if (!line.startsWith(QStringLiteral("@@ -"))) {
+        return false;
+    }
+
+    const int right_marker = line.indexOf(QStringLiteral(" +"), 4);
+    if (right_marker == -1) {
+        return false;
+    }
+
+    const int close_marker = line.indexOf(QStringLiteral(" @@"), right_marker + 2);
+    if (close_marker == -1) {
+        return false;
+    }
+
+    const QString left_range = line.mid(4, right_marker - 4);
+    const QString right_range = line.mid(right_marker + 2, close_marker - right_marker - 2);
+    return parse_hunk_range(left_range, header.leftStart, header.leftCount) &&
+        parse_hunk_range(right_range, header.rightStart, header.rightCount);
+}
+
+DiffWidgetInput diff_input_from_unified_diff(const QString& unified_diff)
+{
+    const QStringList diff_lines = unified_diff.split(QLatin1Char('\n'), Qt::KeepEmptyParts);
+    QStringList left_lines;
+    QStringList right_lines;
     std::vector<DiffRow> rows;
-    rows.reserve(static_cast<size_t>(std::max(left_count, right_count)));
+    rows.reserve(static_cast<size_t>(diff_lines.size()));
+
     int next_hunk_id = 1;
     int next_group_id = 1;
     int left_block_begin = 0;
     int right_block_begin = 0;
-    int left_index = 0;
-    int right_index = 0;
+    int hunk_left_seen = 0;
+    int hunk_right_seen = 0;
+    bool in_change_block = false;
+    bool in_hunk = false;
+    bool saw_hunk = false;
+    bool saw_file_header = false;
+    DiffHunkHeader active_hunk = {};
 
-    while (left_index < left_count && right_index < right_count) {
-        if (left_lines[left_index] == right_lines[right_index]) {
-            append_change_block(
-                rows, next_hunk_id, next_group_id, left_block_begin, left_index, right_block_begin, right_index);
-            rows.push_back({0, -1, left_index + 1, right_index + 1, DiffSideState::Equal, DiffSideState::Equal});
-            ++left_index;
-            ++right_index;
-            left_block_begin = left_index;
-            right_block_begin = right_index;
+    const auto flush_change_block = [&]() {
+        if (!in_change_block) {
+            return;
+        }
+
+        append_change_block(rows, next_hunk_id, next_group_id, left_block_begin,
+            static_cast<int>(left_lines.size()), right_block_begin, static_cast<int>(right_lines.size()));
+        in_change_block = false;
+    };
+
+    const auto finish_hunk = [&]() {
+        if (!in_hunk) {
+            return;
+        }
+
+        flush_change_block();
+        if (hunk_left_seen != active_hunk.leftCount || hunk_right_seen != active_hunk.rightCount) {
+            qFatal("TortoiseDiff Step 7 fixture hunk has %d left/%d right lines, expected %d left/%d right.",
+                hunk_left_seen, hunk_right_seen, active_hunk.leftCount, active_hunk.rightCount);
+        }
+        in_hunk = false;
+    };
+
+    const auto start_change_block = [&]() {
+        if (in_change_block) {
+            return;
+        }
+
+        left_block_begin = static_cast<int>(left_lines.size());
+        right_block_begin = static_cast<int>(right_lines.size());
+        in_change_block = true;
+    };
+
+    for (int line_index = 0; line_index < diff_lines.size(); ++line_index) {
+        const QString& diff_line = diff_lines[line_index];
+        DiffHunkHeader parsed_hunk = {};
+        if (parse_hunk_header(diff_line, parsed_hunk)) {
+            finish_hunk();
+            active_hunk = parsed_hunk;
+            hunk_left_seen = 0;
+            hunk_right_seen = 0;
+            in_hunk = true;
+            saw_hunk = true;
             continue;
         }
 
-        // Equal LCS scores advance the right side first so repeated lines keep
-        // the earliest possible left-side anchor.
-        if (score(left_index, right_index + 1) >= score(left_index + 1, right_index)) {
-            ++right_index;
+        if (!in_hunk) {
+            if (diff_line.isEmpty()) {
+                continue;
+            }
+            if (diff_line.startsWith(QStringLiteral("diff --git "))) {
+                if (saw_file_header || saw_hunk) {
+                    qFatal("TortoiseDiff Step 7 fixture supports one unified-diff file only.");
+                }
+                saw_file_header = true;
+                continue;
+            }
+            if (diff_line.startsWith(QStringLiteral("index ")) || diff_line.startsWith(QStringLiteral("--- ")) ||
+                diff_line.startsWith(QStringLiteral("+++ ")))
+            {
+                continue;
+            }
+
+            qFatal("TortoiseDiff Step 7 fixture has an unexpected line outside a hunk: %s",
+                qPrintable(diff_line));
+        }
+
+        if (diff_line == QStringLiteral("\\ No newline at end of file")) {
+            continue;
+        }
+        if (diff_line.isEmpty()) {
+            qFatal("TortoiseDiff Step 7 fixture has a hunk body line without a diff prefix.");
+        }
+
+        const QChar prefix = diff_line.at(0);
+        const QString text = diff_line.mid(1);
+        if (prefix == QLatin1Char(' ')) {
+            flush_change_block();
+            left_lines.append(text);
+            right_lines.append(text);
+            rows.push_back({0, -1, static_cast<int>(left_lines.size()), static_cast<int>(right_lines.size()),
+                DiffSideState::Equal, DiffSideState::Equal});
+            ++hunk_left_seen;
+            ++hunk_right_seen;
+        } else if (prefix == QLatin1Char('-')) {
+            start_change_block();
+            left_lines.append(text);
+            ++hunk_left_seen;
+        } else if (prefix == QLatin1Char('+')) {
+            start_change_block();
+            right_lines.append(text);
+            ++hunk_right_seen;
         } else {
-            ++left_index;
+            qFatal("TortoiseDiff Step 7 fixture has an unsupported hunk body prefix: %s",
+                qPrintable(diff_line.left(1)));
         }
     }
 
-    append_change_block(
-        rows, next_hunk_id, next_group_id, left_block_begin, left_count, right_block_begin, right_count);
-    return {std::move(left_text), std::move(right_text), std::move(rows)};
+    finish_hunk();
+    if (!saw_hunk) {
+        qFatal("TortoiseDiff Step 7 fixture must contain at least one hunk.");
+    }
+
+    return {left_lines.join(QStringLiteral("\n")), right_lines.join(QStringLiteral("\n")), std::move(rows)};
 }
 
 bool source_and_state_match(int source_line, DiffSideState state)
@@ -329,14 +446,14 @@ void validate_source_line_references(
         }
 
         if (source_line != expected_source_line || source_line > source_line_count) {
-            qFatal("TortoiseDiff Step 6 widget input has invalid %s source line %d; expected %d.", side, source_line,
+            qFatal("TortoiseDiff Step 7 widget input has invalid %s source line %d; expected %d.", side, source_line,
                 expected_source_line);
         }
         ++expected_source_line;
     }
 
     if (expected_source_line - 1 != source_line_count) {
-        qFatal("TortoiseDiff Step 6 widget input has %d %s source lines but references %d.", source_line_count, side,
+        qFatal("TortoiseDiff Step 7 widget input has %d %s source lines but references %d.", source_line_count, side,
             expected_source_line - 1);
     }
 }
@@ -344,7 +461,7 @@ void validate_source_line_references(
 void validate_diff_input(const DiffWidgetInput& input)
 {
     if (input.rows.empty()) {
-        qFatal("TortoiseDiff Step 6 widget input must not be empty.");
+        qFatal("TortoiseDiff Step 7 widget input must not be empty.");
     }
 
     validate_source_line_references(input.rows, true, display_row_count(input.leftText), "left");
@@ -354,7 +471,7 @@ void validate_diff_input(const DiffWidgetInput& input)
         if (!source_and_state_match(row.leftSourceLine, row.leftState) ||
             !source_and_state_match(row.rightSourceLine, row.rightState))
         {
-            qFatal("TortoiseDiff Step 6 widget input has filler state/source-line mismatch.");
+            qFatal("TortoiseDiff Step 7 widget input has filler state/source-line mismatch.");
         }
     }
 
@@ -362,80 +479,70 @@ void validate_diff_input(const DiffWidgetInput& input)
     const QString right_display_text = render_side_text(input, false);
     const int expected_rows = static_cast<int>(input.rows.size());
     if (display_row_count(left_display_text) != expected_rows || display_row_count(right_display_text) != expected_rows) {
-        qFatal("TortoiseDiff Step 6 widget input display buffers must have the same display row count as the row model.");
+        qFatal("TortoiseDiff Step 7 widget input display buffers must have the same display row count as the row model.");
     }
     if (left_display_text == right_display_text) {
-        qFatal("TortoiseDiff Step 6 widget input must render non-identical pane text.");
+        qFatal("TortoiseDiff Step 7 widget input must render non-identical pane text.");
     }
+}
+
+QString sample_unified_diff_fixture()
+{
+    QStringList lines = {
+        QStringLiteral("diff --git a/src/widget.cpp b/src/widget.cpp"),
+        QStringLiteral("index 13579ab..24680cd 100644"),
+        QStringLiteral("--- a/src/widget.cpp"),
+        QStringLiteral("+++ b/src/widget.cpp"),
+        QStringLiteral("@@ -1,109 +1,110 @@"),
+        QStringLiteral(" src/widget.cpp"),
+        QStringLiteral(" "),
+        QStringLiteral(" int calculate_total(int value)"),
+        QStringLiteral(" {"),
+        QStringLiteral("-\tconst int adjustment = 1;"),
+        QStringLiteral("+\tconst int adjustment = 2;"),
+        QStringLiteral(" \treturn value + adjustment;"),
+        QStringLiteral(" }"),
+        QStringLiteral(" "),
+        QStringLiteral(" void configure_options(Config& config)"),
+        QStringLiteral(" {"),
+        QStringLiteral(" \tconfig.enableCache();"),
+        QStringLiteral("-\tconfig.enableDiagnostics();"),
+        QStringLiteral("+\tconfig.enableMetrics();"),
+        QStringLiteral("+\tconfig.enableTracing();"),
+        QStringLiteral(" }"),
+        QStringLiteral(" "),
+        QStringLiteral(" void remove_legacy_path()"),
+        QStringLiteral(" {"),
+        QStringLiteral("-\tcleanupLegacyPath();"),
+        QStringLiteral("-\tcleanupTempDir();"),
+        QStringLiteral("+\tcleanupDeprecatedPaths();"),
+        QStringLiteral(" \twriteAuditLine();"),
+        QStringLiteral(" }"),
+        QStringLiteral(" "),
+        QStringLiteral(" QString format_label(QStringView key, QStringView value)"),
+        QStringLiteral(" {"),
+        QStringLiteral("-\tconst QString separator = QStringLiteral(\"=\");"),
+        QStringLiteral("-\treturn key.toString() + separator + value.toString();"),
+        QStringLiteral("+\tconst QString label = key.toString();"),
+        QStringLiteral("+\tconst QString separator = QStringLiteral(\": \");"),
+        QStringLiteral("+\treturn label + separator + value.toString();"),
+        QStringLiteral(" }"),
+        QStringLiteral(" "),
+        QStringLiteral(" // This deliberately long line stays unwrapped in Step 7 so horizontal scrolling can be "
+                       "checked while left/right display rows are aligned with blank filler buffer lines.")};
+
+    for (int row = 1; row <= 80; ++row) {
+        lines.append(QStringLiteral(" unchanged display row %1 keeps vertical synchronization checkable.")
+                         .arg(row, 2, 10, QLatin1Char('0')));
+    }
+
+    lines.append(QStringLiteral(" // End of synchronized scrolling fixture."));
+    return lines.join(QStringLiteral("\n"));
 }
 
 DiffWidgetInput sample_diff_input()
 {
-    QStringList left_lines;
-    QStringList right_lines;
-    const auto equal = [&](const QString& text) {
-        left_lines.append(text);
-        right_lines.append(text);
-    };
-    const auto changed = [&](const QString& left_text, const QString& right_text) {
-        left_lines.append(left_text);
-        right_lines.append(right_text);
-    };
-    const auto right_extra = [&](const QString& text) {
-        right_lines.append(text);
-    };
-    const auto left_extra = [&](const QString& text) {
-        left_lines.append(text);
-    };
-
-    equal(QStringLiteral("src/widget.cpp"));
-    equal(QString());
-
-    equal(QStringLiteral("int calculate_total(int value)"));
-    equal(QStringLiteral("{"));
-    changed(QStringLiteral("\tconst int adjustment = 1;"), QStringLiteral("\tconst int adjustment = 2;"));
-    equal(QStringLiteral("\treturn value + adjustment;"));
-    equal(QStringLiteral("}"));
-    equal(QString());
-
-    equal(QStringLiteral("void configure_options(Config& config)"));
-    equal(QStringLiteral("{"));
-    equal(QStringLiteral("\tconfig.enableCache();"));
-    changed(QStringLiteral("\tconfig.enableDiagnostics();"), QStringLiteral("\tconfig.enableMetrics();"));
-    right_extra(QStringLiteral("\tconfig.enableTracing();"));
-    equal(QStringLiteral("}"));
-    equal(QString());
-
-    equal(QStringLiteral("void remove_legacy_path()"));
-    equal(QStringLiteral("{"));
-    changed(QStringLiteral("\tcleanupLegacyPath();"), QStringLiteral("\tcleanupDeprecatedPaths();"));
-    left_extra(QStringLiteral("\tcleanupTempDir();"));
-    equal(QStringLiteral("\twriteAuditLine();"));
-    equal(QStringLiteral("}"));
-    equal(QString());
-
-    equal(QStringLiteral("QString format_label(QStringView key, QStringView value)"));
-    equal(QStringLiteral("{"));
-    changed(QStringLiteral("\tconst QString separator = QStringLiteral(\"=\");"),
-        QStringLiteral("\tconst QString label = key.toString();"));
-    changed(QStringLiteral("\treturn key.toString() + separator + value.toString();"),
-        QStringLiteral("\tconst QString separator = QStringLiteral(\": \");"));
-    right_extra(QStringLiteral("\treturn label + separator + value.toString();"));
-    equal(QStringLiteral("}"));
-    equal(QString());
-
-    equal(QStringLiteral("// This deliberately long line stays unwrapped in Step 6 so horizontal scrolling can be "
-                         "checked while left/right display rows are aligned with blank filler buffer lines."));
-
-    for (int row = 1; row <= 80; ++row) {
-        equal(QStringLiteral("unchanged display row %1 keeps vertical synchronization checkable.")
-                .arg(row, 2, 10, QLatin1Char('0')));
-    }
-
-    equal(QStringLiteral("// End of synchronized scrolling fixture."));
-
-    DiffWidgetInput input =
-        diff_input_from_raw_text(left_lines.join(QStringLiteral("\n")), right_lines.join(QStringLiteral("\n")));
+    DiffWidgetInput input = diff_input_from_unified_diff(sample_unified_diff_fixture());
     validate_diff_input(input);
     return input;
 }
@@ -486,7 +593,7 @@ int main(int argc, char** argv)
     }
 
     QQuickWindow window;
-    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 6 - Raw Line Diff"));
+    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 7 - Unified Diff Fixture"));
     window.resize(1200, 720);
     window.setColor(QColor(214, 219, 225));
 
@@ -613,7 +720,7 @@ int main(int argc, char** argv)
     layout_panes();
     const int expected_display_rows = static_cast<int>(input.rows.size());
     if (left.send(SCI_GETLINECOUNT) != expected_display_rows || right.send(SCI_GETLINECOUNT) != expected_display_rows) {
-        qFatal("TortoiseDiff Step 6 panes must keep display-buffer line numbers aligned.");
+        qFatal("TortoiseDiff Step 7 panes must keep display-buffer line numbers aligned.");
     }
 
     const auto update_overlays = [&]() {

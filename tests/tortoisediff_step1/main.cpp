@@ -348,6 +348,195 @@ void expect_raw_text_diff_rows(
     SQ_EXPECT(display_row_count(render_display_text(input, DiffSide::Right)) == static_cast<int>(rows.size()));
 }
 
+bool read_hunk_number(const QString& line, qsizetype& offset)
+{
+    const qsizetype begin = offset;
+    while (offset < line.size() && line[offset].isDigit()) {
+        ++offset;
+    }
+    return offset != begin;
+}
+
+bool read_hunk_range(const QString& line, qsizetype& offset, QChar sign)
+{
+    if (offset >= line.size() || line[offset] != sign) {
+        return false;
+    }
+    ++offset;
+
+    if (!read_hunk_number(line, offset) || offset >= line.size() || line[offset] != QLatin1Char(',')) {
+        return false;
+    }
+    ++offset;
+
+    return read_hunk_number(line, offset);
+}
+
+bool is_unified_hunk_header(const QString& line)
+{
+    qsizetype offset = 3;
+    if (!line.startsWith(QStringLiteral("@@ ")) || !read_hunk_range(line, offset, QLatin1Char('-')) ||
+        offset >= line.size() || line[offset] != QLatin1Char(' '))
+    {
+        return false;
+    }
+    ++offset;
+
+    return read_hunk_range(line, offset, QLatin1Char('+')) && line.mid(offset).startsWith(QStringLiteral(" @@"));
+}
+
+bool stored_unified_diff_input(const QString& diff_text, DiffWidgetInput& input)
+{
+    QStringList left_lines;
+    QStringList right_lines;
+    std::vector<DiffRow> rows;
+    std::vector<int> deleted_lines;
+    std::vector<int> added_lines;
+    int hunk_id = 0;
+    int next_changed_group_id = 1;
+    bool in_hunk = false;
+    bool saw_hunk = false;
+    bool saw_diff_git = false;
+
+    auto flush_changed_block = [&]() {
+        if (deleted_lines.empty() && added_lines.empty()) {
+            return;
+        }
+
+        const int changed_group_id = next_changed_group_id++;
+        const size_t row_count = std::max(deleted_lines.size(), added_lines.size());
+        for (size_t row = 0; row < row_count; ++row) {
+            const bool has_left = row < deleted_lines.size();
+            const bool has_right = row < added_lines.size();
+            rows.push_back({
+                hunk_id,
+                changed_group_id,
+                has_left ? deleted_lines[row] : -1,
+                has_right ? added_lines[row] : -1,
+                has_left ? (has_right ? DiffSideState::Changed : DiffSideState::Deleted) : DiffSideState::Filler,
+                has_right ? (has_left ? DiffSideState::Changed : DiffSideState::Added) : DiffSideState::Filler,
+            });
+        }
+        deleted_lines.clear();
+        added_lines.clear();
+    };
+
+    const QStringList lines = diff_text.split(QLatin1Char('\n'), Qt::KeepEmptyParts);
+    for (qsizetype index = 0; index < lines.size(); ++index) {
+        QString line = lines[index];
+        if (line.endsWith(QLatin1Char('\r'))) {
+            line.chop(1);
+        }
+        if (index == lines.size() - 1 && line.isEmpty()) {
+            break;
+        }
+
+        if (line.startsWith(QStringLiteral("diff --git "))) {
+            if (saw_diff_git || saw_hunk) {
+                return false;
+            }
+            saw_diff_git = true;
+            continue;
+        }
+
+        if (is_unified_hunk_header(line)) {
+            flush_changed_block();
+            in_hunk = true;
+            saw_hunk = true;
+            ++hunk_id;
+            continue;
+        }
+
+        if (!in_hunk) {
+            if (line.isEmpty() || line.startsWith(QStringLiteral("index ")) || line.startsWith(QStringLiteral("--- ")) ||
+                line.startsWith(QStringLiteral("+++ ")))
+            {
+                continue;
+            }
+            return false;
+        }
+
+        if (line.startsWith(QStringLiteral("\\ No newline at end of file"))) {
+            continue;
+        }
+
+        if (line.startsWith(QLatin1Char(' '))) {
+            flush_changed_block();
+            const QString text = line.mid(1);
+            left_lines.push_back(text);
+            right_lines.push_back(text);
+            rows.push_back({0, -1, static_cast<int>(left_lines.size()), static_cast<int>(right_lines.size()),
+                DiffSideState::Equal, DiffSideState::Equal});
+            continue;
+        }
+
+        if (line.startsWith(QLatin1Char('-'))) {
+            left_lines.push_back(line.mid(1));
+            deleted_lines.push_back(static_cast<int>(left_lines.size()));
+            continue;
+        }
+
+        if (line.startsWith(QLatin1Char('+'))) {
+            right_lines.push_back(line.mid(1));
+            added_lines.push_back(static_cast<int>(right_lines.size()));
+            continue;
+        }
+
+        return false;
+    }
+
+    flush_changed_block();
+    if (!saw_hunk) {
+        return false;
+    }
+
+    input = {left_lines.join(QLatin1Char('\n')), right_lines.join(QLatin1Char('\n')), rows};
+    return validate_diff_widget_input(input) == WidgetInputValidation::Accepted;
+}
+
+void test_stored_unified_diff_adapter()
+{
+    DiffWidgetInput input;
+    SQ_EXPECT(stored_unified_diff_input(QStringLiteral("diff --git a/file.txt b/file.txt\n"
+                                                       "index 1111111..2222222 100644\n"
+                                                       "--- a/file.txt\n"
+                                                       "+++ b/file.txt\n"
+                                                       "@@ -1,5 +1,5 @@\n"
+                                                       " alpha\n"
+                                                       "-old value\n"
+                                                       "+new value\n"
+                                                       "+right only\n"
+                                                       " shared\n"
+                                                       "-left only\n"
+                                                       "\\ No newline at end of file\n"
+                                                       " tail\n"),
+        input));
+
+    SQ_EXPECT(input.leftText == QStringLiteral("alpha\nold value\nshared\nleft only\ntail"));
+    SQ_EXPECT(input.rightText == QStringLiteral("alpha\nnew value\nright only\nshared\ntail"));
+    expect_exact_rows(input.rows, {
+                                      {0, -1, 1, 1, DiffSideState::Equal, DiffSideState::Equal},
+                                      {1, 1, 2, 2, DiffSideState::Changed, DiffSideState::Changed},
+                                      {1, 1, -1, 3, DiffSideState::Filler, DiffSideState::Added},
+                                      {0, -1, 3, 4, DiffSideState::Equal, DiffSideState::Equal},
+                                      {1, 2, 4, -1, DiffSideState::Deleted, DiffSideState::Filler},
+                                      {0, -1, 5, 5, DiffSideState::Equal, DiffSideState::Equal},
+                                  });
+    SQ_EXPECT(validate_diff_widget_input(input) == WidgetInputValidation::Accepted);
+
+    SQ_EXPECT(!stored_unified_diff_input(QStringLiteral("--- a/file.txt\n"
+                                                        "+++ b/file.txt\n"
+                                                        "-body before hunk\n"),
+        input));
+    SQ_EXPECT(!stored_unified_diff_input(QStringLiteral("diff --git a/one.txt b/one.txt\n"
+                                                        "--- a/one.txt\n"
+                                                        "+++ b/one.txt\n"
+                                                        "@@ -1,1 +1,1 @@\n"
+                                                        " one\n"
+                                                        "diff --git a/two.txt b/two.txt\n"),
+        input));
+}
+
 void expect_side_has_blank_fillers_only(
     const std::vector<DiffRow>& rows, const QStringList& display_lines, DiffSide side)
 {
@@ -835,6 +1024,7 @@ int main(int argc, char** argv)
 
     test_display_row_model_changed_blocks();
     test_raw_text_line_diff_adapter();
+    test_stored_unified_diff_adapter();
     test_widget_input_contract_validation();
     test_two_readonly_panes_in_one_window();
 

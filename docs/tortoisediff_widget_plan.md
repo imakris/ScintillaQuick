@@ -228,13 +228,12 @@ Human checkpoint:
 
 - compare line-level hunk placement against TortoiseDiff on fixture files
 
-## Step 7: Unified Diff And Git Adapters
+## Step 7A: Stored Unified-Diff Fixture Adapter
 
 Build:
 
-- a stored unified-diff fixture adapter first
-- a `git diff --no-color` command adapter only after stored fixtures pass
-- parser scope: one text file diff per widget
+- parse one in-memory unified diff for one text file into `DiffWidgetInput`
+- no live Git, no filesystem input, and no multi-file support
 - accept normal `diff --git` headers, `---`/`+++`, hunk headers, `/dev/null`
   creates/deletes, and no-newline markers
 - reject multi-file, binary, combined, rename-only, and malformed diffs with a
@@ -242,13 +241,22 @@ Build:
 
 Test:
 
-- assert parser output for parser-specific fixtures
+- assert parser output for parser-specific in-memory fixtures
 - assert rejection cases produce clear errors
-- integration test feeds parser output into the widget contract from Step 5
+- integration test feeds parsed output into the widget contract from Step 5
 
 Human checkpoint:
 
-- accept only when parser failures are isolated from widget rendering failures
+- accept when the widget renders from a parsed unified diff
+- accept only when parser failures are separate from widget rendering failures
+
+## Step 7B: Live Git Diff Command Adapter
+
+Future work:
+
+- add a live `git diff --no-color` command adapter after Step 7A passes
+- keep live command execution outside the widget and feed parsed output into
+  `DiffWidgetInput`
 
 ## Step 8: Line Highlight Primitive Spike
 
