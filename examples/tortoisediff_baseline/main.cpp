@@ -16,6 +16,7 @@
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QProcess>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -383,6 +384,87 @@ QString source_side_copy_text(
     return source_lines.join(QLatin1Char('\n'));
 }
 
+std::vector<DiffRow> raw_text_diff_rows(const QString& left_text, const QString& right_text)
+{
+    const QStringList left_lines = source_lines_from_text(left_text);
+    const QStringList right_lines = source_lines_from_text(right_text);
+    const int left_count = static_cast<int>(left_lines.size());
+    const int right_count = static_cast<int>(right_lines.size());
+
+    std::vector<std::vector<int>> lcs(
+        static_cast<size_t>(left_count + 1), std::vector<int>(static_cast<size_t>(right_count + 1), 0));
+    for (int left = left_count - 1; left >= 0; --left) {
+        for (int right = right_count - 1; right >= 0; --right) {
+            if (left_lines[left] == right_lines[right]) {
+                lcs[static_cast<size_t>(left)][static_cast<size_t>(right)] =
+                    lcs[static_cast<size_t>(left + 1)][static_cast<size_t>(right + 1)] + 1;
+            } else {
+                lcs[static_cast<size_t>(left)][static_cast<size_t>(right)] =
+                    std::max(lcs[static_cast<size_t>(left + 1)][static_cast<size_t>(right)],
+                        lcs[static_cast<size_t>(left)][static_cast<size_t>(right + 1)]);
+            }
+        }
+    }
+
+    std::vector<DiffRow> rows;
+    rows.reserve(static_cast<size_t>(left_count + right_count));
+    int next_hunk_id = 1;
+
+    const auto append_block = [&](int left_begin, int left_end, int right_begin, int right_end) {
+        if (left_begin == left_end && right_begin == right_end) {
+            return;
+        }
+
+        const int hunk_id = next_hunk_id;
+        const int changed_group_id = next_hunk_id;
+        const int row_count = std::max(left_end - left_begin, right_end - right_begin);
+        for (int row = 0; row < row_count; ++row) {
+            const bool has_left = left_begin + row < left_end;
+            const bool has_right = right_begin + row < right_end;
+            rows.push_back({
+                hunk_id,
+                changed_group_id,
+                has_left ? left_begin + row + 1 : -1,
+                has_right ? right_begin + row + 1 : -1,
+                has_left ? (has_right ? DiffSideState::Changed : DiffSideState::Deleted) : DiffSideState::Filler,
+                has_right ? (has_left ? DiffSideState::Changed : DiffSideState::Added) : DiffSideState::Filler,
+            });
+        }
+        ++next_hunk_id;
+    };
+
+    int left = 0;
+    int right = 0;
+    while (left < left_count && right < right_count) {
+        if (left_lines[left] == right_lines[right]) {
+            rows.push_back({0, -1, left + 1, right + 1, DiffSideState::Equal, DiffSideState::Equal});
+            ++left;
+            ++right;
+            continue;
+        }
+
+        const int left_begin = left;
+        const int right_begin = right;
+        while (left < left_count && right < right_count && left_lines[left] != right_lines[right]) {
+            if (lcs[static_cast<size_t>(left)][static_cast<size_t>(right + 1)] >=
+                lcs[static_cast<size_t>(left + 1)][static_cast<size_t>(right)])
+            {
+                ++right;
+            } else {
+                ++left;
+            }
+        }
+        if (left == left_count || right == right_count) {
+            left = left_count;
+            right = right_count;
+        }
+        append_block(left_begin, left, right_begin, right);
+    }
+    append_block(left, left_count, right, right_count);
+
+    return rows;
+}
+
 int display_row_count(const QString& text)
 {
     return text.count(QLatin1Char('\n')) + 1;
@@ -433,9 +515,6 @@ void validate_diff_input(const DiffWidgetInput& input)
     const int expected_rows = static_cast<int>(input.rows.size());
     if (display_row_count(left_display_text) != expected_rows || display_row_count(right_display_text) != expected_rows) {
         qFatal("TortoiseDiff Step 9 widget input display buffers must have the same display row count as the row model.");
-    }
-    if (left_display_text == right_display_text) {
-        qFatal("TortoiseDiff Step 9 widget input must render non-identical pane text.");
     }
 }
 
@@ -603,6 +682,9 @@ int marker_for_state(DiffSideState state)
 void apply_diff_markers(ScintillaQuick_item& pane, const DiffWidgetInput& input, bool left_side)
 {
     configure_diff_markers(pane);
+    for (int marker : std::array<int, 4>{k_marker_added, k_marker_deleted, k_marker_changed, k_marker_filler}) {
+        pane.send(SCI_MARKERDELETEALL, marker);
+    }
     for (int row_index = 0; row_index < static_cast<int>(input.rows.size()); ++row_index) {
         const DiffRow& row = input.rows[static_cast<size_t>(row_index)];
         const DiffSideState state = left_side ? row.leftState : row.rightState;
@@ -641,6 +723,10 @@ void apply_inline_changed_text_highlights(
 {
     configure_inline_changed_text_highlights(left);
     configure_inline_changed_text_highlights(right);
+    left.send(SCI_SETINDICATORCURRENT, k_inline_changed_indicator);
+    left.send(SCI_INDICATORCLEARRANGE, 0, left.send(SCI_GETLENGTH));
+    right.send(SCI_SETINDICATORCURRENT, k_inline_changed_indicator);
+    right.send(SCI_INDICATORCLEARRANGE, 0, right.send(SCI_GETLENGTH));
 
     const QStringList left_lines = source_lines_from_text(input.leftText);
     const QStringList right_lines = source_lines_from_text(input.rightText);
@@ -678,6 +764,63 @@ std::vector<int> hunk_start_display_rows(const DiffWidgetInput& input)
     return hunk_rows;
 }
 
+int hunk_index_for_display_row(const DiffWidgetInput& input, const std::vector<int>& hunk_start_rows, int display_row)
+{
+    if (display_row < 0 || display_row >= static_cast<int>(input.rows.size())) {
+        return -1;
+    }
+
+    const int hunk_id = input.rows[static_cast<size_t>(display_row)].hunkId;
+    if (hunk_id <= 0) {
+        return -1;
+    }
+
+    for (int hunk_index = 0; hunk_index < static_cast<int>(hunk_start_rows.size()); ++hunk_index) {
+        const int hunk_start_row = hunk_start_rows[static_cast<size_t>(hunk_index)];
+        if (hunk_start_row >= 0 && hunk_start_row < static_cast<int>(input.rows.size()) &&
+            input.rows[static_cast<size_t>(hunk_start_row)].hunkId == hunk_id)
+        {
+            return hunk_index;
+        }
+    }
+
+    return -1;
+}
+
+int first_hunk_index_intersecting_display_row_range(
+    const DiffWidgetInput& input, const std::vector<int>& hunk_start_rows, int first_display_row, int end_display_row)
+{
+    if (input.rows.empty()) {
+        return -1;
+    }
+
+    const int row_count = static_cast<int>(input.rows.size());
+    const int first_row = std::clamp(std::min(first_display_row, end_display_row), 0, row_count);
+    const int end_row = std::clamp(std::max(first_display_row, end_display_row), 0, row_count);
+    for (int row = first_row; row < end_row; ++row) {
+        const int hunk_index = hunk_index_for_display_row(input, hunk_start_rows, row);
+        if (hunk_index >= 0) {
+            return hunk_index;
+        }
+    }
+
+    return -1;
+}
+
+std::pair<int, int> exact_display_row_range(int first_display_row, int end_display_row, int row_count)
+{
+    if (row_count <= 0) {
+        return {-1, -1};
+    }
+
+    int first_row = std::clamp(std::min(first_display_row, end_display_row), 0, row_count);
+    int end_row = std::clamp(std::max(first_display_row, end_display_row), 0, row_count);
+    if (first_row == end_row && first_row < row_count) {
+        ++end_row;
+    }
+    return first_row < end_row ? std::pair{first_row, end_row} : std::pair{-1, -1};
+}
+
 std::pair<int, int> hunk_display_row_range(const DiffWidgetInput& input, int hunk_start_row)
 {
     if (hunk_start_row < 0 || hunk_start_row >= static_cast<int>(input.rows.size())) {
@@ -703,6 +846,102 @@ std::pair<int, int> hunk_display_row_range(const DiffWidgetInput& input, int hun
     return {first_row, end_row};
 }
 
+std::pair<int, int> changed_block_range_for_display_row(
+    const DiffWidgetInput& input, const std::vector<int>& hunk_start_rows, int display_row)
+{
+    const int hunk_index = hunk_index_for_display_row(input, hunk_start_rows, display_row);
+    return hunk_index >= 0 ?
+        hunk_display_row_range(input, hunk_start_rows[static_cast<size_t>(hunk_index)]) :
+        exact_display_row_range(display_row, display_row + 1, static_cast<int>(input.rows.size()));
+}
+
+int source_line_for_side(const DiffRow& row, bool left_side)
+{
+    return left_side ? row.leftSourceLine : row.rightSourceLine;
+}
+
+const QString& source_text_for_side(const DiffWidgetInput& input, bool left_side)
+{
+    return left_side ? input.leftText : input.rightText;
+}
+
+QString source_text_with_display_row_range_applied(
+    const DiffWidgetInput& input, int first_display_row, int end_display_row, bool target_left_side)
+{
+    const bool source_left_side = !target_left_side;
+    const auto [first_row, end_row] =
+        exact_display_row_range(first_display_row, end_display_row, static_cast<int>(input.rows.size()));
+    if (first_row < 0 || end_row <= first_row) {
+        return source_text_for_side(input, target_left_side);
+    }
+
+    const QStringList source_lines = source_lines_from_text(source_text_for_side(input, source_left_side));
+    const QStringList target_lines = source_lines_from_text(source_text_for_side(input, target_left_side));
+    QStringList replacement_lines;
+    int target_start = target_lines.size();
+    int target_end = target_lines.size();
+    bool has_target_lines = false;
+
+    for (int row_index = first_row; row_index < end_row; ++row_index) {
+        const DiffRow& row = input.rows[static_cast<size_t>(row_index)];
+        const int source_line = source_line_for_side(row, source_left_side);
+        if (source_line != -1) {
+            replacement_lines.append(source_lines[source_line - 1]);
+        }
+
+        const int target_line = source_line_for_side(row, target_left_side);
+        if (target_line != -1) {
+            if (!has_target_lines) {
+                target_start = target_line - 1;
+            }
+            target_end = target_line;
+            has_target_lines = true;
+        }
+    }
+
+    if (!has_target_lines) {
+        for (int row_index = end_row; row_index < static_cast<int>(input.rows.size()); ++row_index) {
+            const int target_line = source_line_for_side(input.rows[static_cast<size_t>(row_index)], target_left_side);
+            if (target_line != -1) {
+                target_start = target_line - 1;
+                break;
+            }
+        }
+        target_end = target_start;
+    }
+
+    QStringList merged_lines;
+    for (int line = 0; line < target_start; ++line) {
+        merged_lines.append(target_lines[line]);
+    }
+    merged_lines.append(replacement_lines);
+    for (int line = target_end; line < target_lines.size(); ++line) {
+        merged_lines.append(target_lines[line]);
+    }
+
+    return merged_lines.join(QLatin1Char('\n'));
+}
+
+bool apply_display_row_range_to_target(
+    DiffWidgetInput& input, int first_display_row, int end_display_row, bool target_left_side)
+{
+    const auto [first_row, end_row] =
+        exact_display_row_range(first_display_row, end_display_row, static_cast<int>(input.rows.size()));
+    if (first_row < 0 || end_row <= first_row) {
+        return false;
+    }
+
+    const QString merged_text =
+        source_text_with_display_row_range_applied(input, first_row, end_row, target_left_side);
+    if (target_left_side) {
+        input.leftText = merged_text;
+    } else {
+        input.rightText = merged_text;
+    }
+    input.rows = raw_text_diff_rows(input.leftText, input.rightText);
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -714,7 +953,7 @@ int main(int argc, char** argv)
     }
 
     QQuickWindow window;
-    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 12 - Hunk Navigation"));
+    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 14 - Merge Actions"));
     window.resize(1200, 720);
     window.setColor(QColor(214, 219, 225));
 
@@ -781,6 +1020,20 @@ Rectangle {
             text: "Previous hunk"
         }
 
+        Button {
+            objectName: "copyLeftToRightButton"
+            anchors.verticalCenter: parent.verticalCenter
+            enabled: false
+            text: "Copy ->"
+        }
+
+        Button {
+            objectName: "copyRightToLeftButton"
+            anchors.verticalCenter: parent.verticalCenter
+            enabled: false
+            text: "<- Copy"
+        }
+
         Label {
             anchors.verticalCenter: parent.verticalCenter
             text: "F7 / Shift+F7"
@@ -808,7 +1061,11 @@ Rectangle {
     auto* hunk_status = hunk_toolbar->findChild<QObject*>(QStringLiteral("hunkStatus"));
     auto* next_hunk_button = hunk_toolbar->findChild<QObject*>(QStringLiteral("nextHunkButton"));
     auto* previous_hunk_button = hunk_toolbar->findChild<QObject*>(QStringLiteral("previousHunkButton"));
-    if (!hunk_status || !next_hunk_button || !previous_hunk_button) {
+    auto* copy_left_to_right_button = hunk_toolbar->findChild<QObject*>(QStringLiteral("copyLeftToRightButton"));
+    auto* copy_right_to_left_button = hunk_toolbar->findChild<QObject*>(QStringLiteral("copyRightToLeftButton"));
+    if (!hunk_status || !next_hunk_button || !previous_hunk_button || !copy_left_to_right_button ||
+        !copy_right_to_left_button)
+    {
         qFatal("TortoiseDiff Step 12 hunk toolbar controls were not found.");
     }
     hunk_toolbar->setParentItem(root);
@@ -950,7 +1207,11 @@ Rectangle {
     };
 
     const auto refresh_horizontal_scrollbar = [&]() {
-        const auto [x_offset, text_width, viewport_width, max_x_offset] = horizontal_scrollbar_metrics();
+        const auto horizontal_metrics = horizontal_scrollbar_metrics();
+        const int x_offset = horizontal_metrics[0];
+        const int text_width = horizontal_metrics[1];
+        const int viewport_width = horizontal_metrics[2];
+        const int max_x_offset = horizontal_metrics[3];
         const QSignalBlocker block_scrollbar_signals(horizontal_scrollbar);
         const bool visible = text_width > viewport_width;
         horizontal_scrollbar->setProperty("size", std::min(1.0, static_cast<double>(viewport_width) / text_width));
@@ -1082,7 +1343,7 @@ Rectangle {
     layout_panes();
 
     const QFont pane_font = scintillaquick::shared::deterministic_test_font(11);
-    const DiffWidgetInput input = sample_diff_input();
+    DiffWidgetInput input = sample_diff_input();
     left_text = render_side_text(input, true);
     right_text = render_side_text(input, false);
     configure_pane(left, pane_font, left_text);
@@ -1099,8 +1360,12 @@ Rectangle {
     refresh_vertical_scrollbar();
     refresh_horizontal_scrollbar();
 
-    const std::vector<int> hunk_start_rows = hunk_start_display_rows(input);
+    std::vector<int> hunk_start_rows = hunk_start_display_rows(input);
     int selected_hunk_index = -1;
+    int active_first_row = -1;
+    int active_end_row = -1;
+    bool refreshing_panes = false;
+    bool suppress_selection_tracking = false;
     const auto update_active_hunk_boundaries = [&]() {
         const auto hide_boundaries = [&]() {
             for (QQuickItem* boundary : std::array{left_top_hunk_boundary, left_bottom_hunk_boundary,
@@ -1108,18 +1373,13 @@ Rectangle {
                 boundary->setVisible(false);
             }
         };
-        if (selected_hunk_index < 0 || selected_hunk_index >= static_cast<int>(hunk_start_rows.size())) {
+        if (active_first_row < 0 || active_end_row <= active_first_row) {
             hide_boundaries();
             return;
         }
 
-        const auto [first_row, end_row] =
-            hunk_display_row_range(input, hunk_start_rows[static_cast<size_t>(selected_hunk_index)]);
-        if (first_row < 0 || end_row <= first_row) {
-            hide_boundaries();
-            return;
-        }
-
+        const int first_row = active_first_row;
+        const int end_row = active_end_row;
         const qreal dpr = std::max<qreal>(1.0, window.effectiveDevicePixelRatio());
         constexpr qreal line_height_physical_pixels = 2.0;
         const qreal line_height = line_height_physical_pixels / dpr;
@@ -1149,10 +1409,44 @@ Rectangle {
         update_pane_boundaries(right, right_top_hunk_boundary, right_bottom_hunk_boundary);
     };
     const auto update_hunk_controls = [&]() {
-        const bool has_hunks = !hunk_start_rows.empty();
-        hunk_status->setProperty("text", has_hunks && selected_hunk_index >= 0 ?
-                QStringLiteral("Hunk %1/%2").arg(selected_hunk_index + 1).arg(hunk_start_rows.size()) :
-                QStringLiteral("Hunk -/%1").arg(hunk_start_rows.size()));
+        const bool has_active_range = active_first_row >= 0 && active_end_row > active_first_row;
+        hunk_status->setProperty("text", has_active_range ?
+                (active_end_row == active_first_row + 1 ?
+                        QStringLiteral("Row %1").arg(active_first_row + 1) :
+                        QStringLiteral("Rows %1-%2").arg(active_first_row + 1).arg(active_end_row)) :
+                QStringLiteral("Rows -"));
+        copy_left_to_right_button->setProperty("enabled", has_active_range);
+        copy_right_to_left_button->setProperty("enabled", has_active_range);
+    };
+    const auto set_active_display_row_range = [&](int first_display_row, int end_display_row) {
+        const auto [first_row, end_row] =
+            exact_display_row_range(first_display_row, end_display_row, static_cast<int>(input.rows.size()));
+        active_first_row = first_row;
+        active_end_row = end_row;
+        selected_hunk_index =
+            first_hunk_index_intersecting_display_row_range(input, hunk_start_rows, active_first_row, active_end_row);
+        update_hunk_controls();
+        update_active_hunk_boundaries();
+    };
+    const auto set_active_changed_block_from_display_row = [&](int display_row) {
+        const auto [first_row, end_row] = changed_block_range_for_display_row(input, hunk_start_rows, display_row);
+        set_active_display_row_range(first_row, end_row);
+    };
+    const auto display_row_from_mouse_event = [](ScintillaQuick_item& pane, QMouseEvent* event) {
+        const QPoint point = event->pos();
+        const sptr_t position = pane.send(SCI_POSITIONFROMPOINTCLOSE, point.x(), point.y());
+        if (position < 0) {
+            return -1;
+        }
+        return static_cast<int>(pane.send(SCI_LINEFROMPOSITION, position));
+    };
+    const auto selected_display_row_range = [](ScintillaQuick_item& pane) {
+        const sptr_t selection_start = pane.send(SCI_GETSELECTIONSTART);
+        const sptr_t selection_end = pane.send(SCI_GETSELECTIONEND);
+        const sptr_t last_position = selection_end > selection_start ? selection_end - 1 : selection_start;
+        const int first_row = static_cast<int>(pane.send(SCI_LINEFROMPOSITION, selection_start));
+        const int end_row = static_cast<int>(pane.send(SCI_LINEFROMPOSITION, last_position)) + 1;
+        return std::array{std::min(first_row, end_row), std::max(first_row, end_row)};
     };
     const auto selected_hunk_is_visible = [&]() {
         if (selected_hunk_index < 0 || selected_hunk_index >= static_cast<int>(hunk_start_rows.size())) {
@@ -1201,12 +1495,80 @@ Rectangle {
 
         selected_hunk_index = target_index;
         const int target_row = hunk_start_rows[static_cast<size_t>(selected_hunk_index)];
+        const auto [first_row, end_row] = hunk_display_row_range(input, target_row);
+        active_first_row = first_row;
+        active_end_row = end_row;
         const int first_visible_line = centered_hunk_first_visible_line(target_row);
         mirror_scroll([&]() {
             left.scrollVertical(first_visible_line);
             right.scrollVertical(first_visible_line);
         });
         refresh_vertical_scrollbar();
+        update_hunk_controls();
+        update_active_hunk_boundaries();
+    };
+    const auto refresh_panes_from_input = [&]() {
+        const int previous_first_visible_line = static_cast<int>(left.send(SCI_GETFIRSTVISIBLELINE));
+        const int previous_x_offset = static_cast<int>(left.send(SCI_GETXOFFSET));
+
+        refreshing_panes = true;
+        left_text = render_side_text(input, true);
+        right_text = render_side_text(input, false);
+        configure_pane(left, pane_font, left_text);
+        configure_pane(right, pane_font, right_text);
+        update_shared_horizontal_scroll_width();
+        apply_diff_markers(left, input, true);
+        apply_diff_markers(right, input, false);
+        apply_inline_changed_text_highlights(left, right, input);
+        layout_panes();
+        refreshing_panes = false;
+
+        const int line_count = std::max(1, static_cast<int>(left.send(SCI_GETLINECOUNT)));
+        const int lines_on_screen = std::clamp(static_cast<int>(left.send(SCI_LINESONSCREEN)), 1, line_count);
+        const int max_first_line = std::max(0, line_count - lines_on_screen);
+        const auto horizontal_metrics = horizontal_scrollbar_metrics();
+        const int max_x_offset = horizontal_metrics[3];
+        const int first_visible_line = std::clamp(previous_first_visible_line, 0, max_first_line);
+        const int restored_x_offset = std::clamp(previous_x_offset, 0, max_x_offset);
+
+        mirror_scroll([&]() {
+            left.scrollVertical(first_visible_line);
+            right.scrollVertical(first_visible_line);
+            left.scrollHorizontal(restored_x_offset);
+            right.scrollHorizontal(restored_x_offset);
+        });
+        refresh_vertical_scrollbar();
+        refresh_horizontal_scrollbar();
+    };
+    const auto apply_selected_hunk = [&](bool left_to_right) {
+        const bool target_left_side = !left_to_right;
+        if (!apply_display_row_range_to_target(input, active_first_row, active_end_row, target_left_side)) {
+            return;
+        }
+
+        validate_diff_input(input);
+        hunk_start_rows = hunk_start_display_rows(input);
+        if (hunk_start_rows.empty()) {
+            selected_hunk_index = -1;
+            active_first_row = -1;
+            active_end_row = -1;
+        } else {
+            selected_hunk_index = std::clamp(selected_hunk_index, 0, static_cast<int>(hunk_start_rows.size()) - 1);
+            const auto [first_row, end_row] =
+                hunk_display_row_range(input, hunk_start_rows[static_cast<size_t>(selected_hunk_index)]);
+            active_first_row = first_row;
+            active_end_row = end_row;
+        }
+        refresh_panes_from_input();
+        if (selected_hunk_index >= 0) {
+            const int target_row = hunk_start_rows[static_cast<size_t>(selected_hunk_index)];
+            const int first_visible_line = centered_hunk_first_visible_line(target_row);
+            mirror_scroll([&]() {
+                left.scrollVertical(first_visible_line);
+                right.scrollVertical(first_visible_line);
+            });
+            refresh_vertical_scrollbar();
+        }
         update_hunk_controls();
         update_active_hunk_boundaries();
     };
@@ -1235,10 +1597,56 @@ Rectangle {
     };
     install_source_side_copy(left, true);
     install_source_side_copy(right, false);
+    const auto install_active_hunk_tracking = [&](ScintillaQuick_item& pane) {
+        auto* pane_ptr = &pane;
+        QObject::connect(&pane, &ScintillaQuick_item::buttonPressed, &window, [&, pane_ptr](QMouseEvent* event) {
+            if (event->button() != Qt::RightButton) {
+                return;
+            }
+
+            suppress_selection_tracking = true;
+            const int display_row = display_row_from_mouse_event(*pane_ptr, event);
+            if (display_row >= 0) {
+                set_active_changed_block_from_display_row(display_row);
+            }
+        });
+        QObject::connect(&pane, &ScintillaQuick_item::buttonReleased, &window, [&, pane_ptr](QMouseEvent* event) {
+            if (event->button() == Qt::RightButton) {
+                const int display_row = display_row_from_mouse_event(*pane_ptr, event);
+                if (display_row >= 0) {
+                    set_active_changed_block_from_display_row(display_row);
+                }
+                suppress_selection_tracking = false;
+                return;
+            }
+            if (event->button() != Qt::LeftButton) {
+                return;
+            }
+
+            const auto [first_row, end_row] = selected_display_row_range(*pane_ptr);
+            set_active_display_row_range(first_row, end_row);
+        });
+        QObject::connect(&pane, &ScintillaQuick_item::updateUi, &window, [&, pane_ptr](Scintilla::Update updated) {
+            if (refreshing_panes || suppress_selection_tracking ||
+                !(static_cast<int>(updated) & static_cast<int>(Scintilla::Update::Selection)))
+            {
+                return;
+            }
+
+            const auto [first_row, end_row] = selected_display_row_range(*pane_ptr);
+            set_active_display_row_range(first_row, end_row);
+        });
+    };
+    install_active_hunk_tracking(left);
+    install_active_hunk_tracking(right);
     CallbackEventFilter next_hunk_click_filter([&]() { navigate_hunk(1); });
     CallbackEventFilter previous_hunk_click_filter([&]() { navigate_hunk(-1); });
+    CallbackEventFilter copy_left_to_right_click_filter([&]() { apply_selected_hunk(true); });
+    CallbackEventFilter copy_right_to_left_click_filter([&]() { apply_selected_hunk(false); });
     next_hunk_button->installEventFilter(&next_hunk_click_filter);
     previous_hunk_button->installEventFilter(&previous_hunk_click_filter);
+    copy_left_to_right_button->installEventFilter(&copy_left_to_right_click_filter);
+    copy_right_to_left_button->installEventFilter(&copy_right_to_left_click_filter);
     update_hunk_controls();
     update_active_hunk_boundaries();
 

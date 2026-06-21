@@ -427,22 +427,27 @@ Human checkpoint:
 
 - accept when copy behavior is explicit and matches the intended viewer UX
 
-## Step 14: Optional Merge Actions
+## Step 14: Merge Actions
 
-Build only if needed:
+Build:
 
 - copy selected hunk left-to-right
 - copy selected hunk right-to-left
+- active hunk follows the clicked row or selected display-row range
+- right-clicking a changed block makes that block active before later context
+  menu work
 - expose the resulting edited buffer outside the widget
 
 Test:
 
 - apply one hunk and assert the output text changes exactly as expected
+- click/select rows and assert the first intersecting hunk becomes active
 - reject conflicting or unsupported operations clearly
 
 Human checkpoint:
 
-- decide whether this is still a viewer or has become a merge tool
+- accept when the prototype has started behaving as a merge tool, with the
+  first slice limited to active-hunk copy actions
 
 ## Step 15: Large File Check
 

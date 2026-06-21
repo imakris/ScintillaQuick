@@ -301,6 +301,49 @@ std::vector<int> hunk_target_rows(const std::vector<DiffRow>& rows)
     return target_rows;
 }
 
+int hunk_index_for_display_row(const std::vector<DiffRow>& rows, const std::vector<int>& target_rows, int display_row)
+{
+    if (display_row < 0 || display_row >= static_cast<int>(rows.size())) {
+        return -1;
+    }
+
+    const int hunk_id = rows[static_cast<size_t>(display_row)].hunkId;
+    if (hunk_id <= 0) {
+        return -1;
+    }
+
+    for (int hunk_index = 0; hunk_index < static_cast<int>(target_rows.size()); ++hunk_index) {
+        const int target_row = target_rows[static_cast<size_t>(hunk_index)];
+        if (target_row >= 0 && target_row < static_cast<int>(rows.size()) &&
+            rows[static_cast<size_t>(target_row)].hunkId == hunk_id)
+        {
+            return hunk_index;
+        }
+    }
+
+    return -1;
+}
+
+int first_hunk_index_intersecting_display_row_range(
+    const std::vector<DiffRow>& rows, const std::vector<int>& target_rows, int first_display_row, int end_display_row)
+{
+    if (rows.empty()) {
+        return -1;
+    }
+
+    const int row_count = static_cast<int>(rows.size());
+    const int first_row = std::clamp(std::min(first_display_row, end_display_row), 0, row_count);
+    const int end_row = std::clamp(std::max(first_display_row, end_display_row), 0, row_count);
+    for (int row = first_row; row < end_row; ++row) {
+        const int hunk_index = hunk_index_for_display_row(rows, target_rows, row);
+        if (hunk_index >= 0) {
+            return hunk_index;
+        }
+    }
+
+    return -1;
+}
+
 HunkRowRange hunk_row_range_for_target_index(
     const std::vector<DiffRow>& rows, const std::vector<int>& target_rows, int target_index)
 {
@@ -329,6 +372,28 @@ HunkRowRange hunk_row_range_for_target_index(
     }
 
     return {start_row, end_row};
+}
+
+HunkRowRange exact_display_row_range(int first_display_row, int end_display_row, int row_count)
+{
+    if (row_count <= 0) {
+        return {};
+    }
+
+    int first_row = std::clamp(std::min(first_display_row, end_display_row), 0, row_count);
+    int end_row = std::clamp(std::max(first_display_row, end_display_row), 0, row_count);
+    if (first_row == end_row && first_row < row_count) {
+        ++end_row;
+    }
+    return first_row < end_row ? HunkRowRange{first_row, end_row} : HunkRowRange{};
+}
+
+HunkRowRange changed_block_range_for_display_row(
+    const std::vector<DiffRow>& rows, const std::vector<int>& target_rows, int display_row)
+{
+    const int hunk_index = hunk_index_for_display_row(rows, target_rows, display_row);
+    return hunk_index >= 0 ? hunk_row_range_for_target_index(rows, target_rows, hunk_index) :
+                             exact_display_row_range(display_row, display_row + 1, static_cast<int>(rows.size()));
 }
 
 double active_hunk_boundary_logical_thickness(double device_pixel_ratio)
@@ -480,6 +545,108 @@ QString render_display_text(const DiffWidgetInput& input, DiffSide side)
     }
 
     return display_lines.join(QLatin1Char('\n'));
+}
+
+int source_line_for_side(const DiffRow& row, DiffSide side)
+{
+    return side == DiffSide::Left ? row.leftSourceLine : row.rightSourceLine;
+}
+
+QString source_text_for_side(const DiffWidgetInput& input, DiffSide side)
+{
+    return side == DiffSide::Left ? input.leftText : input.rightText;
+}
+
+QString source_text_with_display_row_range_applied(
+    const DiffWidgetInput& input, int first_display_row, int end_display_row, DiffSide target_side)
+{
+    const DiffSide source_side = target_side == DiffSide::Left ? DiffSide::Right : DiffSide::Left;
+    const HunkRowRange range = exact_display_row_range(
+        first_display_row, end_display_row, static_cast<int>(input.rows.size()));
+    if (range.startRow < 0 || range.endRow <= range.startRow) {
+        return source_text_for_side(input, target_side);
+    }
+
+    const QStringList source_lines = display_lines_from_text(source_text_for_side(input, source_side));
+    const QStringList target_lines = display_lines_from_text(source_text_for_side(input, target_side));
+    QStringList replacement_lines;
+    int target_start = target_lines.size();
+    int target_end = target_lines.size();
+    bool has_target_lines = false;
+
+    for (int row_index = range.startRow; row_index < range.endRow; ++row_index) {
+        const DiffRow& row = input.rows[static_cast<size_t>(row_index)];
+        const int source_line = source_line_for_side(row, source_side);
+        if (source_line != -1) {
+            replacement_lines.append(source_lines[source_line - 1]);
+        }
+
+        const int target_line = source_line_for_side(row, target_side);
+        if (target_line != -1) {
+            if (!has_target_lines) {
+                target_start = target_line - 1;
+            }
+            target_end = target_line;
+            has_target_lines = true;
+        }
+    }
+
+    if (!has_target_lines) {
+        for (int row_index = range.endRow; row_index < static_cast<int>(input.rows.size()); ++row_index) {
+            const int target_line = source_line_for_side(input.rows[static_cast<size_t>(row_index)], target_side);
+            if (target_line != -1) {
+                target_start = target_line - 1;
+                break;
+            }
+        }
+        target_end = target_start;
+    }
+
+    QStringList merged_lines;
+    for (int line = 0; line < target_start; ++line) {
+        merged_lines.append(target_lines[line]);
+    }
+    merged_lines.append(replacement_lines);
+    for (int line = target_end; line < target_lines.size(); ++line) {
+        merged_lines.append(target_lines[line]);
+    }
+
+    return merged_lines.join(QLatin1Char('\n'));
+}
+
+bool apply_active_hunk(DiffWidgetInput& input, int active_hunk_index, DiffSide target_side)
+{
+    const std::vector<int> target_rows = hunk_target_rows(input.rows);
+    if (active_hunk_index < 0 || active_hunk_index >= static_cast<int>(target_rows.size())) {
+        return false;
+    }
+
+    const HunkRowRange range = hunk_row_range_for_target_index(input.rows, target_rows, active_hunk_index);
+    const QString merged_text =
+        source_text_with_display_row_range_applied(input, range.startRow, range.endRow, target_side);
+    if (target_side == DiffSide::Left) {
+        input.leftText = merged_text;
+    }
+    else {
+        input.rightText = merged_text;
+    }
+    input.rows = raw_text_diff_rows(input.leftText, input.rightText);
+    return true;
+}
+
+bool apply_active_display_row_range(
+    DiffWidgetInput& input, int first_display_row, int end_display_row, DiffSide target_side)
+{
+    const QString merged_text =
+        source_text_with_display_row_range_applied(input, first_display_row, end_display_row, target_side);
+    if (target_side == DiffSide::Left) {
+        input.leftText = merged_text;
+    }
+    else {
+        input.rightText = merged_text;
+    }
+    input.rows = raw_text_diff_rows(input.leftText, input.rightText);
+    return true;
 }
 
 QString source_side_copy_text(
@@ -922,6 +1089,51 @@ void test_source_side_copy_strips_filler_rows()
     SQ_EXPECT(source_side_copy_text(QString(), input.rows, DiffSide::Left, 1).isEmpty());
 }
 
+void test_apply_active_hunk_left_to_right_and_right_to_left()
+{
+    const DiffWidgetInput base{
+        QStringLiteral("alpha\nleft-only\nomega"),
+        QStringLiteral("alpha\nomega"),
+        raw_text_diff_rows(QStringLiteral("alpha\nleft-only\nomega"), QStringLiteral("alpha\nomega")),
+    };
+    SQ_EXPECT(validate_diff_widget_input(base) == WidgetInputValidation::Accepted);
+    SQ_EXPECT(hunk_target_rows(base.rows) == std::vector<int>({1}));
+
+    DiffWidgetInput left_to_right = base;
+    SQ_EXPECT(apply_active_hunk(left_to_right, 0, DiffSide::Right));
+    SQ_EXPECT(left_to_right.leftText == base.leftText);
+    SQ_EXPECT(left_to_right.rightText == base.leftText);
+    SQ_EXPECT(validate_diff_widget_input(left_to_right) == WidgetInputValidation::Accepted);
+    SQ_EXPECT(hunk_target_rows(left_to_right.rows).empty());
+    SQ_EXPECT(render_display_text(left_to_right, DiffSide::Left) ==
+              render_display_text(left_to_right, DiffSide::Right));
+
+    DiffWidgetInput right_to_left = base;
+    SQ_EXPECT(apply_active_hunk(right_to_left, 0, DiffSide::Left));
+    SQ_EXPECT(right_to_left.leftText == base.rightText);
+    SQ_EXPECT(right_to_left.rightText == base.rightText);
+    SQ_EXPECT(validate_diff_widget_input(right_to_left) == WidgetInputValidation::Accepted);
+    SQ_EXPECT(hunk_target_rows(right_to_left.rows).empty());
+    SQ_EXPECT(render_display_text(right_to_left, DiffSide::Left) ==
+              render_display_text(right_to_left, DiffSide::Right));
+}
+
+void test_apply_active_display_row_range()
+{
+    DiffWidgetInput input{
+        QStringLiteral("alpha\nleft one\nleft two\nomega"),
+        QStringLiteral("alpha\nright one\nright two\nomega"),
+        raw_text_diff_rows(QStringLiteral("alpha\nleft one\nleft two\nomega"),
+            QStringLiteral("alpha\nright one\nright two\nomega")),
+    };
+    SQ_EXPECT(validate_diff_widget_input(input) == WidgetInputValidation::Accepted);
+    SQ_EXPECT(hunk_target_rows(input.rows) == std::vector<int>({1}));
+
+    SQ_EXPECT(apply_active_display_row_range(input, 1, 2, DiffSide::Right));
+    SQ_EXPECT(input.rightText == QStringLiteral("alpha\nleft one\nright two\nomega"));
+    SQ_EXPECT(input.leftText == QStringLiteral("alpha\nleft one\nleft two\nomega"));
+}
+
 void test_raw_text_line_diff_adapter()
 {
     expect_raw_text_diff_rows(QStringLiteral("alpha\nbeta\ngamma"), QStringLiteral("alpha\nbeta\ngamma"),
@@ -1071,6 +1283,42 @@ void test_hunk_navigation_model()
     SQ_EXPECT(centered_hunk_first_visible_line(30, 100, 20) == 20);
     SQ_EXPECT(centered_hunk_first_visible_line(3, 100, 20) == 0);
     SQ_EXPECT(centered_hunk_first_visible_line(95, 100, 20) == 80);
+}
+
+void test_active_hunk_from_display_rows()
+{
+    const std::vector<DiffRow> rows{
+        {0, -1, 1, 1, DiffSideState::Equal, DiffSideState::Equal},
+        {10, 1, 2, 2, DiffSideState::Changed, DiffSideState::Changed},
+        {10, 1, -1, 3, DiffSideState::Filler, DiffSideState::Added},
+        {0, -1, 3, 4, DiffSideState::Equal, DiffSideState::Equal},
+        {20, 2, 4, -1, DiffSideState::Deleted, DiffSideState::Filler},
+        {0, -1, 5, 5, DiffSideState::Equal, DiffSideState::Equal},
+    };
+    const std::vector<int> targets = hunk_target_rows(rows);
+
+    SQ_EXPECT(targets == std::vector<int>({1, 4}));
+    SQ_EXPECT(hunk_index_for_display_row(rows, targets, 0) == -1);
+    SQ_EXPECT(hunk_index_for_display_row(rows, targets, 1) == 0);
+    SQ_EXPECT(hunk_index_for_display_row(rows, targets, 2) == 0);
+    SQ_EXPECT(hunk_index_for_display_row(rows, targets, 4) == 1);
+    SQ_EXPECT(first_hunk_index_intersecting_display_row_range(rows, targets, 0, 1) == -1);
+    SQ_EXPECT(first_hunk_index_intersecting_display_row_range(rows, targets, 0, 3) == 0);
+    SQ_EXPECT(first_hunk_index_intersecting_display_row_range(rows, targets, 3, 5) == 1);
+    SQ_EXPECT(first_hunk_index_intersecting_display_row_range(rows, targets, 5, 6) == -1);
+
+    HunkRowRange exact = exact_display_row_range(2, 3, static_cast<int>(rows.size()));
+    SQ_EXPECT(exact.startRow == 2);
+    SQ_EXPECT(exact.endRow == 3);
+    exact = exact_display_row_range(1, 4, static_cast<int>(rows.size()));
+    SQ_EXPECT(exact.startRow == 1);
+    SQ_EXPECT(exact.endRow == 4);
+    HunkRowRange block = changed_block_range_for_display_row(rows, targets, 2);
+    SQ_EXPECT(block.startRow == 1);
+    SQ_EXPECT(block.endRow == 3);
+    block = changed_block_range_for_display_row(rows, targets, 0);
+    SQ_EXPECT(block.startRow == 0);
+    SQ_EXPECT(block.endRow == 1);
 }
 
 void test_active_hunk_boundary_thickness_model()
@@ -1652,6 +1900,7 @@ int main(int argc, char** argv)
 
     test_display_row_model_changed_blocks();
     test_hunk_navigation_model();
+    test_active_hunk_from_display_rows();
     test_active_hunk_boundary_thickness_model();
     test_raw_text_line_diff_adapter();
     test_inline_changed_text_spans();
@@ -1659,6 +1908,8 @@ int main(int argc, char** argv)
     test_live_command_diff_adapter_selection();
     test_widget_input_contract_validation();
     test_source_side_copy_strips_filler_rows();
+    test_apply_active_hunk_left_to_right_and_right_to_left();
+    test_apply_active_display_row_range();
     test_vertical_scrollbar_model_mapping();
     test_horizontal_scrollbar_model_mapping();
     test_native_marker_line_highlight_candidates();
