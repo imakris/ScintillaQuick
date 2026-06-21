@@ -92,6 +92,15 @@ scintillaquick_register_validation_test(
     scintillaquick_smoke_test
     "")
 
+scintillaquick_add_quick_test_target(
+    scintillaquick_tortoisediff_step1_test
+    tortoisediff_step1/main.cpp)
+
+scintillaquick_register_validation_test(
+    scintillaquick_tortoisediff_step1_test
+    scintillaquick_tortoisediff_step1_test
+    "")
+
 # --- Dispatch table unit tests -------------------------------------------
 #
 # Pure-function tests against the scene-graph update dispatch table at

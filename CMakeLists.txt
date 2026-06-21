@@ -194,6 +194,23 @@ if(SCINTILLAQUICK_BUILD_EXAMPLES)
             Qt6::Core
             Qt6::Gui
             Qt6::Quick)
+
+    add_executable(
+        scintillaquick_tortoisediff_baseline
+        examples/tortoisediff_baseline/main.cpp)
+
+    target_include_directories(
+        scintillaquick_tortoisediff_baseline
+        PRIVATE
+            ${scintillaquick_example_common_include_dir})
+
+    target_link_libraries(
+        scintillaquick_tortoisediff_baseline
+        PRIVATE
+            ScintillaQuick::ScintillaQuick
+            Qt6::Core
+            Qt6::Gui
+            Qt6::Quick)
 endif()
 
 if(SCINTILLAQUICK_BUILD_BENCHMARKS)
