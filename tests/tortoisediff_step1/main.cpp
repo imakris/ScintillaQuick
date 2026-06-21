@@ -91,6 +91,14 @@ struct VerticalScrollbarModel
     double size = 1.0;
 };
 
+struct HorizontalScrollbarModel
+{
+    bool needed = false;
+    int maxXOffset = 0;
+    double position = 0.0;
+    double size = 1.0;
+};
+
 enum class WidgetInputValidation
 {
     Accepted,
@@ -216,6 +224,43 @@ int first_visible_line_for_vertical_scrollbar_position(int total_rows, int visib
     const double bounded_position = std::clamp(position, 0.0, 1.0 - top_model.size);
     const int first_visible_line = static_cast<int>(std::llround(bounded_position * bounded_total_rows));
     return std::clamp(first_visible_line, 0, top_model.maxFirstVisibleLine);
+}
+
+HorizontalScrollbarModel horizontal_scrollbar_model(int content_width, int viewport_width, int x_offset)
+{
+    const int bounded_content_width = std::max(0, content_width);
+    const int bounded_viewport_width = std::max(0, viewport_width);
+    const int max_x_offset = std::max(0, bounded_content_width - bounded_viewport_width);
+    if (bounded_content_width == 0 || max_x_offset == 0) {
+        return {};
+    }
+
+    const double size = std::clamp(static_cast<double>(bounded_viewport_width) / bounded_content_width, 0.0, 1.0);
+    const int bounded_x_offset = std::clamp(x_offset, 0, max_x_offset);
+    const double position =
+        std::clamp(static_cast<double>(bounded_x_offset) / bounded_content_width, 0.0, 1.0 - size);
+
+    return {true, max_x_offset, position, size};
+}
+
+int x_offset_for_horizontal_scrollbar_position(int content_width, int viewport_width, double position)
+{
+    const HorizontalScrollbarModel start_model = horizontal_scrollbar_model(content_width, viewport_width, 0);
+    if (!start_model.needed) {
+        return 0;
+    }
+
+    const int bounded_content_width = std::max(0, content_width);
+    const double bounded_position = std::clamp(position, 0.0, 1.0 - start_model.size);
+    const int x_offset = static_cast<int>(std::llround(bounded_position * bounded_content_width));
+    return std::clamp(x_offset, 0, start_model.maxXOffset);
+}
+
+HorizontalScrollbarModel horizontal_scrollbar_model_for_panes(
+    int left_content_width, int right_content_width, int left_viewport_width, int right_viewport_width, int x_offset)
+{
+    return horizontal_scrollbar_model(
+        std::max(left_content_width, right_content_width), std::min(left_viewport_width, right_viewport_width), x_offset);
 }
 
 std::vector<DiffRow> raw_text_diff_rows(const QString& left_text, const QString& right_text)
@@ -830,6 +875,48 @@ void test_vertical_scrollbar_model_mapping()
               max_first_visible_line);
 }
 
+void test_horizontal_scrollbar_model_mapping()
+{
+    constexpr int viewport_width = 320;
+    constexpr int content_width = 1280;
+    constexpr int max_x_offset = content_width - viewport_width;
+
+    const HorizontalScrollbarModel equal_width = horizontal_scrollbar_model(viewport_width, viewport_width, 80);
+    SQ_EXPECT(!equal_width.needed);
+    SQ_EXPECT(equal_width.maxXOffset == 0);
+    SQ_EXPECT(nearly_equal(equal_width.size, 1.0));
+    SQ_EXPECT(nearly_equal(equal_width.position, 0.0));
+
+    const HorizontalScrollbarModel narrower_content =
+        horizontal_scrollbar_model(viewport_width - 1, viewport_width, 80);
+    SQ_EXPECT(!narrower_content.needed);
+    SQ_EXPECT(narrower_content.maxXOffset == 0);
+    SQ_EXPECT(nearly_equal(narrower_content.size, 1.0));
+    SQ_EXPECT(nearly_equal(narrower_content.position, 0.0));
+
+    const HorizontalScrollbarModel middle = horizontal_scrollbar_model(content_width, viewport_width, max_x_offset / 2);
+    const double max_normalized_travel = 1.0 - middle.size;
+    SQ_EXPECT(middle.needed);
+    SQ_EXPECT(middle.maxXOffset == max_x_offset);
+    SQ_EXPECT(middle.position > 0.0);
+    SQ_EXPECT(middle.position < max_normalized_travel);
+
+    const HorizontalScrollbarModel right_only_long =
+        horizontal_scrollbar_model_for_panes(viewport_width - 1, content_width, viewport_width, viewport_width,
+            max_x_offset / 2);
+    SQ_EXPECT(right_only_long.needed);
+    SQ_EXPECT(right_only_long.maxXOffset == max_x_offset);
+
+    const HorizontalScrollbarModel end = horizontal_scrollbar_model(content_width, viewport_width, max_x_offset);
+    SQ_EXPECT(end.needed);
+    SQ_EXPECT(end.maxXOffset == max_x_offset);
+    SQ_EXPECT(nearly_equal(end.position, 1.0 - end.size));
+
+    SQ_EXPECT(x_offset_for_horizontal_scrollbar_position(content_width, viewport_width, 1.0 - end.size - 0.0001) ==
+              max_x_offset);
+    SQ_EXPECT(x_offset_for_horizontal_scrollbar_position(content_width, viewport_width, 1.0) == max_x_offset);
+}
+
 bool image_region_has_dark_pixels(const QImage& image, int x_start, int x_end)
 {
     if (image.isNull()) {
@@ -1330,6 +1417,7 @@ int main(int argc, char** argv)
     test_live_command_diff_adapter_selection();
     test_widget_input_contract_validation();
     test_vertical_scrollbar_model_mapping();
+    test_horizontal_scrollbar_model_mapping();
     test_native_marker_line_highlight_candidates();
     test_native_diff_row_markers_follow_side_state();
     test_two_readonly_panes_in_one_window();

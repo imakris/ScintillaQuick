@@ -325,21 +325,26 @@ Human checkpoint:
 Build:
 
 - `ScintillaQuick` does not embed widget scrollbars
-- replace the old arrow buttons with a Qt Quick Controls `ScrollBar`, not a
-  hand-painted scrollbar
+- replace the old arrow buttons with Qt Quick Controls `ScrollBar`s, not
+  hand-painted scrollbars
 - bind the vertical scrollbar to `scrollVertical(int)` and `verticalScrolled`
+- bind the horizontal scrollbar to `scrollHorizontal(int)`,
+  `horizontalScrolled`, and `horizontalRangeChanged`
+- compute the horizontal range from the wider pane so one-sided long lines can
+  still be scrolled
+- show each scrollbar only when its range is needed
 - mirror the existing synchronized-scroll guard
-- keep the horizontal scrollbar later/optional unless it is cheap
 
 Test:
 
-- manually scroll from the thumb, track clicks, and each pane
-- verify thumb position follows both panes
+- manually scroll each bar from the thumb, track clicks, and each pane
+- verify thumb positions follow both panes
 
 Human checkpoint:
 
-- accept when native-looking control behavior, thumb position, drag/click sync,
-  and both panes staying aligned are acceptable
+- accept when native-looking control behavior, thumb positions, horizontal
+  drag/click sync, vertical drag/click sync, and both panes staying aligned are
+  acceptable
 
 ## Step 11: Inline Changed Text Highlighting
 

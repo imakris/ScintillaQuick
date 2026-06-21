@@ -550,7 +550,7 @@ int main(int argc, char** argv)
     }
 
     QQuickWindow window;
-    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 10 - Vertical Scrollbar"));
+    window.setTitle(QStringLiteral("ScintillaQuick TortoiseDiff Step 10 - Scrollbars"));
     window.resize(1200, 720);
     window.setColor(QColor(214, 219, 225));
 
@@ -563,22 +563,33 @@ import QtQuick
 import QtQuick.Controls
 
 ScrollBar {
-    orientation: Qt.Vertical
     policy: ScrollBar.AlwaysOn
     active: true
+    visible: false
     z: 10
 }
 )qml",
         QUrl());
-    std::unique_ptr<QObject> vertical_scrollbar_object(scrollbar_component.create());
-    if (!vertical_scrollbar_object) {
-        qFatal("TortoiseDiff Step 10 ScrollBar failed to load: %s", qPrintable(scrollbar_component.errorString()));
-    }
+    const auto create_scrollbar = [&](Qt::Orientation orientation) {
+        std::unique_ptr<QObject> scrollbar_object(scrollbar_component.create());
+        if (!scrollbar_object) {
+            qFatal("TortoiseDiff Step 10 ScrollBar failed to load: %s", qPrintable(scrollbar_component.errorString()));
+        }
+
+        auto* scrollbar = qobject_cast<QQuickItem*>(scrollbar_object.get());
+        if (!scrollbar) {
+            qFatal("TortoiseDiff Step 10 ScrollBar is not a QQuickItem.");
+        }
+        if (!scrollbar->setProperty("orientation", static_cast<int>(orientation))) {
+            qFatal("TortoiseDiff Step 10 ScrollBar orientation property was not writable.");
+        }
+        scrollbar->setParentItem(root);
+        return scrollbar_object;
+    };
+    std::unique_ptr<QObject> vertical_scrollbar_object = create_scrollbar(Qt::Vertical);
+    std::unique_ptr<QObject> horizontal_scrollbar_object = create_scrollbar(Qt::Horizontal);
     auto* vertical_scrollbar = qobject_cast<QQuickItem*>(vertical_scrollbar_object.get());
-    if (!vertical_scrollbar) {
-        qFatal("TortoiseDiff Step 10 ScrollBar is not a QQuickItem.");
-    }
-    vertical_scrollbar->setParentItem(root);
+    auto* horizontal_scrollbar = qobject_cast<QQuickItem*>(horizontal_scrollbar_object.get());
 
     bool applying_mirrored_scroll = false;
     bool applying_mirrored_zoom = false;
@@ -611,6 +622,9 @@ ScrollBar {
     right_container.setParentItem(root);
     left.setParentItem(&left_container);
     right.setParentItem(&right_container);
+    QString left_text;
+    QString right_text;
+    int shared_horizontal_scroll_width = 1;
 
     const auto vertical_scrollbar_metrics = [&left]() {
         const int line_count = std::max(1, static_cast<int>(left.send(SCI_GETLINECOUNT)));
@@ -621,12 +635,69 @@ ScrollBar {
         return std::array{first_visible_line, line_count, lines_on_screen, max_first_line};
     };
 
+    const auto horizontal_text_width = [](ScintillaQuick_item& pane) {
+        int width = std::max(0, static_cast<int>(pane.width()));
+        width -= static_cast<int>(pane.send(SCI_GETMARGINLEFT));
+        const int margin_count = static_cast<int>(pane.send(SCI_GETMARGINS));
+        for (int margin = 0; margin < margin_count; ++margin) {
+            width -= static_cast<int>(pane.send(SCI_GETMARGINWIDTHN, margin));
+        }
+        width -= static_cast<int>(pane.send(SCI_GETMARGINRIGHT));
+        return std::max(1, width);
+    };
+
+    const auto measured_text_width = [](ScintillaQuick_item& pane, const QString& text) {
+        int max_width = 1;
+        const QStringList lines = text.split(QLatin1Char('\n'));
+        for (QString line : lines) {
+            line.replace(QLatin1Char('\t'), QStringLiteral("    "));
+            const QByteArray bytes = line.toUtf8();
+            max_width =
+                std::max(max_width, static_cast<int>(pane.send(SCI_TEXTWIDTH, STYLE_DEFAULT,
+                                        reinterpret_cast<sptr_t>(bytes.constData()))));
+        }
+        return max_width;
+    };
+
+    const auto update_shared_horizontal_scroll_width = [&]() {
+        shared_horizontal_scroll_width =
+            std::max({1, measured_text_width(left, left_text), measured_text_width(right, right_text)});
+        if (left.send(SCI_GETSCROLLWIDTH) != shared_horizontal_scroll_width) {
+            left.send(SCI_SETSCROLLWIDTH, shared_horizontal_scroll_width);
+        }
+        if (right.send(SCI_GETSCROLLWIDTH) != shared_horizontal_scroll_width) {
+            right.send(SCI_SETSCROLLWIDTH, shared_horizontal_scroll_width);
+        }
+    };
+
+    const auto horizontal_scrollbar_metrics = [&left, &right, &horizontal_text_width, &shared_horizontal_scroll_width]() {
+        const int text_width = std::max(1, shared_horizontal_scroll_width);
+        const int viewport_width = std::min(horizontal_text_width(left), horizontal_text_width(right));
+        const int max_x_offset = std::max(0, text_width - viewport_width);
+        const int x_offset = std::clamp(static_cast<int>(left.send(SCI_GETXOFFSET)), 0, max_x_offset);
+        return std::array{x_offset, text_width, viewport_width, max_x_offset};
+    };
+
     const auto refresh_vertical_scrollbar = [&]() {
         const auto [first_visible_line, line_count, lines_on_screen, max_first_line] = vertical_scrollbar_metrics();
         const QSignalBlocker block_scrollbar_signals(vertical_scrollbar);
+        const bool visible = line_count > lines_on_screen;
         vertical_scrollbar->setProperty("size", static_cast<double>(lines_on_screen) / line_count);
         vertical_scrollbar->setProperty("position", static_cast<double>(first_visible_line) / line_count);
-        vertical_scrollbar->setEnabled(max_first_line > 0);
+        vertical_scrollbar->setEnabled(visible);
+        vertical_scrollbar->setVisible(visible);
+        return visible;
+    };
+
+    const auto refresh_horizontal_scrollbar = [&]() {
+        const auto [x_offset, text_width, viewport_width, max_x_offset] = horizontal_scrollbar_metrics();
+        const QSignalBlocker block_scrollbar_signals(horizontal_scrollbar);
+        const bool visible = text_width > viewport_width;
+        horizontal_scrollbar->setProperty("size", std::min(1.0, static_cast<double>(viewport_width) / text_width));
+        horizontal_scrollbar->setProperty("position", static_cast<double>(x_offset) / text_width);
+        horizontal_scrollbar->setEnabled(visible);
+        horizontal_scrollbar->setVisible(visible);
+        return max_x_offset > 0;
     };
 
     QTimer vertical_scrollbar_position_timer;
@@ -647,21 +718,51 @@ ScrollBar {
         }
     });
 
-    const auto layout_panes = [&]() {
+    QTimer horizontal_scrollbar_position_timer;
+    horizontal_scrollbar_position_timer.setInterval(0);
+    horizontal_scrollbar_position_timer.setSingleShot(true);
+    QObject::connect(
+        horizontal_scrollbar, SIGNAL(positionChanged()), &horizontal_scrollbar_position_timer, SLOT(start()));
+    QObject::connect(&horizontal_scrollbar_position_timer, &QTimer::timeout, &window, [&]() {
+        const auto [x_offset, text_width, viewport_width, max_x_offset] = horizontal_scrollbar_metrics();
+        if (max_x_offset <= 0) {
+            return;
+        }
+
+        const int target_x_offset =
+            std::clamp(static_cast<int>(horizontal_scrollbar->property("position").toDouble() * text_width + 0.5), 0,
+                max_x_offset);
+        if (target_x_offset != x_offset || right.send(SCI_GETXOFFSET) != target_x_offset) {
+            mirror_scroll([&]() {
+                if (left.send(SCI_GETXOFFSET) != target_x_offset) {
+                    left.scrollHorizontal(target_x_offset);
+                }
+                if (right.send(SCI_GETXOFFSET) != target_x_offset) {
+                    right.scrollHorizontal(target_x_offset);
+                }
+            });
+            refresh_horizontal_scrollbar();
+        }
+    });
+
+    const auto apply_pane_geometry = [&]() {
         constexpr qreal separator_width = 8.0;
-        constexpr qreal scrollbar_width = 16.0;
+        constexpr qreal scrollbar_extent = 16.0;
         const qreal root_width = std::max<qreal>(root->width(), 0.0);
         const qreal root_height = std::max<qreal>(root->height(), 0.0);
-        const qreal content_width = std::max<qreal>(0.0, root_width - scrollbar_width);
+        const qreal vertical_extent = vertical_scrollbar->isVisible() ? scrollbar_extent : 0.0;
+        const qreal horizontal_extent = horizontal_scrollbar->isVisible() ? scrollbar_extent : 0.0;
+        const qreal content_width = std::max<qreal>(0.0, root_width - vertical_extent);
+        const qreal content_height = std::max<qreal>(0.0, root_height - horizontal_extent);
         const qreal actual_separator_width = content_width > separator_width ? separator_width : 0.0;
         const qreal panes_width = content_width - actual_separator_width;
         const qreal left_width = panes_width / 2.0;
         const qreal right_width = panes_width - left_width;
 
         left_container.setPosition({0.0, 0.0});
-        left_container.setSize({left_width, root_height});
+        left_container.setSize({left_width, content_height});
         right_container.setPosition({left_width + actual_separator_width, 0.0});
-        right_container.setSize({right_width, root_height});
+        right_container.setSize({right_width, content_height});
 
         left.setPosition({0.0, 0.0});
         left.setSize(left_container.size());
@@ -669,18 +770,58 @@ ScrollBar {
         right.setSize(right_container.size());
 
         vertical_scrollbar->setPosition({content_width, 0.0});
-        vertical_scrollbar->setSize({scrollbar_width, root_height});
+        vertical_scrollbar->setSize({scrollbar_extent, content_height});
+        horizontal_scrollbar->setPosition({0.0, content_height});
+        horizontal_scrollbar->setSize({content_width, scrollbar_extent});
+    };
+
+    bool applying_layout = false;
+    const auto layout_panes = [&]() {
+        if (applying_layout) {
+            return;
+        }
+
+        applying_layout = true;
+        for (int pass = 0; pass < 3; ++pass) {
+            const bool previous_vertical_visible = vertical_scrollbar->isVisible();
+            const bool previous_horizontal_visible = horizontal_scrollbar->isVisible();
+
+            apply_pane_geometry();
+            const bool vertical_visible = refresh_vertical_scrollbar();
+            const bool horizontal_visible = refresh_horizontal_scrollbar();
+            if (vertical_visible == previous_vertical_visible && horizontal_visible == previous_horizontal_visible) {
+                break;
+            }
+        }
+        apply_pane_geometry();
         refresh_vertical_scrollbar();
+        refresh_horizontal_scrollbar();
+        applying_layout = false;
     };
 
     QObject::connect(root, &QQuickItem::widthChanged, &window, layout_panes);
     QObject::connect(root, &QQuickItem::heightChanged, &window, layout_panes);
+    QObject::connect(&left, &ScintillaQuick_item::horizontalRangeChanged, &window, [&](int, int) {
+        layout_panes();
+    });
+    QObject::connect(&right, &ScintillaQuick_item::horizontalRangeChanged, &window, [&](int, int) {
+        layout_panes();
+    });
+    QObject::connect(&left, &ScintillaQuick_item::verticalRangeChanged, &window, [&](int, int) {
+        layout_panes();
+    });
+    QObject::connect(&right, &ScintillaQuick_item::verticalRangeChanged, &window, [&](int, int) {
+        layout_panes();
+    });
     layout_panes();
 
     const QFont pane_font = scintillaquick::shared::deterministic_test_font(11);
     const DiffWidgetInput input = sample_diff_input();
-    configure_pane(left, pane_font, render_side_text(input, true));
-    configure_pane(right, pane_font, render_side_text(input, false));
+    left_text = render_side_text(input, true);
+    right_text = render_side_text(input, false);
+    configure_pane(left, pane_font, left_text);
+    configure_pane(right, pane_font, right_text);
+    update_shared_horizontal_scroll_width();
     apply_diff_markers(left, input, true);
     apply_diff_markers(right, input, false);
     layout_panes();
@@ -689,6 +830,7 @@ ScrollBar {
         qFatal("TortoiseDiff Step 9 panes must keep display-buffer line numbers aligned.");
     }
     refresh_vertical_scrollbar();
+    refresh_horizontal_scrollbar();
 
     QObject::connect(&left, &ScintillaQuick_item::verticalScrolled, &right, [&](int value) {
         mirror_scroll([&]() {
@@ -713,6 +855,9 @@ ScrollBar {
     QObject::connect(&left, &ScintillaQuick_item::verticalScrolled, vertical_scrollbar, [&](int) {
         refresh_vertical_scrollbar();
     });
+    QObject::connect(&left, &ScintillaQuick_item::horizontalScrolled, horizontal_scrollbar, [&](int) {
+        refresh_horizontal_scrollbar();
+    });
     QObject::connect(&left, &ScintillaQuick_item::zoom, &right, [&](int value) {
         mirror_zoom(right, value);
     });
@@ -720,7 +865,8 @@ ScrollBar {
         mirror_zoom(left, value);
     });
     QObject::connect(&left, &ScintillaQuick_item::zoom, vertical_scrollbar, [&](int) {
-        refresh_vertical_scrollbar();
+        update_shared_horizontal_scroll_width();
+        layout_panes();
     });
 
     window.show();
