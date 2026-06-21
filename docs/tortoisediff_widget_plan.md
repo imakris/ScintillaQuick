@@ -439,6 +439,10 @@ Build:
 - right-click shows merge choices: `use other`,
   `use both (this one first)`, `use both (this one last)`, separator,
   `use whole other file`
+- context menu actions apply to the side that was right-clicked; that side is
+  "this one" and the opposite side is "other"
+- merge actions clear the active hunk instead of auto-advancing or preserving
+  the old row range
 - expose the resulting edited buffer outside the widget
 
 Test:

@@ -117,6 +117,14 @@ struct ChangedTextSpans
     ChangedTextSpan right;
 };
 
+enum class MergeAction
+{
+    UseOther,
+    UseBothThisFirst,
+    UseBothThisLast,
+    UseWholeOtherFile
+};
+
 enum class WidgetInputValidation
 {
     Accepted,
@@ -562,30 +570,43 @@ QString source_text_for_side(const DiffWidgetInput& input, DiffSide side)
     return side == DiffSide::Left ? input.leftText : input.rightText;
 }
 
-QString source_text_with_display_row_range_applied(
-    const DiffWidgetInput& input, int first_display_row, int end_display_row, DiffSide target_side)
+QStringList source_lines_for_display_row_range(
+    const DiffWidgetInput& input, int first_display_row, int end_display_row, DiffSide side)
 {
-    const DiffSide source_side = target_side == DiffSide::Left ? DiffSide::Right : DiffSide::Left;
+    const HunkRowRange range = exact_display_row_range(
+        first_display_row, end_display_row, static_cast<int>(input.rows.size()));
+    if (range.startRow < 0 || range.endRow <= range.startRow) {
+        return {};
+    }
+
+    const QStringList lines = display_lines_from_text(source_text_for_side(input, side));
+    QStringList result;
+    for (int row_index = range.startRow; row_index < range.endRow; ++row_index) {
+        const DiffRow& row = input.rows[static_cast<size_t>(row_index)];
+        const int source_line = source_line_for_side(row, side);
+        if (source_line != -1) {
+            result.append(lines[source_line - 1]);
+        }
+    }
+    return result;
+}
+
+QString source_text_with_display_row_range_replaced(
+    const DiffWidgetInput& input, int first_display_row, int end_display_row, DiffSide target_side,
+    const QStringList& replacement_lines)
+{
     const HunkRowRange range = exact_display_row_range(
         first_display_row, end_display_row, static_cast<int>(input.rows.size()));
     if (range.startRow < 0 || range.endRow <= range.startRow) {
         return source_text_for_side(input, target_side);
     }
 
-    const QStringList source_lines = display_lines_from_text(source_text_for_side(input, source_side));
     const QStringList target_lines = display_lines_from_text(source_text_for_side(input, target_side));
-    QStringList replacement_lines;
     int target_start = target_lines.size();
     int target_end = target_lines.size();
     bool has_target_lines = false;
-
     for (int row_index = range.startRow; row_index < range.endRow; ++row_index) {
         const DiffRow& row = input.rows[static_cast<size_t>(row_index)];
-        const int source_line = source_line_for_side(row, source_side);
-        if (source_line != -1) {
-            replacement_lines.append(source_lines[source_line - 1]);
-        }
-
         const int target_line = source_line_for_side(row, target_side);
         if (target_line != -1) {
             if (!has_target_lines) {
@@ -627,8 +648,9 @@ bool apply_active_hunk(DiffWidgetInput& input, int active_hunk_index, DiffSide t
     }
 
     const HunkRowRange range = hunk_row_range_for_target_index(input.rows, target_rows, active_hunk_index);
-    const QString merged_text =
-        source_text_with_display_row_range_applied(input, range.startRow, range.endRow, target_side);
+    const DiffSide source_side = target_side == DiffSide::Left ? DiffSide::Right : DiffSide::Left;
+    const QString merged_text = source_text_with_display_row_range_replaced(input, range.startRow, range.endRow,
+        target_side, source_lines_for_display_row_range(input, range.startRow, range.endRow, source_side));
     if (target_side == DiffSide::Left) {
         input.leftText = merged_text;
     }
@@ -642,9 +664,47 @@ bool apply_active_hunk(DiffWidgetInput& input, int active_hunk_index, DiffSide t
 bool apply_active_display_row_range(
     DiffWidgetInput& input, int first_display_row, int end_display_row, DiffSide target_side)
 {
-    const QString merged_text =
-        source_text_with_display_row_range_applied(input, first_display_row, end_display_row, target_side);
+    const DiffSide source_side = target_side == DiffSide::Left ? DiffSide::Right : DiffSide::Left;
+    const QString merged_text = source_text_with_display_row_range_replaced(input, first_display_row, end_display_row,
+        target_side, source_lines_for_display_row_range(input, first_display_row, end_display_row, source_side));
     if (target_side == DiffSide::Left) {
+        input.leftText = merged_text;
+    }
+    else {
+        input.rightText = merged_text;
+    }
+    input.rows = raw_text_diff_rows(input.leftText, input.rightText);
+    return true;
+}
+
+bool apply_merge_action(
+    DiffWidgetInput& input, int first_display_row, int end_display_row, DiffSide this_side, MergeAction action)
+{
+    const DiffSide other_side = this_side == DiffSide::Left ? DiffSide::Right : DiffSide::Left;
+    QString merged_text;
+    if (action == MergeAction::UseWholeOtherFile) {
+        merged_text = source_text_for_side(input, other_side);
+    }
+    else {
+        const QStringList this_lines =
+            source_lines_for_display_row_range(input, first_display_row, end_display_row, this_side);
+        const QStringList other_lines =
+            source_lines_for_display_row_range(input, first_display_row, end_display_row, other_side);
+        QStringList replacement_lines;
+        if (action == MergeAction::UseOther) {
+            replacement_lines = other_lines;
+        }
+        else if (action == MergeAction::UseBothThisFirst) {
+            replacement_lines = this_lines + other_lines;
+        }
+        else {
+            replacement_lines = other_lines + this_lines;
+        }
+        merged_text = source_text_with_display_row_range_replaced(
+            input, first_display_row, end_display_row, this_side, replacement_lines);
+    }
+
+    if (this_side == DiffSide::Left) {
         input.leftText = merged_text;
     }
     else {
@@ -1137,6 +1197,36 @@ void test_apply_active_display_row_range()
     SQ_EXPECT(apply_active_display_row_range(input, 1, 2, DiffSide::Right));
     SQ_EXPECT(input.rightText == QStringLiteral("alpha\nleft one\nright two\nomega"));
     SQ_EXPECT(input.leftText == QStringLiteral("alpha\nleft one\nleft two\nomega"));
+}
+
+void test_apply_context_menu_merge_actions()
+{
+    const DiffWidgetInput base{
+        QStringLiteral("alpha\nleft one\nleft two\nomega"),
+        QStringLiteral("alpha\nright one\nright two\nomega"),
+        raw_text_diff_rows(QStringLiteral("alpha\nleft one\nleft two\nomega"),
+            QStringLiteral("alpha\nright one\nright two\nomega")),
+    };
+
+    DiffWidgetInput use_other = base;
+    SQ_EXPECT(apply_merge_action(use_other, 1, 3, DiffSide::Right, MergeAction::UseOther));
+    SQ_EXPECT(use_other.rightText == QStringLiteral("alpha\nleft one\nleft two\nomega"));
+    SQ_EXPECT(use_other.leftText == base.leftText);
+
+    DiffWidgetInput this_first = base;
+    SQ_EXPECT(apply_merge_action(this_first, 1, 3, DiffSide::Right, MergeAction::UseBothThisFirst));
+    SQ_EXPECT(this_first.rightText == QStringLiteral("alpha\nright one\nright two\nleft one\nleft two\nomega"));
+    SQ_EXPECT(this_first.leftText == base.leftText);
+
+    DiffWidgetInput this_last = base;
+    SQ_EXPECT(apply_merge_action(this_last, 1, 3, DiffSide::Right, MergeAction::UseBothThisLast));
+    SQ_EXPECT(this_last.rightText == QStringLiteral("alpha\nleft one\nleft two\nright one\nright two\nomega"));
+    SQ_EXPECT(this_last.leftText == base.leftText);
+
+    DiffWidgetInput whole_other = base;
+    SQ_EXPECT(apply_merge_action(whole_other, 1, 3, DiffSide::Right, MergeAction::UseWholeOtherFile));
+    SQ_EXPECT(whole_other.rightText == base.leftText);
+    SQ_EXPECT(whole_other.leftText == base.leftText);
 }
 
 void test_raw_text_line_diff_adapter()
@@ -1918,6 +2008,7 @@ int main(int argc, char** argv)
     test_source_side_copy_strips_filler_rows();
     test_apply_active_hunk_left_to_right_and_right_to_left();
     test_apply_active_display_row_range();
+    test_apply_context_menu_merge_actions();
     test_vertical_scrollbar_model_mapping();
     test_horizontal_scrollbar_model_mapping();
     test_native_marker_line_highlight_candidates();

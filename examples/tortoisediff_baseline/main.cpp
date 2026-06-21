@@ -104,6 +104,14 @@ struct InlineChangedSpan
     int end;
 };
 
+enum class MergeAction
+{
+    UseOther,
+    UseBothThisFirst,
+    UseBothThisLast,
+    UseWholeOtherFile
+};
+
 QStringList source_lines_from_text(const QString& text)
 {
     return text.split(QLatin1Char('\n'), Qt::KeepEmptyParts);
@@ -637,6 +645,7 @@ void configure_pane(ScintillaQuick_item& pane, const QFont& font, const QString&
     pane.send(SCI_SETCARETFORE, k_editor_background);
     pane.send(SCI_SETCARETWIDTH, 0);
 
+    pane.setProperty("readonly", false);
     pane.setProperty("text", text);
     pane.setProperty("readonly", true);
 }
@@ -865,30 +874,43 @@ const QString& source_text_for_side(const DiffWidgetInput& input, bool left_side
     return left_side ? input.leftText : input.rightText;
 }
 
-QString source_text_with_display_row_range_applied(
-    const DiffWidgetInput& input, int first_display_row, int end_display_row, bool target_left_side)
+QStringList source_lines_for_display_row_range(
+    const DiffWidgetInput& input, int first_display_row, int end_display_row, bool left_side)
 {
-    const bool source_left_side = !target_left_side;
+    const auto [first_row, end_row] =
+        exact_display_row_range(first_display_row, end_display_row, static_cast<int>(input.rows.size()));
+    if (first_row < 0 || end_row <= first_row) {
+        return {};
+    }
+
+    const QStringList lines = source_lines_from_text(source_text_for_side(input, left_side));
+    QStringList result;
+    for (int row_index = first_row; row_index < end_row; ++row_index) {
+        const DiffRow& row = input.rows[static_cast<size_t>(row_index)];
+        const int source_line = source_line_for_side(row, left_side);
+        if (source_line != -1) {
+            result.append(lines[source_line - 1]);
+        }
+    }
+    return result;
+}
+
+QString source_text_with_display_row_range_replaced(
+    const DiffWidgetInput& input, int first_display_row, int end_display_row, bool target_left_side,
+    const QStringList& replacement_lines)
+{
     const auto [first_row, end_row] =
         exact_display_row_range(first_display_row, end_display_row, static_cast<int>(input.rows.size()));
     if (first_row < 0 || end_row <= first_row) {
         return source_text_for_side(input, target_left_side);
     }
 
-    const QStringList source_lines = source_lines_from_text(source_text_for_side(input, source_left_side));
     const QStringList target_lines = source_lines_from_text(source_text_for_side(input, target_left_side));
-    QStringList replacement_lines;
     int target_start = target_lines.size();
     int target_end = target_lines.size();
     bool has_target_lines = false;
-
     for (int row_index = first_row; row_index < end_row; ++row_index) {
         const DiffRow& row = input.rows[static_cast<size_t>(row_index)];
-        const int source_line = source_line_for_side(row, source_left_side);
-        if (source_line != -1) {
-            replacement_lines.append(source_lines[source_line - 1]);
-        }
-
         const int target_line = source_line_for_side(row, target_left_side);
         if (target_line != -1) {
             if (!has_target_lines) {
@@ -931,9 +953,41 @@ bool apply_display_row_range_to_target(
         return false;
     }
 
-    const QString merged_text =
-        source_text_with_display_row_range_applied(input, first_row, end_row, target_left_side);
+    const QString merged_text = source_text_with_display_row_range_replaced(input, first_row, end_row, target_left_side,
+        source_lines_for_display_row_range(input, first_row, end_row, !target_left_side));
     if (target_left_side) {
+        input.leftText = merged_text;
+    } else {
+        input.rightText = merged_text;
+    }
+    input.rows = raw_text_diff_rows(input.leftText, input.rightText);
+    return true;
+}
+
+bool apply_merge_action(
+    DiffWidgetInput& input, int first_display_row, int end_display_row, bool this_left_side, MergeAction action)
+{
+    QString merged_text;
+    if (action == MergeAction::UseWholeOtherFile) {
+        merged_text = source_text_for_side(input, !this_left_side);
+    } else {
+        const QStringList this_lines =
+            source_lines_for_display_row_range(input, first_display_row, end_display_row, this_left_side);
+        const QStringList other_lines =
+            source_lines_for_display_row_range(input, first_display_row, end_display_row, !this_left_side);
+        QStringList replacement_lines;
+        if (action == MergeAction::UseOther) {
+            replacement_lines = other_lines;
+        } else if (action == MergeAction::UseBothThisFirst) {
+            replacement_lines = this_lines + other_lines;
+        } else {
+            replacement_lines = other_lines + this_lines;
+        }
+        merged_text = source_text_with_display_row_range_replaced(
+            input, first_display_row, end_display_row, this_left_side, replacement_lines);
+    }
+
+    if (this_left_side) {
         input.leftText = merged_text;
     } else {
         input.rightText = merged_text;
@@ -1094,32 +1148,66 @@ Rectangle {
         anchors.top: parent.top
         anchors.margins: 1
 
-        Repeater {
-            model: [
-                "use other",
-                "use both (this one first)",
-                "use both (this one last)"
-            ]
+        Rectangle {
+            width: menuColumn.width
+            height: 26
+            color: useOtherMouse.containsMouse ? "#0969da" : "#ffffff"
 
-            delegate: Rectangle {
-                width: menuColumn.width
-                height: 26
-                color: rowMouse.containsMouse ? "#0969da" : "#ffffff"
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                color: useOtherMouse.containsMouse ? "#ffffff" : "#24292f"
+                text: "use other"
+            }
 
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: 10
-                    color: rowMouse.containsMouse ? "#ffffff" : "#24292f"
-                    text: modelData
-                }
+            MouseArea {
+                id: useOtherMouse
+                objectName: "useOtherAction"
+                anchors.fill: parent
+                hoverEnabled: true
+            }
+        }
 
-                MouseArea {
-                    id: rowMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onClicked: menu.closeMenu()
-                }
+        Rectangle {
+            width: menuColumn.width
+            height: 26
+            color: useBothFirstMouse.containsMouse ? "#0969da" : "#ffffff"
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                color: useBothFirstMouse.containsMouse ? "#ffffff" : "#24292f"
+                text: "use both (this one first)"
+            }
+
+            MouseArea {
+                id: useBothFirstMouse
+                objectName: "useBothFirstAction"
+                anchors.fill: parent
+                hoverEnabled: true
+            }
+        }
+
+        Rectangle {
+            width: menuColumn.width
+            height: 26
+            color: useBothLastMouse.containsMouse ? "#0969da" : "#ffffff"
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                color: useBothLastMouse.containsMouse ? "#ffffff" : "#24292f"
+                text: "use both (this one last)"
+            }
+
+            MouseArea {
+                id: useBothLastMouse
+                objectName: "useBothLastAction"
+                anchors.fill: parent
+                hoverEnabled: true
             }
         }
 
@@ -1144,9 +1232,9 @@ Rectangle {
 
             MouseArea {
                 id: rowMouse
+                objectName: "useWholeOtherFileAction"
                 anchors.fill: parent
                 hoverEnabled: true
-                onClicked: menu.closeMenu()
             }
         }
     }
@@ -1161,6 +1249,14 @@ Rectangle {
     auto* context_menu = qobject_cast<QQuickItem*>(context_menu_object.get());
     if (!context_menu) {
         qFatal("TortoiseDiff Step 14 context menu is not a QQuickItem.");
+    }
+    auto* use_other_action = context_menu->findChild<QObject*>(QStringLiteral("useOtherAction"));
+    auto* use_both_first_action = context_menu->findChild<QObject*>(QStringLiteral("useBothFirstAction"));
+    auto* use_both_last_action = context_menu->findChild<QObject*>(QStringLiteral("useBothLastAction"));
+    auto* use_whole_other_file_action =
+        context_menu->findChild<QObject*>(QStringLiteral("useWholeOtherFileAction"));
+    if (!use_other_action || !use_both_first_action || !use_both_last_action || !use_whole_other_file_action) {
+        qFatal("TortoiseDiff Step 14 context menu actions were not found.");
     }
     context_menu->setParentItem(root);
 
@@ -1460,6 +1556,7 @@ Rectangle {
     int active_end_row = -1;
     bool refreshing_panes = false;
     bool suppress_selection_tracking = false;
+    bool last_right_click_left_side = true;
     const auto update_active_hunk_boundaries = [&]() {
         const auto hide_boundaries = [&]() {
             for (QQuickItem* boundary : std::array{left_top_hunk_boundary, left_bottom_hunk_boundary,
@@ -1649,37 +1746,34 @@ Rectangle {
         refresh_vertical_scrollbar();
         refresh_horizontal_scrollbar();
     };
+    const auto refresh_after_merge = [&]() {
+        validate_diff_input(input);
+        hunk_start_rows = hunk_start_display_rows(input);
+        active_first_row = -1;
+        active_end_row = -1;
+        selected_hunk_index = -1;
+        refresh_panes_from_input();
+        update_hunk_controls();
+        update_active_hunk_boundaries();
+    };
     const auto apply_selected_hunk = [&](bool left_to_right) {
         const bool target_left_side = !left_to_right;
         if (!apply_display_row_range_to_target(input, active_first_row, active_end_row, target_left_side)) {
             return;
         }
-
-        validate_diff_input(input);
-        hunk_start_rows = hunk_start_display_rows(input);
-        if (hunk_start_rows.empty()) {
-            selected_hunk_index = -1;
-            active_first_row = -1;
-            active_end_row = -1;
-        } else {
-            selected_hunk_index = std::clamp(selected_hunk_index, 0, static_cast<int>(hunk_start_rows.size()) - 1);
-            const auto [first_row, end_row] =
-                hunk_display_row_range(input, hunk_start_rows[static_cast<size_t>(selected_hunk_index)]);
-            active_first_row = first_row;
-            active_end_row = end_row;
+        refresh_after_merge();
+    };
+    const auto apply_context_menu_action = [&](MergeAction action) {
+        if (active_first_row < 0 || active_end_row <= active_first_row) {
+            return;
         }
-        refresh_panes_from_input();
-        if (selected_hunk_index >= 0) {
-            const int target_row = hunk_start_rows[static_cast<size_t>(selected_hunk_index)];
-            const int first_visible_line = centered_hunk_first_visible_line(target_row);
-            mirror_scroll([&]() {
-                left.scrollVertical(first_visible_line);
-                right.scrollVertical(first_visible_line);
-            });
-            refresh_vertical_scrollbar();
+        if (!apply_merge_action(
+                input, active_first_row, active_end_row, last_right_click_left_side, action))
+        {
+            return;
         }
-        update_hunk_controls();
-        update_active_hunk_boundaries();
+        hide_context_menu();
+        refresh_after_merge();
     };
     const auto handle_hunk_shortcut = [&](QKeyEvent* event) {
         if (event->key() != Qt::Key_F7) {
@@ -1706,14 +1800,15 @@ Rectangle {
     };
     install_source_side_copy(left, true);
     install_source_side_copy(right, false);
-    const auto install_active_hunk_tracking = [&](ScintillaQuick_item& pane) {
+    const auto install_active_hunk_tracking = [&](ScintillaQuick_item& pane, bool left_side) {
         auto* pane_ptr = &pane;
-        QObject::connect(&pane, &ScintillaQuick_item::buttonPressed, &window, [&, pane_ptr](QMouseEvent* event) {
+        QObject::connect(&pane, &ScintillaQuick_item::buttonPressed, &window, [&, pane_ptr, left_side](QMouseEvent* event) {
             if (event->button() != Qt::RightButton) {
                 hide_context_menu();
                 return;
             }
 
+            last_right_click_left_side = left_side;
             suppress_selection_tracking = true;
             const int display_row = display_row_from_mouse_event(*pane_ptr, event);
             if (display_row >= 0) {
@@ -1721,8 +1816,9 @@ Rectangle {
             }
             show_context_menu(*pane_ptr, event);
         });
-        QObject::connect(&pane, &ScintillaQuick_item::buttonReleased, &window, [&, pane_ptr](QMouseEvent* event) {
+        QObject::connect(&pane, &ScintillaQuick_item::buttonReleased, &window, [&, pane_ptr, left_side](QMouseEvent* event) {
             if (event->button() == Qt::RightButton) {
+                last_right_click_left_side = left_side;
                 const int display_row = display_row_from_mouse_event(*pane_ptr, event);
                 if (display_row >= 0) {
                     set_active_changed_block_from_display_row(display_row);
@@ -1749,8 +1845,18 @@ Rectangle {
             set_active_display_row_range(first_row, end_row);
         });
     };
-    install_active_hunk_tracking(left);
-    install_active_hunk_tracking(right);
+    install_active_hunk_tracking(left, true);
+    install_active_hunk_tracking(right, false);
+    CallbackEventFilter use_other_filter([&]() { apply_context_menu_action(MergeAction::UseOther); });
+    CallbackEventFilter use_both_first_filter([&]() { apply_context_menu_action(MergeAction::UseBothThisFirst); });
+    CallbackEventFilter use_both_last_filter([&]() { apply_context_menu_action(MergeAction::UseBothThisLast); });
+    CallbackEventFilter use_whole_other_file_filter([&]() {
+        apply_context_menu_action(MergeAction::UseWholeOtherFile);
+    });
+    use_other_action->installEventFilter(&use_other_filter);
+    use_both_first_action->installEventFilter(&use_both_first_filter);
+    use_both_last_action->installEventFilter(&use_both_last_filter);
+    use_whole_other_file_action->installEventFilter(&use_whole_other_file_filter);
     CallbackEventFilter next_hunk_click_filter([&]() { navigate_hunk(1); });
     CallbackEventFilter previous_hunk_click_filter([&]() { navigate_hunk(-1); });
     CallbackEventFilter copy_left_to_right_click_filter([&]() { apply_selected_hunk(true); });
