@@ -21,6 +21,7 @@
 #include <initializer_list>
 #include <vector>
 
+#include "../../examples/tortoisediff_baseline/tortoisediff_merge_model.h"
 #include "Scintilla.h"
 #include "scintillaquick_font.h"
 #include "scintillaquick_test_macros.h"
@@ -39,6 +40,8 @@ constexpr int diff_marker_added = 0;
 constexpr int diff_marker_deleted = 1;
 constexpr int diff_marker_changed = 2;
 constexpr int diff_marker_filler = 3;
+constexpr int diff_marker_sign_plus = 4;
+constexpr int diff_marker_sign_minus = 5;
 
 enum class Scroll_axis
 {
@@ -734,6 +737,57 @@ QString source_side_copy_text(
     return source_lines.join(QLatin1Char('\n'));
 }
 
+QString source_text_from_display_text(
+    const QString& edited_display_text, const QString& previous_display_text, const std::vector<DiffRow>& rows,
+    DiffSide side)
+{
+    const QStringList edited_lines = display_lines_from_text(edited_display_text);
+    QStringList previous_lines_for_diff = display_lines_from_text(previous_display_text);
+    for (int row_index = 0; row_index < previous_lines_for_diff.size() &&
+         row_index < static_cast<int>(rows.size()); ++row_index) {
+        const DiffRow& row = rows[static_cast<size_t>(row_index)];
+        const int source_line = side == DiffSide::Left ? row.leftSourceLine : row.rightSourceLine;
+        if (source_line != -1 && previous_lines_for_diff[row_index].isEmpty()) {
+            previous_lines_for_diff[row_index] = QString(QChar(0xE000)) + QString::number(row_index);
+        }
+    }
+
+    const std::vector<DiffRow> display_diff_rows =
+        raw_text_diff_rows(previous_lines_for_diff.join(QLatin1Char('\n')), edited_display_text);
+    QStringList source_lines;
+    for (const DiffRow& display_row : display_diff_rows) {
+        if (display_row.rightSourceLine == -1) {
+            continue;
+        }
+
+        const QString& edited_line = edited_lines[display_row.rightSourceLine - 1];
+        if (display_row.leftSourceLine == -1) {
+            source_lines.append(edited_line);
+            continue;
+        }
+
+        const int old_display_row = display_row.leftSourceLine - 1;
+        if (old_display_row < 0 || old_display_row >= static_cast<int>(rows.size())) {
+            source_lines.append(edited_line);
+            continue;
+        }
+
+        const DiffRow& row = rows[static_cast<size_t>(old_display_row)];
+        const int source_line = side == DiffSide::Left ? row.leftSourceLine : row.rightSourceLine;
+        const bool empty_line_left_by_display_delete = edited_line.isEmpty() && display_row.changedGroupId != -1 &&
+            std::any_of(display_diff_rows.begin(), display_diff_rows.end(), [&](const DiffRow& other_row) {
+                return other_row.changedGroupId == display_row.changedGroupId && other_row.rightSourceLine == -1;
+            });
+        if (empty_line_left_by_display_delete) {
+            continue;
+        }
+        if (source_line != -1 || !edited_line.isEmpty()) {
+            source_lines.append(edited_line);
+        }
+    }
+    return source_lines.join(QLatin1Char('\n'));
+}
+
 bool source_and_state_match(int source_line, DiffSideState state)
 {
     return (source_line == -1) == (state == DiffSideState::Filler);
@@ -1154,6 +1208,217 @@ void test_source_side_copy_strips_filler_rows()
     SQ_EXPECT(source_side_copy_text(QString(), input.rows, DiffSide::Left, 1).isEmpty());
 }
 
+void test_display_text_to_source_text_keeps_source_rows_and_inserts_nonblank_fillers()
+{
+    const std::vector<DiffRow> rows{
+        {0, -1, 1, 1, DiffSideState::Equal, DiffSideState::Equal},
+        {1, 1, 2, -1, DiffSideState::Deleted, DiffSideState::Filler},
+        {1, 1, 3, 2, DiffSideState::Changed, DiffSideState::Changed},
+        {2, 2, -1, -1, DiffSideState::Filler, DiffSideState::Filler},
+        {2, 2, -1, -1, DiffSideState::Filler, DiffSideState::Filler},
+        {0, -1, 4, 3, DiffSideState::Equal, DiffSideState::Equal},
+    };
+
+    const QString previous_right_display = QStringLiteral("alpha\n\nright changed\n\n\nomega");
+    const QString edited_right_display =
+        QStringLiteral("alpha\ninserted from deleted row\nedited changed\n\ninserted filler\nomega");
+    SQ_EXPECT(source_text_from_display_text(edited_right_display, previous_right_display, rows, DiffSide::Right) ==
+              QStringLiteral("alpha\ninserted from deleted row\nedited changed\ninserted filler\nomega"));
+
+    const QString previous_left_display = QStringLiteral("alpha\nleft deleted\nleft changed\n\n\nomega");
+    const QString edited_left_display = QStringLiteral("alpha\nleft deleted edited\nleft changed\n\nleft filler\nomega");
+    SQ_EXPECT(source_text_from_display_text(edited_left_display, previous_left_display, rows, DiffSide::Left) ==
+              QStringLiteral("alpha\nleft deleted edited\nleft changed\nleft filler\nomega"));
+
+    const QString inserted_source_line_display =
+        QStringLiteral("alpha\ninserted from deleted row\nedited changed\nnew source line\n\ninserted filler\nomega");
+    SQ_EXPECT(source_text_from_display_text(
+                  inserted_source_line_display, previous_right_display, rows, DiffSide::Right) ==
+              QStringLiteral(
+                  "alpha\ninserted from deleted row\nedited changed\nnew source line\ninserted filler\nomega"));
+
+    SQ_EXPECT(source_text_from_display_text(QStringLiteral("alpha\nomega"), previous_right_display, rows,
+                  DiffSide::Right) == QStringLiteral("alpha\nomega"));
+
+    const std::vector<DiffRow> source_backed_delete_rows{
+        {0, -1, 1, 1, DiffSideState::Equal, DiffSideState::Equal},
+        {1, 1, 2, 2, DiffSideState::Changed, DiffSideState::Changed},
+        {1, 1, 3, 3, DiffSideState::Changed, DiffSideState::Changed},
+        {0, -1, 4, 4, DiffSideState::Equal, DiffSideState::Equal},
+    };
+    SQ_EXPECT(source_text_from_display_text(QStringLiteral("alpha\n\nomega"),
+                  QStringLiteral("alpha\nprivate:\ncallback\nomega"), source_backed_delete_rows, DiffSide::Right) ==
+              QStringLiteral("alpha\nomega"));
+
+    const std::vector<DiffRow> source_blank_before_filler_rows{
+        {0, -1, 1, 1, DiffSideState::Equal, DiffSideState::Equal},
+        {0, -1, 2, 2, DiffSideState::Equal, DiffSideState::Equal},
+        {1, 1, 3, -1, DiffSideState::Deleted, DiffSideState::Filler},
+        {1, 1, 4, -1, DiffSideState::Deleted, DiffSideState::Filler},
+        {0, -1, 5, 3, DiffSideState::Equal, DiffSideState::Equal},
+    };
+    SQ_EXPECT(source_text_from_display_text(QStringLiteral("close\n\n\nnext"),
+                  QStringLiteral("close\n\n\n\nnext"), source_blank_before_filler_rows, DiffSide::Right) ==
+              QStringLiteral("close\nnext"));
+    SQ_EXPECT(source_text_from_display_text(QStringLiteral("close\n\n\n\nnext"),
+                  QStringLiteral("close\n\n\n\nnext"), source_blank_before_filler_rows, DiffSide::Right) ==
+              QStringLiteral("close\n\nnext"));
+}
+
+void test_aligned_merge_model_backspace_rows_49_to_51()
+{
+    MergeModel model;
+    model.rows.reserve(54);
+    for (int row = 0; row < 54; ++row) {
+        model.rows.push_back({
+            0,
+            -1,
+            real_merge_cell(QStringLiteral("left %1").arg(row), row + 1),
+            real_merge_cell(QStringLiteral("right %1").arg(row), row + 1),
+        });
+    }
+
+    model.rows[50].left = gap_merge_cell();
+
+    const QString first_prefix = QStringLiteral("right49 prefix ");
+    const QString last_deleted_prefix = QStringLiteral("REMOVED ");
+    model.rows[49].right = real_merge_cell(first_prefix + "DELETE", 50, MergeCellState::Changed);
+    model.rows[50].right = real_merge_cell(QStringLiteral("right50 whole line"), 51, MergeCellState::Changed);
+    model.rows[51].left = real_merge_cell(QStringLiteral("left51 still aligned"), 52, MergeCellState::Changed);
+    model.rows[51].right = real_merge_cell(last_deleted_prefix + "suffix51", 52, MergeCellState::Changed);
+
+    SQ_EXPECT(delete_selection(model, MergeSide::Right,
+        {49, first_prefix.size()}, {51, last_deleted_prefix.size()}));
+
+    SQ_EXPECT(model.rows.size() == 53);
+    SQ_EXPECT(merge_cell_for_side(model.rows[49], MergeSide::Right).text == QStringLiteral("right49 prefix suffix51"));
+    SQ_EXPECT(merge_cell_for_side(model.rows[49], MergeSide::Right).sourceLine == 50);
+    SQ_EXPECT(merge_cell_for_side(model.rows[49], MergeSide::Right).kind == MergeCellKind::Real);
+    SQ_EXPECT(merge_cell_for_side(model.rows[49], MergeSide::Right).state == MergeCellState::Edited);
+
+    SQ_EXPECT(model.rows[50].left.text == QStringLiteral("left51 still aligned"));
+    SQ_EXPECT(merge_cell_for_side(model.rows[50], MergeSide::Right).text.isEmpty());
+    SQ_EXPECT(merge_cell_for_side(model.rows[50], MergeSide::Right).sourceLine == -1);
+    SQ_EXPECT(merge_cell_for_side(model.rows[50], MergeSide::Right).kind == MergeCellKind::Gap);
+    SQ_EXPECT(merge_cell_for_side(model.rows[50], MergeSide::Right).state == MergeCellState::Edited);
+    SQ_EXPECT(model.rows[51].right.text == QStringLiteral("right 52"));
+
+    const bool both_panes_gap = std::any_of(model.rows.begin(), model.rows.end(), [](const MergeRow& row) {
+        return merge_cell_is_gap_empty(row.left) && merge_cell_is_gap_empty(row.right);
+    });
+    SQ_EXPECT(!both_panes_gap);
+
+    MergeModel empty_prefix_model;
+    empty_prefix_model.rows.reserve(54);
+    for (int row = 0; row < 54; ++row) {
+        empty_prefix_model.rows.push_back({
+            0,
+            -1,
+            real_merge_cell(QStringLiteral("left %1").arg(row), row + 1),
+            real_merge_cell(QStringLiteral("right %1").arg(row), row + 1),
+        });
+    }
+    empty_prefix_model.rows[49].left = gap_merge_cell();
+    empty_prefix_model.rows[49].right = real_merge_cell(QStringLiteral("private:"), 50, MergeCellState::Changed);
+    empty_prefix_model.rows[50].left = real_merge_cell(QStringLiteral("left50 still aligned"), 51);
+    empty_prefix_model.rows[50].right =
+        real_merge_cell(QStringLiteral("std::function<void()> callback_;"), 51, MergeCellState::Changed);
+
+    SQ_EXPECT(delete_selection(empty_prefix_model, MergeSide::Right, {49, 0},
+        {50, QStringLiteral("std::function<void()> callback_;").size()}));
+    SQ_EXPECT(empty_prefix_model.rows.size() == 54);
+    SQ_EXPECT(merge_cell_for_side(empty_prefix_model.rows[49], MergeSide::Left).kind == MergeCellKind::Gap);
+    SQ_EXPECT(merge_cell_for_side(empty_prefix_model.rows[49], MergeSide::Right).kind == MergeCellKind::Real);
+    SQ_EXPECT(merge_cell_for_side(empty_prefix_model.rows[49], MergeSide::Right).text.isEmpty());
+    SQ_EXPECT(merge_cell_for_side(empty_prefix_model.rows[49], MergeSide::Right).state == MergeCellState::Edited);
+    SQ_EXPECT(empty_prefix_model.rows[50].left.text == QStringLiteral("left50 still aligned"));
+    SQ_EXPECT(merge_cell_for_side(empty_prefix_model.rows[50], MergeSide::Right).kind == MergeCellKind::Gap);
+
+    MergeModel aligned_gap_model;
+    aligned_gap_model.rows = {
+        {0, -1, real_merge_cell(QStringLiteral("left private:"), 1),
+            real_merge_cell(QStringLiteral("private:"), 1, MergeCellState::Changed)},
+        {0, -1, real_merge_cell(QStringLiteral("left callback"), 2),
+            real_merge_cell(QStringLiteral("std::function<void()> callback_;"), 2, MergeCellState::Changed)},
+        {0, -1, real_merge_cell(QStringLiteral("};"), 3), real_merge_cell(QStringLiteral("};"), 3)},
+    };
+
+    SQ_EXPECT(delete_selection(aligned_gap_model, MergeSide::Right, {0, 0},
+        {1, QStringLiteral("std::function<void()> callback_;").size()}));
+    SQ_EXPECT(aligned_gap_model.rows.size() == 3);
+    SQ_EXPECT(aligned_gap_model.rows[0].left.text == QStringLiteral("left private:"));
+    SQ_EXPECT(merge_cell_for_side(aligned_gap_model.rows[0], MergeSide::Right).kind == MergeCellKind::Real);
+    SQ_EXPECT(merge_cell_for_side(aligned_gap_model.rows[0], MergeSide::Right).sourceLine == 1);
+    SQ_EXPECT(merge_cell_for_side(aligned_gap_model.rows[0], MergeSide::Right).text.isEmpty());
+    SQ_EXPECT(merge_cell_for_side(aligned_gap_model.rows[1], MergeSide::Right).kind == MergeCellKind::Gap);
+    SQ_EXPECT(aligned_gap_model.rows[2].right.text == QStringLiteral("};"));
+
+    MergeModel delete_key_model;
+    delete_key_model.rows = {
+        {0, -1, real_merge_cell(QStringLiteral("left private:"), 1),
+            real_merge_cell(QStringLiteral("private:"), 1, MergeCellState::Changed)},
+        {0, -1, real_merge_cell(QStringLiteral("left callback"), 2),
+            real_merge_cell(QStringLiteral("std::function<void()> callback_;"), 2, MergeCellState::Changed)},
+        {0, -1, real_merge_cell(QStringLiteral("};"), 3), real_merge_cell(QStringLiteral("};"), 3)},
+    };
+
+    SQ_EXPECT(delete_selection(delete_key_model, MergeSide::Right, {0, 0},
+        {1, QStringLiteral("std::function<void()> callback_;").size()}));
+    SQ_EXPECT(delete_key_model.rows.size() == 3);
+    SQ_EXPECT(merge_cell_for_side(delete_key_model.rows[0], MergeSide::Right).kind == MergeCellKind::Real);
+    SQ_EXPECT(merge_cell_for_side(delete_key_model.rows[0], MergeSide::Right).sourceLine == 1);
+    SQ_EXPECT(merge_cell_for_side(delete_key_model.rows[0], MergeSide::Right).text.isEmpty());
+    SQ_EXPECT(merge_cell_for_side(delete_key_model.rows[1], MergeSide::Right).kind == MergeCellKind::Gap);
+
+    MergeModel replacement_model;
+    replacement_model.rows = {
+        {0, -1, real_merge_cell(QStringLiteral("left private:"), 1),
+            real_merge_cell(QStringLiteral("private:"), 1, MergeCellState::Changed)},
+        {0, -1, real_merge_cell(QStringLiteral("left callback"), 2),
+            real_merge_cell(QStringLiteral("std::function<void()> callback_;"), 2, MergeCellState::Changed)},
+    };
+
+    SQ_EXPECT(replace_selection(replacement_model, MergeSide::Right, {0, 0},
+        {1, QStringLiteral("std::function<void()> callback_;").size()}, QStringLiteral("replaced")));
+    SQ_EXPECT(replacement_model.rows.size() == 2);
+    SQ_EXPECT(merge_cell_for_side(replacement_model.rows[0], MergeSide::Right).text == QStringLiteral("replaced"));
+    SQ_EXPECT(merge_cell_for_side(replacement_model.rows[0], MergeSide::Right).state == MergeCellState::Edited);
+    SQ_EXPECT(merge_cell_for_side(replacement_model.rows[1], MergeSide::Right).kind == MergeCellKind::Gap);
+
+    MergeModel paste_model;
+    paste_model.rows = {
+        {0, -1, real_merge_cell(QStringLiteral("left one"), 1),
+            real_merge_cell(QStringLiteral("abcXYZdef"), 1, MergeCellState::Changed)},
+        {0, -1, real_merge_cell(QStringLiteral("left two"), 2), real_merge_cell(QStringLiteral("tail"), 2)},
+    };
+
+    SQ_EXPECT(replace_selection(paste_model, MergeSide::Right, {0, 3}, {0, 6}, QStringLiteral("1\n2")));
+    SQ_EXPECT(paste_model.rows.size() == 3);
+    SQ_EXPECT(merge_cell_for_side(paste_model.rows[0], MergeSide::Right).text == QStringLiteral("abc1"));
+    SQ_EXPECT(merge_cell_for_side(paste_model.rows[1], MergeSide::Left).kind == MergeCellKind::Gap);
+    SQ_EXPECT(merge_cell_for_side(paste_model.rows[1], MergeSide::Right).text == QStringLiteral("2def"));
+    SQ_EXPECT(merge_cell_for_side(paste_model.rows[2], MergeSide::Right).text == QStringLiteral("tail"));
+
+    MergeModel enter_model;
+    enter_model.rows = {
+        {0, -1, real_merge_cell(QStringLiteral("left private:"), 1),
+            real_merge_cell(QStringLiteral("private:"), 1, MergeCellState::Changed)},
+        {0, -1, real_merge_cell(QStringLiteral("left callback"), 2),
+            real_merge_cell(QStringLiteral("std::function<void()> callback_;"), 2, MergeCellState::Changed)},
+        {0, -1, real_merge_cell(QStringLiteral("};"), 3), real_merge_cell(QStringLiteral("};"), 3)},
+    };
+
+    SQ_EXPECT(replace_selection(enter_model, MergeSide::Right, {0, 0},
+        {1, QStringLiteral("std::function<void()> callback_;").size()}, QStringLiteral("\n")));
+    SQ_EXPECT(enter_model.rows.size() == 4);
+    SQ_EXPECT(merge_cell_for_side(enter_model.rows[0], MergeSide::Right).kind == MergeCellKind::Real);
+    SQ_EXPECT(merge_cell_for_side(enter_model.rows[0], MergeSide::Right).text.isEmpty());
+    SQ_EXPECT(merge_cell_for_side(enter_model.rows[1], MergeSide::Left).kind == MergeCellKind::Gap);
+    SQ_EXPECT(merge_cell_for_side(enter_model.rows[1], MergeSide::Right).kind == MergeCellKind::Real);
+    SQ_EXPECT(merge_cell_for_side(enter_model.rows[1], MergeSide::Right).text.isEmpty());
+    SQ_EXPECT(merge_cell_for_side(enter_model.rows[2], MergeSide::Right).kind == MergeCellKind::Gap);
+}
+
 void test_apply_active_hunk_left_to_right_and_right_to_left()
 {
     const DiffWidgetInput base{
@@ -1197,6 +1462,7 @@ void test_apply_active_display_row_range()
     SQ_EXPECT(apply_active_display_row_range(input, 1, 2, DiffSide::Right));
     SQ_EXPECT(input.rightText == QStringLiteral("alpha\nleft one\nright two\nomega"));
     SQ_EXPECT(input.leftText == QStringLiteral("alpha\nleft one\nleft two\nomega"));
+
 }
 
 void test_apply_context_menu_merge_actions()
@@ -1587,15 +1853,17 @@ bool image_region_has_magenta_pixels(const QImage& image, int x_start, int x_end
     return false;
 }
 
-void configure_pane(ScintillaQuick_item& pane, const QString& text)
+void configure_pane(ScintillaQuick_item& pane, const QString& text, bool editable)
 {
     pane.setProperty("font", scintillaquick::shared::deterministic_test_font(11));
     pane.send(SCI_SETTABWIDTH, 4);
     pane.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
     pane.send(SCI_SETMARGINTYPEN, line_number_margin, SC_MARGIN_NUMBER);
     pane.send(SCI_SETMARGINWIDTHN, line_number_margin, line_number_margin_width);
+    pane.send(SCI_SETCARETWIDTH, editable ? 1 : 0);
+    pane.setProperty("readonly", false);
     pane.setProperty("text", text);
-    pane.setProperty("readonly", true);
+    pane.setProperty("readonly", !editable);
 }
 
 void configure_native_diff_row_markers(ScintillaQuick_item& pane)
@@ -1604,6 +1872,7 @@ void configure_native_diff_row_markers(ScintillaQuick_item& pane)
     for (int margin = 0; margin < margin_count; ++margin) {
         pane.send(SCI_SETMARGINMASKN, margin, 0);
     }
+    pane.send(SCI_SETMARGINMASKN, 1, (1 << diff_marker_sign_plus) | (1 << diff_marker_sign_minus));
 
     auto configure_marker = [&](int marker_number, int color) {
         pane.send(SCI_MARKERDEFINE, marker_number, SC_MARK_FULLRECT);
@@ -1615,6 +1884,8 @@ void configure_native_diff_row_markers(ScintillaQuick_item& pane)
     configure_marker(diff_marker_deleted, 0xCCCCFF);
     configure_marker(diff_marker_changed, 0xCCFFFF);
     configure_marker(diff_marker_filler, 0xEEEEEE);
+    pane.send(SCI_MARKERDEFINE, diff_marker_sign_plus, SC_MARK_CHARACTER + '+');
+    pane.send(SCI_MARKERDEFINE, diff_marker_sign_minus, SC_MARK_CHARACTER + '-');
 }
 
 int native_marker_for_state(DiffSideState state)
@@ -1635,6 +1906,14 @@ int native_marker_for_state(DiffSideState state)
     return -1;
 }
 
+int native_sign_marker_for_state(DiffSideState state, DiffSide side)
+{
+    if (state == DiffSideState::Equal || state == DiffSideState::Filler) {
+        return -1;
+    }
+    return side == DiffSide::Left ? diff_marker_sign_minus : diff_marker_sign_plus;
+}
+
 void apply_native_diff_row_markers(ScintillaQuick_item& pane, const std::vector<DiffRow>& rows, DiffSide side)
 {
     for (size_t row_index = 0; row_index < rows.size(); ++row_index) {
@@ -1643,6 +1922,10 @@ void apply_native_diff_row_markers(ScintillaQuick_item& pane, const std::vector<
         const int marker = native_marker_for_state(state);
         if (marker != -1) {
             pane.send(SCI_MARKERADD, static_cast<int>(row_index), marker);
+        }
+        const int sign_marker = native_sign_marker_for_state(state, side);
+        if (sign_marker != -1) {
+            pane.send(SCI_MARKERADD, static_cast<int>(row_index), sign_marker);
         }
     }
 }
@@ -1677,14 +1960,14 @@ void test_native_diff_row_markers_follow_side_state()
     apply_native_diff_row_markers(right, rows, DiffSide::Right);
 
     expect_marker_bits(left, 0, 0);
-    expect_marker_bits(left, 1, native_marker_mask(diff_marker_deleted));
-    expect_marker_bits(left, 2, native_marker_mask(diff_marker_changed));
+    expect_marker_bits(left, 1, native_marker_mask(diff_marker_deleted) | native_marker_mask(diff_marker_sign_minus));
+    expect_marker_bits(left, 2, native_marker_mask(diff_marker_changed) | native_marker_mask(diff_marker_sign_minus));
     expect_marker_bits(left, 3, native_marker_mask(diff_marker_filler));
 
     expect_marker_bits(right, 0, 0);
     expect_marker_bits(right, 1, native_marker_mask(diff_marker_filler));
-    expect_marker_bits(right, 2, native_marker_mask(diff_marker_changed));
-    expect_marker_bits(right, 3, native_marker_mask(diff_marker_added));
+    expect_marker_bits(right, 2, native_marker_mask(diff_marker_changed) | native_marker_mask(diff_marker_sign_plus));
+    expect_marker_bits(right, 3, native_marker_mask(diff_marker_added) | native_marker_mask(diff_marker_sign_plus));
 }
 
 GreenPixelCoverage native_marker_line_green_pixel_coverage(int marker_symbol)
@@ -1856,7 +2139,7 @@ void apply_synchronized_zoom(ScintillaQuick_item& target, int value, bool& is_sy
     }
 }
 
-void test_two_readonly_panes_in_one_window()
+void test_left_readonly_right_editable_panes_in_one_window()
 {
     QQuickWindow window;
     window.resize(800, 360);
@@ -1918,8 +2201,8 @@ void test_two_readonly_panes_in_one_window()
 
     window.show();
     pump_events();
-    configure_pane(left, left_text);
-    configure_pane(right, right_text);
+    configure_pane(left, left_text, false);
+    configure_pane(right, right_text, true);
     pump_events();
     QThread::msleep(20);
     pump_events();
@@ -1929,15 +2212,22 @@ void test_two_readonly_panes_in_one_window()
     SQ_EXPECT(left.property("text").toString() == left_text);
     SQ_EXPECT(right.property("text").toString() == right_text);
     SQ_EXPECT(left.property("readonly").toBool());
-    SQ_EXPECT(right.property("readonly").toBool());
+    SQ_EXPECT(!right.property("readonly").toBool());
     SQ_EXPECT(left.send(SCI_GETREADONLY) != 0);
-    SQ_EXPECT(right.send(SCI_GETREADONLY) != 0);
+    SQ_EXPECT(right.send(SCI_GETREADONLY) == 0);
+    SQ_EXPECT(left.send(SCI_GETCARETWIDTH) == 0);
+    SQ_EXPECT(right.send(SCI_GETCARETWIDTH) > 0);
     SQ_EXPECT(left.send(SCI_GETWRAPMODE) == SC_WRAP_NONE);
     SQ_EXPECT(right.send(SCI_GETWRAPMODE) == SC_WRAP_NONE);
     SQ_EXPECT(left.send(SCI_GETMARGINTYPEN, line_number_margin) == SC_MARGIN_NUMBER);
     SQ_EXPECT(right.send(SCI_GETMARGINTYPEN, line_number_margin) == SC_MARGIN_NUMBER);
     SQ_EXPECT(left.send(SCI_GETMARGINWIDTHN, line_number_margin) == line_number_margin_width);
     SQ_EXPECT(right.send(SCI_GETMARGINWIDTHN, line_number_margin) == line_number_margin_width);
+
+    right.sends(SCI_INSERTTEXT, 0, "editable ");
+    left.sends(SCI_INSERTTEXT, 0, "readonly ");
+    SQ_EXPECT(right.property("text").toString().startsWith(QStringLiteral("editable ")));
+    SQ_EXPECT(!left.property("text").toString().startsWith(QStringLiteral("readonly ")));
 
     constexpr int vertical_target = 18;
     left.send(SCI_SETFIRSTVISIBLELINE, vertical_target);
@@ -2006,6 +2296,8 @@ int main(int argc, char** argv)
     test_live_command_diff_adapter_selection();
     test_widget_input_contract_validation();
     test_source_side_copy_strips_filler_rows();
+    test_aligned_merge_model_backspace_rows_49_to_51();
+    test_display_text_to_source_text_keeps_source_rows_and_inserts_nonblank_fillers();
     test_apply_active_hunk_left_to_right_and_right_to_left();
     test_apply_active_display_row_range();
     test_apply_context_menu_merge_actions();
@@ -2013,7 +2305,7 @@ int main(int argc, char** argv)
     test_horizontal_scrollbar_model_mapping();
     test_native_marker_line_highlight_candidates();
     test_native_diff_row_markers_follow_side_state();
-    test_two_readonly_panes_in_one_window();
+    test_left_readonly_right_editable_panes_in_one_window();
 
     if (g_failures != 0) {
         std::fprintf(stderr, "scintillaquick_tortoisediff_step1_test: %d failure(s)\n", g_failures);

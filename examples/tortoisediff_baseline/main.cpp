@@ -11,14 +11,17 @@
 #include <utility>
 #include <vector>
 
+#include <QClipboard>
 #include <QColor>
 #include <QDir>
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QProcess>
 #include <QQuickItem>
+#include <QQuickPaintedItem>
 #include <QQuickWindow>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -29,6 +32,7 @@
 
 #include "scintillaquick_font.h"
 #include "Scintilla.h"
+#include "tortoisediff_merge_model.h"
 
 namespace
 {
@@ -51,9 +55,29 @@ private:
     std::function<void()> callback_;
 };
 
+class EventFilter : public QObject
+{
+public:
+    explicit EventFilter(std::function<bool(QEvent*)> callback) : callback_(std::move(callback)) {}
+
+protected:
+    bool eventFilter(QObject*, QEvent* event) override
+    {
+        return callback_(event);
+    }
+
+private:
+    std::function<bool(QEvent*)> callback_;
+};
+
 constexpr int rgb(int red, int green, int blue)
 {
     return red | (green << 8) | (blue << 16);
+}
+
+QColor qt_color_from_scintilla(int color)
+{
+    return QColor(color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF);
 }
 
 constexpr int k_editor_foreground = rgb(31, 35, 40);
@@ -66,11 +90,13 @@ constexpr int k_marker_deleted = 1;
 constexpr int k_marker_changed = 2;
 constexpr int k_marker_filler = 3;
 constexpr int k_inline_changed_indicator = 0;
+constexpr int k_sign_gutter_width = 18;
 constexpr int k_added_background = rgb(205, 240, 209);
 constexpr int k_deleted_background = rgb(251, 207, 207);
 constexpr int k_changed_background = rgb(252, 239, 197);
 constexpr int k_filler_background = rgb(212, 219, 229);
 constexpr int k_inline_changed_background = rgb(245, 192, 80);
+constexpr int k_sign_marker_foreground = rgb(31, 143, 176);
 
 enum class DiffSideState
 {
@@ -96,6 +122,69 @@ struct DiffWidgetInput
     QString leftText;
     QString rightText;
     std::vector<DiffRow> rows;
+};
+
+class SourceLineGutterOverlay final : public QQuickPaintedItem
+{
+public:
+    SourceLineGutterOverlay(ScintillaQuick_item& pane, bool left_side, QQuickItem* parent = nullptr)
+        : QQuickPaintedItem(parent), pane_(&pane), left_side_(left_side)
+    {
+        setAcceptedMouseButtons(Qt::NoButton);
+        setAntialiasing(false);
+        setOpaquePainting(false);
+        setZ(4.0);
+    }
+
+    void setInput(const DiffWidgetInput& input)
+    {
+        input_ = &input;
+        update();
+    }
+
+    void paint(QPainter* painter) override
+    {
+        if (!input_ || !pane_) {
+            return;
+        }
+
+        painter->setFont(pane_->property("font").value<QFont>());
+
+        const int first_line = std::max(0, static_cast<int>(pane_->send(SCI_GETFIRSTVISIBLELINE)));
+        const int line_count = static_cast<int>(input_->rows.size());
+        const int lines_on_screen = std::max(1, static_cast<int>(pane_->send(SCI_LINESONSCREEN)));
+        const int last_line = std::min(line_count, first_line + lines_on_screen + 2);
+        for (int row_index = first_line; row_index < last_line; ++row_index) {
+            const DiffRow& row = input_->rows[static_cast<size_t>(row_index)];
+            const DiffSideState state = left_side_ ? row.leftState : row.rightState;
+            if (state != DiffSideState::Equal && state != DiffSideState::Filler) {
+                const QChar sign = left_side_ ? QLatin1Char('-') : QLatin1Char('+');
+                const sptr_t position = pane_->send(SCI_POSITIONFROMLINE, row_index);
+                const int y = static_cast<int>(pane_->send(SCI_POINTYFROMPOSITION, 0, position));
+                const int height = std::max(1, static_cast<int>(pane_->send(SCI_TEXTHEIGHT, row_index)));
+                painter->setPen(qt_color_from_scintilla(k_sign_marker_foreground));
+                painter->drawText(QRectF(0.0, y, k_sign_gutter_width, height),
+                    Qt::AlignCenter, QString(sign));
+            }
+
+            const int source_line = left_side_ ? row.leftSourceLine : row.rightSourceLine;
+            if (source_line == -1) {
+                continue;
+            }
+
+            const sptr_t position = pane_->send(SCI_POSITIONFROMLINE, row_index);
+            const int y = static_cast<int>(pane_->send(SCI_POINTYFROMPOSITION, 0, position));
+            const int height = std::max(1, static_cast<int>(pane_->send(SCI_TEXTHEIGHT, row_index)));
+            painter->setPen(qt_color_from_scintilla(k_margin_foreground));
+            painter->drawText(QRectF(k_sign_gutter_width, y, width() - k_sign_gutter_width - 4.0, height),
+                Qt::AlignRight | Qt::AlignVCenter, QString::number(source_line));
+        }
+    }
+
+private:
+    ScintillaQuick_item* pane_ = nullptr;
+    const DiffWidgetInput* input_ = nullptr;
+    bool left_side_ = true;
 };
 
 struct InlineChangedSpan
@@ -392,6 +481,59 @@ QString source_side_copy_text(
     return source_lines.join(QLatin1Char('\n'));
 }
 
+std::vector<DiffRow> raw_text_diff_rows(const QString& left_text, const QString& right_text);
+
+QString source_text_from_display_text(
+    const QString& edited_display_text, const QString& previous_display_text, const std::vector<DiffRow>& rows,
+    bool left_side)
+{
+    const QStringList edited_lines = source_lines_from_text(edited_display_text);
+    QStringList previous_lines_for_diff = source_lines_from_text(previous_display_text);
+    for (int row_index = 0; row_index < previous_lines_for_diff.size() &&
+         row_index < static_cast<int>(rows.size()); ++row_index) {
+        const DiffRow& row = rows[static_cast<size_t>(row_index)];
+        const int source_line = left_side ? row.leftSourceLine : row.rightSourceLine;
+        if (source_line != -1 && previous_lines_for_diff[row_index].isEmpty()) {
+            previous_lines_for_diff[row_index] = QString(QChar(0xE000)) + QString::number(row_index);
+        }
+    }
+
+    const std::vector<DiffRow> display_diff_rows =
+        raw_text_diff_rows(previous_lines_for_diff.join(QLatin1Char('\n')), edited_display_text);
+    QStringList source_lines;
+    for (const DiffRow& display_row : display_diff_rows) {
+        if (display_row.rightSourceLine == -1) {
+            continue;
+        }
+
+        const QString& edited_line = edited_lines[display_row.rightSourceLine - 1];
+        if (display_row.leftSourceLine == -1) {
+            source_lines.append(edited_line);
+            continue;
+        }
+
+        const int old_display_row = display_row.leftSourceLine - 1;
+        if (old_display_row < 0 || old_display_row >= static_cast<int>(rows.size())) {
+            source_lines.append(edited_line);
+            continue;
+        }
+
+        const DiffRow& row = rows[static_cast<size_t>(old_display_row)];
+        const int source_line = left_side ? row.leftSourceLine : row.rightSourceLine;
+        const bool empty_line_left_by_display_delete = edited_line.isEmpty() && display_row.changedGroupId != -1 &&
+            std::any_of(display_diff_rows.begin(), display_diff_rows.end(), [&](const DiffRow& other_row) {
+                return other_row.changedGroupId == display_row.changedGroupId && other_row.rightSourceLine == -1;
+            });
+        if (empty_line_left_by_display_delete) {
+            continue;
+        }
+        if (source_line != -1 || !edited_line.isEmpty()) {
+            source_lines.append(edited_line);
+        }
+    }
+    return source_lines.join(QLatin1Char('\n'));
+}
+
 std::vector<DiffRow> raw_text_diff_rows(const QString& left_text, const QString& right_text)
 {
     const QStringList left_lines = source_lines_from_text(left_text);
@@ -526,6 +668,85 @@ void validate_diff_input(const DiffWidgetInput& input)
     }
 }
 
+MergeCellState merge_state_from_diff_state(DiffSideState state)
+{
+    return state == DiffSideState::Equal || state == DiffSideState::Filler ? MergeCellState::Equal :
+                                                                        MergeCellState::Changed;
+}
+
+MergeCell merge_cell_from_source_line(const QStringList& source_lines, int source_line, DiffSideState state)
+{
+    if (source_line == -1) {
+        return gap_merge_cell(merge_state_from_diff_state(state));
+    }
+    return real_merge_cell(source_lines[source_line - 1], source_line, merge_state_from_diff_state(state));
+}
+
+MergeModel merge_model_from_input(const DiffWidgetInput& input)
+{
+    const QStringList left_lines = source_lines_from_text(input.leftText);
+    const QStringList right_lines = source_lines_from_text(input.rightText);
+    MergeModel model;
+    model.rows.reserve(input.rows.size());
+    for (const DiffRow& row : input.rows) {
+        model.rows.push_back({
+            row.hunkId,
+            row.changedGroupId,
+            merge_cell_from_source_line(left_lines, row.leftSourceLine, row.leftState),
+            merge_cell_from_source_line(right_lines, row.rightSourceLine, row.rightState),
+        });
+    }
+    return model;
+}
+
+QString source_text_from_merge_model(const MergeModel& model, MergeSide side)
+{
+    QStringList lines;
+    for (const MergeRow& row : model.rows) {
+        const MergeCell& cell = merge_cell_for_side(row, side);
+        if (cell.kind == MergeCellKind::Real) {
+            lines.append(cell.text);
+        }
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
+DiffSideState diff_state_from_merge_cell(const MergeCell& cell)
+{
+    if (cell.kind == MergeCellKind::Gap) {
+        return DiffSideState::Filler;
+    }
+    if (cell.state == MergeCellState::Edited || cell.state == MergeCellState::Changed) {
+        return DiffSideState::Changed;
+    }
+    return DiffSideState::Equal;
+}
+
+void apply_merge_model_to_input(DiffWidgetInput& input, const MergeModel& model)
+{
+    input.leftText = source_text_from_merge_model(model, MergeSide::Left);
+    input.rightText = source_text_from_merge_model(model, MergeSide::Right);
+
+    input.rows.clear();
+    input.rows.reserve(model.rows.size());
+    int next_left_source_line = 1;
+    int next_right_source_line = 1;
+    for (const MergeRow& row : model.rows) {
+        const bool has_left = row.left.kind == MergeCellKind::Real;
+        const bool has_right = row.right.kind == MergeCellKind::Real;
+        input.rows.push_back({
+            row.hunkId,
+            row.changedGroupId,
+            has_left ? next_left_source_line++ : -1,
+            has_right ? next_right_source_line++ : -1,
+            has_left ? (has_right ? diff_state_from_merge_cell(row.left) : DiffSideState::Deleted) :
+                       DiffSideState::Filler,
+            has_right ? (has_left ? diff_state_from_merge_cell(row.right) : DiffSideState::Added) :
+                        DiffSideState::Filler,
+        });
+    }
+}
+
 QString sample_unified_diff_fixture()
 {
     QStringList lines = {
@@ -613,7 +834,7 @@ DiffWidgetInput sample_diff_input()
     return input;
 }
 
-void configure_pane(ScintillaQuick_item& pane, const QFont& font, const QString& text)
+void configure_pane(ScintillaQuick_item& pane, const QFont& font, const QString& text, bool editable)
 {
     pane.setProperty("font", font);
     pane.send(SCI_SETTABWIDTH, 4);
@@ -626,28 +847,43 @@ void configure_pane(ScintillaQuick_item& pane, const QFont& font, const QString&
     pane.send(SCI_STYLESETFORE, STYLE_LINENUMBER, k_margin_foreground);
     pane.send(SCI_STYLESETBACK, STYLE_LINENUMBER, k_margin_background);
 
-    // Stock Scintilla number margins show display-buffer line numbers. Source
-    // gutters are intentionally left for later steps.
     const int margin_count = static_cast<int>(pane.send(SCI_GETMARGINS));
     for (int margin = 1; margin < margin_count; ++margin) {
         pane.send(SCI_SETMARGINWIDTHN, margin, 0);
     }
-    pane.send(SCI_SETMARGINTYPEN, 0, SC_MARGIN_NUMBER);
-    const int line_number_width =
-        static_cast<int>(pane.send(SCI_TEXTWIDTH, STYLE_LINENUMBER, reinterpret_cast<sptr_t>("9999")));
-    pane.send(SCI_SETMARGINWIDTHN, 0, line_number_width + 12);
+    pane.send(SCI_SETMARGINTYPEN, 0, SC_MARGIN_BACK);
+    pane.send(SCI_SETMARGINWIDTHN, 0, k_sign_gutter_width);
+    pane.send(SCI_SETMARGINTYPEN, 1, SC_MARGIN_BACK);
+    pane.send(SCI_SETMARGINWIDTHN, 1, 0);
     pane.send(SCI_SETMARGINLEFT, 2);
     pane.send(SCI_SETMARGINRIGHT, 4);
 
     pane.send(SCI_SETSELFORE, 1, k_editor_foreground);
     pane.send(SCI_SETSELBACK, 1, k_selection_background);
     pane.send(SCI_SETSELALPHA, 80);
-    pane.send(SCI_SETCARETFORE, k_editor_background);
-    pane.send(SCI_SETCARETWIDTH, 0);
+    pane.send(SCI_SETCARETFORE, editable ? k_editor_foreground : k_editor_background);
+    pane.send(SCI_SETCARETWIDTH, editable ? 1 : 0);
 
     pane.setProperty("readonly", false);
     pane.setProperty("text", text);
-    pane.setProperty("readonly", true);
+    pane.setProperty("readonly", !editable);
+}
+
+void apply_source_line_gutter(ScintillaQuick_item& pane, const DiffWidgetInput& input, bool left_side)
+{
+    int max_source_line = 1;
+    for (const DiffRow& row : input.rows) {
+        max_source_line = std::max(max_source_line, left_side ? row.leftSourceLine : row.rightSourceLine);
+    }
+    const QByteArray widest_label = QByteArray::number(std::max(9999, max_source_line));
+    const int line_number_width =
+        static_cast<int>(pane.send(SCI_TEXTWIDTH, STYLE_LINENUMBER, reinterpret_cast<sptr_t>(widest_label.constData())));
+    pane.send(SCI_SETMARGINTYPEN, 0, SC_MARGIN_BACK);
+    pane.send(SCI_SETMARGINWIDTHN, 0, k_sign_gutter_width);
+    pane.send(SCI_SETMARGINTYPEN, 1, SC_MARGIN_BACK);
+    pane.send(SCI_SETMARGINWIDTHN, 1, line_number_width + 12);
+    pane.send(SCI_MARGINTEXTCLEARALL);
+    pane.request_scene_graph_update(true, true, false);
 }
 
 void configure_diff_marker(ScintillaQuick_item& pane, int marker, int background)
@@ -1293,6 +1529,8 @@ Rectangle {
     right_container.setClip(true);
     left.setParentItem(&left_container);
     right.setParentItem(&right_container);
+    SourceLineGutterOverlay left_gutter(left, true, &left_container);
+    SourceLineGutterOverlay right_gutter(right, false, &right_container);
     QString left_text;
     QString right_text;
     int shared_horizontal_scroll_width = 1;
@@ -1485,6 +1723,14 @@ Rectangle {
         left.setSize(left_container.size());
         right.setPosition({0.0, 0.0});
         right.setSize(right_container.size());
+        left_gutter.setPosition({0.0, 0.0});
+        right_gutter.setPosition({0.0, 0.0});
+        left_gutter.setSize({static_cast<qreal>(left.send(SCI_GETMARGINWIDTHN, 0) + left.send(SCI_GETMARGINWIDTHN, 1)),
+            left_container.height()});
+        right_gutter.setSize({static_cast<qreal>(right.send(SCI_GETMARGINWIDTHN, 0) + right.send(SCI_GETMARGINWIDTHN, 1)),
+            right_container.height()});
+        left_gutter.update();
+        right_gutter.update();
 
         vertical_scrollbar->setPosition({content_width, toolbar_height});
         vertical_scrollbar->setSize({scrollbar_extent, content_height});
@@ -1536,8 +1782,12 @@ Rectangle {
     DiffWidgetInput input = sample_diff_input();
     left_text = render_side_text(input, true);
     right_text = render_side_text(input, false);
-    configure_pane(left, pane_font, left_text);
-    configure_pane(right, pane_font, right_text);
+    configure_pane(left, pane_font, left_text, false);
+    configure_pane(right, pane_font, right_text, true);
+    apply_source_line_gutter(left, input, true);
+    apply_source_line_gutter(right, input, false);
+    left_gutter.setInput(input);
+    right_gutter.setInput(input);
     update_shared_horizontal_scroll_width();
     apply_diff_markers(left, input, true);
     apply_diff_markers(right, input, false);
@@ -1557,6 +1807,10 @@ Rectangle {
     bool refreshing_panes = false;
     bool suppress_selection_tracking = false;
     bool last_right_click_left_side = true;
+    std::function<void()> flush_right_display_edits = []() {};
+    QTimer right_edit_flush_timer;
+    right_edit_flush_timer.setInterval(120);
+    right_edit_flush_timer.setSingleShot(true);
     const auto update_active_hunk_boundaries = [&]() {
         const auto hide_boundaries = [&]() {
             for (QQuickItem* boundary : std::array{left_top_hunk_boundary, left_bottom_hunk_boundary,
@@ -1694,6 +1948,7 @@ Rectangle {
         return std::clamp(hunk_row - lines_on_screen / 2, 0, max_first_line);
     };
     const auto navigate_hunk = [&](int direction) {
+        flush_right_display_edits();
         const int target_index = hunk_navigation_target(direction);
         if (target_index < 0) {
             return;
@@ -1713,15 +1968,19 @@ Rectangle {
         update_hunk_controls();
         update_active_hunk_boundaries();
     };
-    const auto refresh_panes_from_input = [&]() {
+    const auto refresh_panes_from_input = [&](int restore_right_caret_position = -1) {
         const int previous_first_visible_line = static_cast<int>(left.send(SCI_GETFIRSTVISIBLELINE));
         const int previous_x_offset = static_cast<int>(left.send(SCI_GETXOFFSET));
 
         refreshing_panes = true;
         left_text = render_side_text(input, true);
         right_text = render_side_text(input, false);
-        configure_pane(left, pane_font, left_text);
-        configure_pane(right, pane_font, right_text);
+        configure_pane(left, pane_font, left_text, false);
+        configure_pane(right, pane_font, right_text, true);
+        apply_source_line_gutter(left, input, true);
+        apply_source_line_gutter(right, input, false);
+        left_gutter.setInput(input);
+        right_gutter.setInput(input);
         update_shared_horizontal_scroll_width();
         apply_diff_markers(left, input, true);
         apply_diff_markers(right, input, false);
@@ -1743,6 +2002,13 @@ Rectangle {
             left.scrollHorizontal(restored_x_offset);
             right.scrollHorizontal(restored_x_offset);
         });
+        if (restore_right_caret_position >= 0) {
+            const int restored_position =
+                std::clamp(restore_right_caret_position, 0, static_cast<int>(right.send(SCI_GETLENGTH)));
+            suppress_selection_tracking = true;
+            right.send(SCI_SETSEL, restored_position, restored_position);
+            suppress_selection_tracking = false;
+        }
         refresh_vertical_scrollbar();
         refresh_horizontal_scrollbar();
     };
@@ -1756,7 +2022,35 @@ Rectangle {
         update_hunk_controls();
         update_active_hunk_boundaries();
     };
+    flush_right_display_edits = [&]() {
+        right_edit_flush_timer.stop();
+        if (refreshing_panes) {
+            return;
+        }
+
+        const QString edited_right_text = right.property("text").toString();
+        const QString previous_right_text = render_side_text(input, false);
+        if (edited_right_text == previous_right_text) {
+            return;
+        }
+
+        const sptr_t selection_start = right.send(SCI_GETSELECTIONSTART);
+        const sptr_t selection_end = right.send(SCI_GETSELECTIONEND);
+        const int right_caret_position = static_cast<int>(
+            selection_start == selection_end ? right.send(SCI_GETCURRENTPOS) : std::min(selection_start, selection_end));
+        input.rightText = source_text_from_display_text(edited_right_text, previous_right_text, input.rows, false);
+        input.rows = raw_text_diff_rows(input.leftText, input.rightText);
+        validate_diff_input(input);
+        hunk_start_rows = hunk_start_display_rows(input);
+        active_first_row = -1;
+        active_end_row = -1;
+        selected_hunk_index = -1;
+        refresh_panes_from_input(right_caret_position);
+        update_hunk_controls();
+        update_active_hunk_boundaries();
+    };
     const auto apply_selected_hunk = [&](bool left_to_right) {
+        flush_right_display_edits();
         const bool target_left_side = !left_to_right;
         if (!apply_display_row_range_to_target(input, active_first_row, active_end_row, target_left_side)) {
             return;
@@ -1764,6 +2058,7 @@ Rectangle {
         refresh_after_merge();
     };
     const auto apply_context_menu_action = [&](MergeAction action) {
+        flush_right_display_edits();
         if (active_first_row < 0 || active_end_row <= active_first_row) {
             return;
         }
@@ -1790,9 +2085,162 @@ Rectangle {
     };
     QObject::connect(&left, &ScintillaQuick_item::keyPressed, &window, handle_hunk_shortcut);
     QObject::connect(&right, &ScintillaQuick_item::keyPressed, &window, handle_hunk_shortcut);
+    const auto merge_position_from_pane_position = [&](ScintillaQuick_item& pane, sptr_t position) {
+        const int row = static_cast<int>(pane.send(SCI_LINEFROMPOSITION, position));
+        const sptr_t line_start = pane.send(SCI_POSITIONFROMLINE, row);
+        // ponytail: demo fixture is ASCII; use Scintilla byte-to-QString mapping when Unicode editing matters.
+        return MergePosition{row, static_cast<qsizetype>(std::max<sptr_t>(0, position - line_start))};
+    };
+    const auto normalize_selection_end_position = [&](ScintillaQuick_item& pane, MergePosition first, MergePosition last) {
+        if (last.row > first.row && last.column == 0) {
+            --last.row;
+            const sptr_t line_start = pane.send(SCI_POSITIONFROMLINE, last.row);
+            const sptr_t line_end = pane.send(SCI_GETLINEENDPOSITION, last.row);
+            last.column = static_cast<qsizetype>(std::max<sptr_t>(0, line_end - line_start));
+        }
+        return last;
+    };
+    const auto set_right_caret_at_merge_position = [&](MergePosition position) {
+        const int line_count = std::max(1, static_cast<int>(right.send(SCI_GETLINECOUNT)));
+        const int row = std::clamp(position.row, 0, line_count - 1);
+        const sptr_t line_start = right.send(SCI_POSITIONFROMLINE, row);
+        const sptr_t line_end = right.send(SCI_GETLINEENDPOSITION, row);
+        const sptr_t caret = std::clamp<sptr_t>(line_start + position.column, line_start, line_end);
+        suppress_selection_tracking = true;
+        right.send(SCI_SETSEL, caret, caret);
+        suppress_selection_tracking = false;
+    };
+    const auto nearest_right_real_row = [&](int row) {
+        if (row < 0 || row >= static_cast<int>(input.rows.size())) {
+            return -1;
+        }
+        if (input.rows[static_cast<size_t>(row)].rightSourceLine != -1) {
+            return row;
+        }
+        for (int distance = 1; distance < static_cast<int>(input.rows.size()); ++distance) {
+            const int next_row = row + distance;
+            if (next_row < static_cast<int>(input.rows.size()) &&
+                input.rows[static_cast<size_t>(next_row)].rightSourceLine != -1)
+            {
+                return next_row;
+            }
+            const int previous_row = row - distance;
+            if (previous_row >= 0 && input.rows[static_cast<size_t>(previous_row)].rightSourceLine != -1) {
+                return previous_row;
+            }
+        }
+        return -1;
+    };
+    const auto snap_right_caret_off_gap = [&]() {
+        if (refreshing_panes || suppress_selection_tracking) {
+            return;
+        }
+
+        const sptr_t selection_start = right.send(SCI_GETSELECTIONSTART);
+        const sptr_t selection_end = right.send(SCI_GETSELECTIONEND);
+        if (selection_start != selection_end) {
+            return;
+        }
+
+        const int row = static_cast<int>(right.send(SCI_LINEFROMPOSITION, selection_start));
+        if (row < 0 || row >= static_cast<int>(input.rows.size()) ||
+            input.rows[static_cast<size_t>(row)].rightSourceLine != -1)
+        {
+            return;
+        }
+
+        const int target_row = nearest_right_real_row(row);
+        if (target_row != -1) {
+            set_right_caret_at_merge_position({target_row, 0});
+        }
+    };
+    const auto replacement_end_position = [](MergePosition first, QString replacement_text) {
+        replacement_text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+        replacement_text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+        const QStringList lines = replacement_text.split(QLatin1Char('\n'), Qt::KeepEmptyParts);
+        if (lines.size() <= 1) {
+            return MergePosition{first.row, first.column + replacement_text.size()};
+        }
+        return MergePosition{first.row + static_cast<int>(lines.size()) - 1, lines.last().size()};
+    };
+    const auto handle_right_selection_edit = [&](QEvent* event) {
+        if (event->type() != QEvent::KeyPress) {
+            return false;
+        }
+
+        auto* key_event = static_cast<QKeyEvent*>(event);
+        const sptr_t selection_start = right.send(SCI_GETSELECTIONSTART);
+        const sptr_t selection_end = right.send(SCI_GETSELECTIONEND);
+        if (selection_start == selection_end || right.property("text").toString() != render_side_text(input, false)) {
+            return false;
+        }
+
+        bool replace_with_text = false;
+        QString replacement_text;
+        constexpr Qt::KeyboardModifiers delete_modifiers = Qt::KeypadModifier;
+        const bool delete_key = key_event->key() == Qt::Key_Backspace || key_event->key() == Qt::Key_Delete;
+        if (delete_key) {
+            if (key_event->modifiers() & ~delete_modifiers) {
+                return false;
+            }
+        }
+        else if (key_event->key() == Qt::Key_V && key_event->modifiers() == Qt::ControlModifier) {
+            replacement_text = QGuiApplication::clipboard()->text();
+            if (replacement_text.isEmpty()) {
+                return false;
+            }
+            replace_with_text = true;
+        }
+        else if ((key_event->key() == Qt::Key_Return || key_event->key() == Qt::Key_Enter) &&
+            !(key_event->modifiers() & ~Qt::KeypadModifier))
+        {
+            replacement_text = QStringLiteral("\n");
+            replace_with_text = true;
+        }
+        else {
+            constexpr Qt::KeyboardModifiers text_modifiers = Qt::ShiftModifier | Qt::KeypadModifier;
+            if ((key_event->modifiers() & ~text_modifiers) || key_event->text().isEmpty() ||
+                !key_event->text().front().isPrint())
+            {
+                return false;
+            }
+            replacement_text = key_event->text();
+            replace_with_text = true;
+        }
+
+        MergePosition first = merge_position_from_pane_position(right, std::min(selection_start, selection_end));
+        MergePosition last = merge_position_from_pane_position(right, std::max(selection_start, selection_end));
+        last = normalize_selection_end_position(right, first, last);
+        const MergePosition caret_position =
+            replace_with_text ? replacement_end_position(first, replacement_text) : first;
+
+        MergeModel model = merge_model_from_input(input);
+        const bool applied = replace_with_text ? replace_selection(model, MergeSide::Right, first, last, replacement_text) :
+                                                 delete_selection(model, MergeSide::Right, first, last);
+        if (!applied) {
+            return false;
+        }
+
+        right_edit_flush_timer.stop();
+        apply_merge_model_to_input(input, model);
+        validate_diff_input(input);
+        hunk_start_rows = hunk_start_display_rows(input);
+        active_first_row = -1;
+        active_end_row = -1;
+        selected_hunk_index = -1;
+        refresh_panes_from_input();
+        set_right_caret_at_merge_position(caret_position);
+        update_hunk_controls();
+        update_active_hunk_boundaries();
+        key_event->accept();
+        return true;
+    };
+    EventFilter right_selection_edit_filter(handle_right_selection_edit);
+    right.installEventFilter(&right_selection_edit_filter);
     const auto install_source_side_copy = [&](ScintillaQuick_item& pane, bool left_side) {
         auto* pane_ptr = &pane;
         QObject::connect(&pane, &ScintillaQuick_item::aboutToCopy, &window, [&, pane_ptr, left_side](QMimeData* data) {
+            flush_right_display_edits();
             const int first_display_row =
                 static_cast<int>(pane_ptr->send(SCI_LINEFROMPOSITION, pane_ptr->send(SCI_GETSELECTIONSTART)));
             data->setText(source_side_copy_text(data->text(), input.rows, left_side, first_display_row));
@@ -1800,6 +2248,22 @@ Rectangle {
     };
     install_source_side_copy(left, true);
     install_source_side_copy(right, false);
+    QObject::connect(&right, &ScintillaQuick_item::modified, &window,
+        [&](Scintilla::ModificationFlags type, Scintilla::Position, Scintilla::Position,
+            Scintilla::Position lines_added, const QByteArray&, Scintilla::Position, Scintilla::FoldLevel,
+            Scintilla::FoldLevel) {
+            if (refreshing_panes) {
+                return;
+            }
+
+            constexpr int text_change_flags =
+                static_cast<int>(Scintilla::ModificationFlags::InsertText) |
+                static_cast<int>(Scintilla::ModificationFlags::DeleteText);
+            if (static_cast<int>(type) & text_change_flags) {
+                right_edit_flush_timer.start(lines_added < 0 ? 0 : 120);
+            }
+        });
+    QObject::connect(&right_edit_flush_timer, &QTimer::timeout, &window, flush_right_display_edits);
     const auto install_active_hunk_tracking = [&](ScintillaQuick_item& pane, bool left_side) {
         auto* pane_ptr = &pane;
         QObject::connect(&pane, &ScintillaQuick_item::buttonPressed, &window, [&, pane_ptr, left_side](QMouseEvent* event) {
@@ -1833,8 +2297,11 @@ Rectangle {
 
             const auto [first_row, end_row] = selected_display_row_range(*pane_ptr);
             set_active_display_row_range(first_row, end_row);
+            if (!left_side) {
+                snap_right_caret_off_gap();
+            }
         });
-        QObject::connect(&pane, &ScintillaQuick_item::updateUi, &window, [&, pane_ptr](Scintilla::Update updated) {
+        QObject::connect(&pane, &ScintillaQuick_item::updateUi, &window, [&, pane_ptr, left_side](Scintilla::Update updated) {
             if (refreshing_panes || suppress_selection_tracking ||
                 !(static_cast<int>(updated) & static_cast<int>(Scintilla::Update::Selection)))
             {
@@ -1843,6 +2310,9 @@ Rectangle {
 
             const auto [first_row, end_row] = selected_display_row_range(*pane_ptr);
             set_active_display_row_range(first_row, end_row);
+            if (!left_side) {
+                snap_right_caret_off_gap();
+            }
         });
     };
     install_active_hunk_tracking(left, true);
@@ -1872,12 +2342,16 @@ Rectangle {
         mirror_scroll([&]() {
             right.scrollVertical(value);
         });
+        left_gutter.update();
+        right_gutter.update();
         update_active_hunk_boundaries();
     });
     QObject::connect(&right, &ScintillaQuick_item::verticalScrolled, &left, [&](int value) {
         mirror_scroll([&]() {
             left.scrollVertical(value);
         });
+        left_gutter.update();
+        right_gutter.update();
         update_active_hunk_boundaries();
     });
     QObject::connect(&left, &ScintillaQuick_item::horizontalScrolled, &right, [&](int value) {
@@ -1899,16 +2373,22 @@ Rectangle {
     });
     QObject::connect(&left, &ScintillaQuick_item::zoom, &right, [&](int value) {
         mirror_zoom(right, value);
+        left_gutter.update();
+        right_gutter.update();
     });
     QObject::connect(&right, &ScintillaQuick_item::zoom, &left, [&](int value) {
         mirror_zoom(left, value);
         update_shared_horizontal_scroll_width();
         layout_panes();
+        left_gutter.update();
+        right_gutter.update();
         update_active_hunk_boundaries();
     });
     QObject::connect(&left, &ScintillaQuick_item::zoom, vertical_scrollbar, [&](int) {
         update_shared_horizontal_scroll_width();
         layout_panes();
+        left_gutter.update();
+        right_gutter.update();
         update_active_hunk_boundaries();
     });
     QObject::connect(root, &QQuickItem::widthChanged, &window, update_active_hunk_boundaries);
