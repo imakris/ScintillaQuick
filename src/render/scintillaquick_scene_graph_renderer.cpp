@@ -17,6 +17,7 @@
 #include <QSGGeometryNode>
 #include <QQuickWindow>
 #include <QSGNode>
+#include <QHash>
 #include <QSGRectangleNode>
 #include <QSGRendererInterface>
 #include <QSGTransformNode>
@@ -1331,6 +1332,105 @@ std::vector<QPointF> make_diamond_points(const QRectF& rect)
     };
 }
 
+// Content-keyed shaped-layout cache. Re-shaping a QTextLayout per syntax run on
+// every large scroll dominated scroll latency: a PageDown reveals a whole
+// viewport of runs, and runs (keywords, punctuation, indentation, common
+// identifiers) repeat heavily within and across frames. Caching the shaped
+// layout by content lets recurring runs skip the QTextLayout shaping step.
+// Only left-to-right runs are cached: their glyph positions are relative to x=0
+// and are placed via addTextLayout's position argument, so one shaped layout is
+// reusable at any position. RTL/mixed runs depend on run.width and are not
+// cached. addTextLayout only reads the layout, so sharing one across nodes is
+// safe. The cache is thread_local because shaping runs on the scene-graph
+// render thread.
+struct Shaped_run
+{
+    std::shared_ptr<QTextLayout> layout;
+    qreal ascent = 0.0;
+};
+
+std::shared_ptr<QTextLayout> shape_text_run(const Text_run& run, qreal& ascent_out)
+{
+    auto layout = std::make_shared<QTextLayout>(run.text, run.font);
+
+    QTextOption option;
+    option.setWrapMode(QTextOption::NoWrap);
+    if (run.direction == Text_direction::right_to_left) {
+        option.setTextDirection(Qt::RightToLeft);
+    }
+    else
+    if (run.direction == Text_direction::mixed) {
+        option.setTextDirection(Qt::LayoutDirectionAuto);
+    }
+    else {
+        option.setTextDirection(Qt::LeftToRight);
+    }
+    layout->setTextOption(option);
+
+    QTextCharFormat format;
+    format.setForeground(run.foreground);
+    format.setFont(run.font);
+
+    QTextLayout::FormatRange range;
+    range.start  = 0;
+    range.length = run.text.length();
+    range.format = format;
+    layout->setFormats({range});
+
+    ascent_out = 0.0;
+    layout->beginLayout();
+    QTextLine line = layout->createLine();
+    if (line.isValid()) {
+        if (run.direction == Text_direction::right_to_left ||
+            run.direction == Text_direction::mixed)
+        {
+            line.setLineWidth(std::max<qreal>(1.0, run.width));
+        }
+        else {
+            line.setLineWidth(1000000.0);
+        }
+        line.setPosition(QPointF(0.0, 0.0));
+        ascent_out = line.ascent();
+    }
+    layout->endLayout();
+    return layout;
+}
+
+Shaped_run get_shaped_run(const Text_run& run)
+{
+    // RTL / mixed runs depend on run.width, so the shaped result is
+    // position-dependent and must not be shared by content.
+    if (run.direction != Text_direction::left_to_right) {
+        Shaped_run shaped;
+        shaped.layout = shape_text_run(run, shaped.ascent);
+        return shaped;
+    }
+
+    static thread_local QHash<QString, Shaped_run> cache;
+
+    QString key = run.text;
+    key += QLatin1Char('\x1f');
+    key += run.font.key();
+    key += QLatin1Char('\x1f');
+    key += QString::number(run.foreground.rgba());
+
+    const auto it = cache.constFind(key);
+    if (it != cache.constEnd()) {
+        return it.value();
+    }
+
+    Shaped_run shaped;
+    shaped.layout = shape_text_run(run, shaped.ascent);
+
+    // Bound the cache; recurring runs repopulate immediately after a clear.
+    constexpr int k_max_shaped_run_cache_entries = 4096;
+    if (cache.size() >= k_max_shaped_run_cache_entries) {
+        cache.clear();
+    }
+    cache.insert(key, shaped);
+    return shaped;
+}
+
 class Scene_graph_frame_text_node final : public QSGNode
 {
 public:
@@ -1470,68 +1570,15 @@ public:
                 continue;
             }
 
-            std::unique_ptr<QTextLayout> layout;
-            qreal line_ascent = 0.0;
-            {
-                layout = std::make_unique<QTextLayout>(run.text, run.font);
+            const Shaped_run shaped = get_shaped_run(run);
+            const QPointF pos(
+                run.position.x(),
+                run.position.y() - shaped.ascent);
 
-                QTextOption option;
-                option.setWrapMode(QTextOption::NoWrap);
-                if (run.direction == Text_direction::right_to_left) {
-                    option.setTextDirection(Qt::RightToLeft);
-                }
-                else
-                if (run.direction == Text_direction::mixed) {
-                    option.setTextDirection(Qt::LayoutDirectionAuto);
-                }
-                else {
-                    option.setTextDirection(Qt::LeftToRight);
-                }
-                layout->setTextOption(option);
-
-                QTextCharFormat format;
-                format.setForeground(run.foreground);
-                format.setFont(run.font);
-
-                QTextLayout::FormatRange range;
-                range.start  = 0;
-                range.length = run.text.length();
-                range.format = format;
-                layout->setFormats({range});
-            }
-
-            {
-                layout->beginLayout();
-                QTextLine line = layout->createLine();
-                if (line.isValid()) {
-                    if (run.direction == Text_direction::right_to_left ||
-                        run.direction == Text_direction::mixed)
-                    {
-                        line.setLineWidth(std::max<qreal>(1.0, run.width));
-                    }
-                    else {
-                        line.setLineWidth(1000000.0);
-                    }
-                    line.setPosition(QPointF(0.0, 0.0));
-                    line_ascent = line.ascent();
-                }
-                layout->endLayout();
-            }
-
-            {
-                const QPointF pos(
-                    run.position.x(),
-                    run.position.y() - line_ascent);
-
-                {
-                    m_text_node->addTextLayout(pos, layout.get());
-                }
-                {
-                    m_layouts.push_back(std::move(layout));
-                    m_cached_runs.push_back(run);
-                    m_layout_positions.push_back(run.position);
-                }
-            }
+            m_text_node->addTextLayout(pos, shaped.layout.get());
+            m_layouts.push_back(shaped.layout);
+            m_cached_runs.push_back(run);
+            m_layout_positions.push_back(run.position);
         }
 
         m_cached_key      = visual_line.key;
@@ -1599,7 +1646,7 @@ public:
             return;
         }
 
-        auto layout = std::make_unique<QTextLayout>(margin.text, margin.font);
+        auto layout = std::make_shared<QTextLayout>(margin.text, margin.font);
 
         QTextOption option;
         option.setWrapMode(QTextOption::NoWrap);
@@ -1883,7 +1930,7 @@ public:
     struct Backup_shape_state
     {
         QSGTextNode* text_node = nullptr; // detached from the scene graph
-        std::vector<std::unique_ptr<QTextLayout>> layouts;
+        std::vector<std::shared_ptr<QTextLayout>> layouts;
         std::vector<Text_run> cached_runs;
         std::vector<QPointF> layout_positions;
         QPointF translation{0.0, 0.0};
@@ -1896,7 +1943,7 @@ public:
     QSGClipNode* m_clip_node = nullptr;
     QSGTextNode* m_text_node = nullptr;
     QSGTransformNode* m_transform_node = nullptr;
-    std::vector<std::unique_ptr<QTextLayout>> m_layouts;
+    std::vector<std::shared_ptr<QTextLayout>> m_layouts;
     std::vector<Text_run> m_cached_runs;
     std::vector<QPointF> m_layout_positions;
     Visual_line_key m_cached_key;
