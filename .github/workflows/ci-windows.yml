@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: Windows / Qt 6.7.2 / shared=${{ matrix.build-shared }}
+    name: Windows / Qt 6.10.1 / shared=${{ matrix.build-shared }}
     runs-on: windows-latest
 
     strategy:
@@ -26,8 +26,8 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: 6.7.2
-          arch: win64_msvc2019_64
+          version: 6.10.1
+          arch: win64_msvc2022_64
           cache: true
 
       - name: Configure
