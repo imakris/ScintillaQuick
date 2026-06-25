@@ -473,6 +473,10 @@ Render_frame ScintillaQuick_core::current_render_frame(
     if (ensure_styled) {
         ensure_visible_range_styled(scrolling);
     }
+    if (static_content_dirty) {
+        RefreshStyleData();
+        WrapLines(WrapScope::wsVisible);
+    }
 
     const QSize capture_surface_size(1, 1);
     QImage capture_surface(capture_surface_size, QImage::Format_ARGB32_Premultiplied);

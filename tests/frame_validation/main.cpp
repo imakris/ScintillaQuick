@@ -539,6 +539,51 @@ static bool test_plain_ascii_long_wrap()
     return ok;
 }
 
+static bool test_cached_frame_wrap_toggle_rebuilds()
+{
+    const char* id = "cached_frame_wrap_toggle_rebuilds";
+    qDebug("--- %s", id);
+
+    Fixture_editor f;
+    f.editor.setWidth(200);
+    f.set_text(
+        "The quick brown fox jumps over the lazy dog and then keeps running "
+        "until this single document line must wrap into several visual sublines.");
+
+    f.editor.send(SCI_SETWRAPMODE, SC_WRAP_WORD);
+    const Render_frame wrapped_frame = f.capture_cached();
+
+    f.editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
+    const Render_frame unwrapped_frame = f.capture_cached();
+    dump_frame_summary(id, unwrapped_frame);
+
+    int wrapped_doc_line_count = 0;
+    int unwrapped_doc_line_count = 0;
+    int max_unwrapped_subline = 0;
+    for (const Visual_line_frame& line : wrapped_frame.visual_lines) {
+        if (line.key.document_line == 0) {
+            ++wrapped_doc_line_count;
+        }
+    }
+    for (const Visual_line_frame& line : unwrapped_frame.visual_lines) {
+        if (line.key.document_line == 0) {
+            ++unwrapped_doc_line_count;
+            max_unwrapped_subline = std::max(max_unwrapped_subline, line.key.subline_index);
+        }
+    }
+
+    bool ok = true;
+    ok &= check(wrapped_doc_line_count >= 2, id,
+        "wrap mode must produce multiple cached visual sublines");
+    ok &= check(unwrapped_doc_line_count == 1, id,
+        "turning wrap off must rebuild cached visual lines");
+    ok &= check(max_unwrapped_subline == 0, id,
+        "unwrapped document line must not keep stale wrapped subline indexes");
+    ok &= check_no_overlapping_runs(unwrapped_frame, id);
+    ok &= check_visual_lines_no_vertical_overlap(unwrapped_frame, id);
+    return ok;
+}
+
 static bool test_horizontal_scroll_resets_on_doc_switch()
 {
     const char* id = "horizontal_scroll_resets_on_doc_switch";
@@ -2418,6 +2463,7 @@ int main(int argc, char** argv)
         // Phase 2 fixtures
         {"plain_ascii_short",                        test_plain_ascii_short},
         {"plain_ascii_long_wrap",                    test_plain_ascii_long_wrap},
+        {"cached_frame_wrap_toggle_rebuilds",        test_cached_frame_wrap_toggle_rebuilds},
         {"horizontal_scroll_resets_on_doc_switch",   test_horizontal_scroll_resets_on_doc_switch},
         {"caret_left_scrolls_to_long_previous_line", test_caret_left_scrolls_to_long_previous_line},
         {"vertical_scroll_reuse_translates_secondary_geometry",
