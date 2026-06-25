@@ -13,7 +13,11 @@ concurrency:
 jobs:
   build:
     name: macOS / Qt 6.7.2 / shared=${{ matrix.build-shared }}
-    runs-on: macos-latest
+    # Qt 6.7.2's macOS link interface pulls in the deprecated AGL framework,
+    # which newer macos runner SDKs no longer ship ("ld: framework 'AGL' not
+    # found"). Pin to a runner whose SDK still provides AGL until Qt is bumped
+    # to a version that drops the reference.
+    runs-on: macos-13
 
     strategy:
       fail-fast: false
