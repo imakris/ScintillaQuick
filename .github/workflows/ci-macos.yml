@@ -13,11 +13,7 @@ concurrency:
 jobs:
   build:
     name: macOS / Qt 6.7.2 / shared=${{ matrix.build-shared }}
-    # Qt 6.7.2's macOS link interface pulls in the deprecated AGL framework,
-    # which newer macos runner SDKs no longer ship ("ld: framework 'AGL' not
-    # found"). Pin to a runner whose SDK still provides AGL until Qt is bumped
-    # to a version that drops the reference.
-    runs-on: macos-13
+    runs-on: macos-latest
 
     strategy:
       fail-fast: false
@@ -33,6 +29,21 @@ jobs:
           version: 6.7.2
           arch: clang_64
           cache: true
+
+      # Qt 6.7.2's macOS link interface still references the deprecated AGL
+      # framework, which recent macOS SDKs (macos-latest) no longer ship,
+      # producing "ld: framework 'AGL' not found". AGL is unused at runtime, so
+      # provide an empty stub for the linker to resolve, and drop the unused
+      # dependency from the output with -dead_strip_dylibs.
+      - name: Provide an AGL framework stub for the linker
+        run: |
+          set -euo pipefail
+          stub="$RUNNER_TEMP/agl-stub"
+          mkdir -p "$stub/AGL.framework"
+          printf 'int scintillaquick_agl_stub = 0;\n' > "$RUNNER_TEMP/agl_stub.c"
+          clang -arch arm64 -arch x86_64 -dynamiclib \
+            -o "$stub/AGL.framework/AGL" "$RUNNER_TEMP/agl_stub.c"
+          echo "LDFLAGS=-F$stub -Wl,-dead_strip_dylibs" >> "$GITHUB_ENV"
 
       - name: Configure
         run: >
