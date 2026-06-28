@@ -6,11 +6,13 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QEventLoop>
+#include <QElapsedTimer>
 #include <QFont>
 #include <QFontInfo>
 #include <QDebug>
 #include <QGuiApplication>
 #include <QKeyEvent>
+#include <QQuickWindow>
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +24,7 @@
 
 #include "Scintilla.h"
 #include "scintillaquick_font.h"
+#include "scintillaquick_test_documents.h"
 
 // This test exercises Scintilla::Internal render data directly, so keeping the
 // internal namespace open here keeps the assertions readable.
@@ -94,6 +97,39 @@ bool check(bool condition, const char* fixture_id, const char* detail)
     return true;
 }
 
+bool wait_for_ready(QQuickWindow& window, Fixture_editor& fixture, const char* id, int timeout_ms = 2000)
+{
+    QElapsedTimer timer;
+    timer.start();
+
+    while (timer.elapsed() < timeout_ms) {
+        window.raise();
+        window.requestActivate();
+        fixture.editor.forceActiveFocus();
+        fixture.editor.send(SCI_SETFOCUS, 1);
+        fixture.pump();
+
+        if (window.isExposed() && fixture.editor.hasActiveFocus()) {
+            return check(true, id, "fixture window must be exposed with editor focus");
+        }
+    }
+
+    const QSize window_size = window.size();
+    const QString detail = QStringLiteral(
+        "fixture window readiness timed out: exposed=%1 editor_active_focus=%2 "
+        "visible=%3 active=%4 window_size=%5x%6 editor_size=%7x%8")
+        .arg(window.isExposed())
+        .arg(fixture.editor.hasActiveFocus())
+        .arg(window.isVisible())
+        .arg(window.isActive())
+        .arg(window_size.width())
+        .arg(window_size.height())
+        .arg(static_cast<int>(fixture.editor.width()))
+        .arg(static_cast<int>(fixture.editor.height()));
+    const QByteArray detail_utf8 = detail.toUtf8();
+    return check(false, id, detail_utf8.constData());
+}
+
 QString reconstruct_line_text(const Visual_line_frame& line)
 {
     QString result;
@@ -101,6 +137,90 @@ QString reconstruct_line_text(const Visual_line_frame& line)
         result += run.text;
     }
     return result;
+}
+
+constexpr double k_geometry_tolerance = 1.5;
+
+bool nearly_equal(double a, double b, double tolerance = k_geometry_tolerance)
+{
+    return std::abs(a - b) <= tolerance;
+}
+
+bool rect_y_nearly_equal(const QRectF& a, const QRectF& b, double tolerance = k_geometry_tolerance)
+{
+    if (a.isNull() && b.isNull()) {
+        return true;
+    }
+    return
+        nearly_equal(a.top(), b.top(), tolerance) &&
+        nearly_equal(a.bottom(), b.bottom(), tolerance);
+}
+
+struct Visual_line_signature
+{
+    Visual_line_key key;
+    QString text;
+    QRectF clip_rect;
+};
+
+std::vector<Visual_line_signature> visible_body_line_signatures(const Render_frame& frame)
+{
+    std::vector<Visual_line_signature> lines;
+    for (const Visual_line_frame& line : frame.visual_lines) {
+        if (!line.clip_rect.isValid()) {
+            continue;
+        }
+        if (line.clip_rect.bottom() <= frame.text_rect.top() ||
+            line.clip_rect.top()    >= frame.text_rect.bottom())
+        {
+            continue;
+        }
+
+        lines.push_back({line.key, reconstruct_line_text(line), line.clip_rect});
+    }
+
+    return lines;
+}
+
+bool check_visible_body_lines_match(
+    const Render_frame& actual,
+    const Render_frame& expected,
+    const char* id)
+{
+    const std::vector<Visual_line_signature> actual_lines = visible_body_line_signatures(actual);
+    const std::vector<Visual_line_signature> expected_lines = visible_body_line_signatures(expected);
+
+    bool ok = true;
+    ok &= check(!actual_lines.empty(), id, "actual frame must contain visible body text lines");
+    ok &= check(!expected_lines.empty(), id, "expected frame must contain visible body text lines");
+    ok &= check(actual_lines.size() == expected_lines.size(), id,
+        "visible body line count must match expected frame");
+
+    const size_t count = std::min(actual_lines.size(), expected_lines.size());
+    for (size_t i = 0; i < count; ++i) {
+        ok &= check(!actual_lines[i].text.trimmed().isEmpty(), id,
+            "actual frame body text line must not be blank");
+        ok &= check(actual_lines[i].key == expected_lines[i].key, id,
+            "visual line key must match expected frame");
+        ok &= check(actual_lines[i].text == expected_lines[i].text, id,
+            "visual line text must match expected frame");
+        ok &= check(rect_y_nearly_equal(actual_lines[i].clip_rect, expected_lines[i].clip_rect), id,
+            "visual line clip_rect Y must match expected frame");
+    }
+
+    return ok;
+}
+
+bool rect_nearly_equal(const QRectF& a, const QRectF& b, double tolerance = k_geometry_tolerance)
+{
+    if (a.isNull() && b.isNull()) {
+        return true;
+    }
+    return
+        nearly_equal(a.left(),   b.left(),   tolerance) &&
+        nearly_equal(a.right(),  b.right(),  tolerance) &&
+        nearly_equal(a.top(),    b.top(),    tolerance) &&
+        nearly_equal(a.bottom(), b.bottom(), tolerance);
 }
 
 const Visual_line_frame* find_visual_line(const Render_frame& frame, int document_line)
@@ -388,26 +508,9 @@ bool check_visual_lines_no_vertical_overlap(const Render_frame& frame, const cha
     return ok;
 }
 
-constexpr double k_geometry_tolerance = 1.5;
-
 QColor scintilla_iprgb_color(int value)
 {
     return QColor(value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff);
-}
-
-bool nearly_equal(double a, double b, double tolerance = k_geometry_tolerance)
-{
-    return std::abs(a - b) <= tolerance;
-}
-
-bool rect_y_nearly_equal(const QRectF& a, const QRectF& b, double tolerance = k_geometry_tolerance)
-{
-    if (a.isNull() && b.isNull()) {
-        return true;
-    }
-    return
-        nearly_equal(a.top(), b.top(), tolerance) &&
-        nearly_equal(a.bottom(), b.bottom(), tolerance);
 }
 
 int count_visual_lines_for_document_line(const Render_frame& frame, int document_line)
@@ -678,9 +781,101 @@ static bool test_caret_left_scrolls_to_long_previous_line()
     return ok;
 }
 
-static bool test_vertical_scroll_reuse_translates_secondary_geometry()
+static bool test_cached_overlay_only_selection_refreshes_overlay()
 {
-    const char* id = "vertical_scroll_reuse_translates_secondary_geometry";
+    const char* id = "cached_overlay_only_selection_refreshes_overlay";
+    qDebug("--- %s", id);
+
+    QQuickWindow window;
+    Fixture_editor f;
+    bool ok = true;
+    window.setColor(Qt::white);
+    window.resize(640, 160);
+    f.editor.setParentItem(window.contentItem());
+    f.editor.setHeight(160);
+    f.editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
+    f.editor.send(SCI_SETMARGINTYPEN, 0, SC_MARGIN_NUMBER);
+    f.editor.send(SCI_SETMARGINWIDTHN, 0, 48);
+    f.editor.send(SCI_SETCARETWIDTH, 2);
+    window.show();
+    ok &= wait_for_ready(window, f, id);
+    f.set_text(
+        "alpha bravo charlie\n"
+        "second stable line\n"
+        "third stable line\n"
+        "fourth stable line");
+    f.editor.send(SCI_SETSEL, 0, 0);
+
+    const Render_frame fresh_before = f.capture();
+    const Render_frame cached_before = f.capture_cached();
+
+    f.editor.send(SCI_SETSEL, 6, 11);
+    const Render_frame cached_after = f.capture_cached();
+    const Render_frame fresh_after = f.capture();
+    dump_frame_summary(id, cached_after);
+
+    ok &= check_visible_body_lines_match(cached_before, fresh_before, id);
+    ok &= check_visible_body_lines_match(cached_after, cached_before, id);
+    ok &= check_visible_body_lines_match(cached_after, fresh_after, id);
+
+    ok &= check(cached_before.selection_primitives.empty(), id,
+        "fixture must start without a selection primitive");
+    ok &= check(!cached_after.selection_primitives.empty(), id,
+        "cached overlay-only frame must include the new selection primitive");
+    ok &= check(cached_after.selection_primitives.size() == fresh_after.selection_primitives.size(), id,
+        "cached overlay-only selection count must match fresh capture");
+    ok &= check(cached_after.caret_primitives.size() == fresh_after.caret_primitives.size(), id,
+        "cached overlay-only caret count must match fresh capture");
+    ok &= check(!cached_after.caret_primitives.empty(), id,
+        "cached overlay-only frame must include the moved caret primitive");
+
+    const size_t selection_count =
+        std::min(cached_after.selection_primitives.size(), fresh_after.selection_primitives.size());
+    for (size_t i = 0; i < selection_count; ++i) {
+        const Selection_primitive& cached_selection = cached_after.selection_primitives[i];
+        const Selection_primitive& fresh_selection  = fresh_after.selection_primitives[i];
+        ok &= check(rect_nearly_equal(cached_selection.rect, fresh_selection.rect), id,
+            "cached overlay-only selection rect must match fresh capture");
+        ok &= check(cached_selection.color == fresh_selection.color, id,
+            "cached overlay-only selection color must match fresh capture");
+        ok &= check(cached_selection.is_main == fresh_selection.is_main, id,
+            "cached overlay-only selection main flag must match fresh capture");
+    }
+
+    const size_t caret_count =
+        std::min(cached_after.caret_primitives.size(), fresh_after.caret_primitives.size());
+    for (size_t i = 0; i < caret_count; ++i) {
+        const Caret_primitive& cached_caret = cached_after.caret_primitives[i];
+        const Caret_primitive& fresh_caret  = fresh_after.caret_primitives[i];
+        ok &= check(rect_nearly_equal(cached_caret.rect, fresh_caret.rect), id,
+            "cached overlay-only caret rect must match fresh capture");
+        ok &= check(cached_caret.color == fresh_caret.color, id,
+            "cached overlay-only caret color must match fresh capture");
+        ok &= check(cached_caret.is_main == fresh_caret.is_main, id,
+            "cached overlay-only caret main flag must match fresh capture");
+    }
+    if (!cached_before.caret_primitives.empty() && !cached_after.caret_primitives.empty()) {
+        const bool caret_moved = !rect_nearly_equal(
+            cached_before.caret_primitives.front().rect,
+            cached_after.caret_primitives.front().rect);
+        ok &= check(caret_moved, id,
+            "cached overlay-only caret rect must move after SCI_SETSEL");
+    }
+
+    ok &= check_selection_overlaps_visual_line(cached_after, id);
+    ok &= check_selection_within_text_area(cached_after, id);
+    ok &= check_caret_within_line_bounds(cached_after, id);
+    f.editor.setParentItem(nullptr);
+    window.close();
+    f.pump();
+    return ok;
+}
+
+// This validates scrolled full-capture parity against direct capture, including
+// normal body text and secondary primitives.
+static bool test_scrolled_full_capture_matches_direct_secondary_geometry()
+{
+    const char* id = "scrolled_full_capture_matches_direct_secondary_geometry";
     qDebug("--- %s", id);
 
     Fixture_editor f;
@@ -735,96 +930,111 @@ static bool test_vertical_scroll_reuse_translates_secondary_geometry()
     f.editor.send(SCI_STARTSTYLING, underline_start);
     f.editor.send(SCI_SETSTYLING, 10, 1);
     f.editor.send(SCI_ANNOTATIONSETVISIBLE, ANNOTATION_STANDARD);
-    const char* annotation_text = "scroll reuse annotation";
+    const char* annotation_text = "scroll update annotation";
     f.editor.send(SCI_ANNOTATIONSETTEXT, 4, reinterpret_cast<sptr_t>(annotation_text));
     f.editor.send(SCI_EOLANNOTATIONSETVISIBLE, EOLANNOTATION_STANDARD);
-    const char* eol_annotation_text = "scroll reuse eol";
+    const char* eol_annotation_text = "scroll update eol";
     f.editor.send(SCI_EOLANNOTATIONSETTEXT, 5, reinterpret_cast<sptr_t>(eol_annotation_text));
     f.pump();
 
     const int initial_first_visible_line = static_cast<int>(f.editor.send(SCI_GETFIRSTVISIBLELINE));
-    const Render_frame initial = f.capture_cached();
-    f.editor.scrollVertical(1);
+    const Render_frame initial_item_frame = f.capture_cached();
+    f.editor.scrollVertical(initial_first_visible_line + 1);
     const int scrolled_first_visible_line = static_cast<int>(f.editor.send(SCI_GETFIRSTVISIBLELINE));
-    const Render_frame cached_after = f.capture_cached();
+    const Render_frame item_after = f.capture_cached();
     const Render_frame direct_after = f.capture();
-    dump_frame_summary(id, cached_after);
+    dump_frame_summary(id, item_after);
 
-    ok &= check(!initial.visual_lines.empty(), id, "initial cached frame must contain visual lines");
+    ok &= check(!initial_item_frame.visual_lines.empty(), id, "initial item frame must contain visual lines");
     ok &= check(scrolled_first_visible_line == initial_first_visible_line + 1, id,
         "fixture must scroll by exactly one visible line");
+    ok &= check_visible_body_lines_match(item_after, direct_after, id);
+    ok &= check(item_after.indicator_primitives.size() == direct_after.indicator_primitives.size(), id,
+        "indicator primitive count must match direct capture after scrolled item-frame update");
+    ok &= check(item_after.whitespace_marks.size() == direct_after.whitespace_marks.size(), id,
+        "whitespace mark count must match direct capture after scrolled item-frame update");
+    ok &= check(item_after.margin_text_primitives.size() == direct_after.margin_text_primitives.size(), id,
+        "margin text primitive count must match direct capture after scrolled item-frame update");
+    ok &= check(item_after.annotations.size() == direct_after.annotations.size(), id,
+        "annotation primitive count must match direct capture after scrolled item-frame update");
+    ok &= check(item_after.eol_annotations.size() == direct_after.eol_annotations.size(), id,
+        "EOL annotation primitive count must match direct capture after scrolled item-frame update");
+    ok &= check(item_after.indent_guides.size() == direct_after.indent_guides.size(), id,
+        "indent guide primitive count must match direct capture after scrolled item-frame update");
+    ok &= check(item_after.decoration_underlines.size() == direct_after.decoration_underlines.size(), id,
+        "decoration underline primitive count must match direct capture after scrolled item-frame update");
 
     bool checked_represented_run = false;
-    for (const Visual_line_frame& cached_line : cached_after.visual_lines) {
-        const Visual_line_frame* direct_line = find_visual_line(direct_after, cached_line.key.document_line);
+    for (const Visual_line_frame& item_line : item_after.visual_lines) {
+        const Visual_line_frame* direct_line = find_visual_line(direct_after, item_line.key.document_line);
         if (!direct_line) {
             continue;
         }
 
-        const size_t run_count = std::min(cached_line.text_runs.size(), direct_line->text_runs.size());
+        const size_t run_count = std::min(item_line.text_runs.size(), direct_line->text_runs.size());
         for (size_t i = 0; i < run_count; ++i) {
-            const Text_run& cached_run = cached_line.text_runs[i];
+            const Text_run& item_run = item_line.text_runs[i];
             const Text_run& direct_run = direct_line->text_runs[i];
-            if (!cached_run.is_represented_text && !cached_run.represented_as_blob) {
+            if (!item_run.is_represented_text && !item_run.represented_as_blob) {
                 continue;
             }
 
-            ok &= check(nearly_equal(cached_run.position.y(), direct_run.position.y()), id,
-                "represented text run position.y must match direct capture after scroll reuse");
-            ok &= check(nearly_equal(cached_run.top, direct_run.top), id,
-                "represented text run top must match direct capture after scroll reuse");
-            ok &= check(nearly_equal(cached_run.bottom, direct_run.bottom), id,
-                "represented text run bottom must match direct capture after scroll reuse");
-            ok &= check(rect_y_nearly_equal(cached_run.blob_text_clip_rect, direct_run.blob_text_clip_rect), id,
-                "represented text clip rect must match direct capture after scroll reuse");
-            ok &= check(rect_y_nearly_equal(cached_run.blob_outer_rect, direct_run.blob_outer_rect), id,
-                "represented blob outer rect must match direct capture after scroll reuse");
-            ok &= check(rect_y_nearly_equal(cached_run.blob_inner_rect, direct_run.blob_inner_rect), id,
-                "represented blob inner rect must match direct capture after scroll reuse");
+            ok &= check(nearly_equal(item_run.position.y(), direct_run.position.y()), id,
+                "represented text run position.y must match direct capture after scrolled item-frame update");
+            ok &= check(nearly_equal(item_run.top, direct_run.top), id,
+                "represented text run top must match direct capture after scrolled item-frame update");
+            ok &= check(nearly_equal(item_run.bottom, direct_run.bottom), id,
+                "represented text run bottom must match direct capture after scrolled item-frame update");
+            ok &= check(rect_y_nearly_equal(item_run.blob_text_clip_rect, direct_run.blob_text_clip_rect), id,
+                "represented text clip rect must match direct capture after scrolled item-frame update");
+            ok &= check(rect_y_nearly_equal(item_run.blob_outer_rect, direct_run.blob_outer_rect), id,
+                "represented blob outer rect must match direct capture after scrolled item-frame update");
+            ok &= check(rect_y_nearly_equal(item_run.blob_inner_rect, direct_run.blob_inner_rect), id,
+                "represented blob inner rect must match direct capture after scrolled item-frame update");
             checked_represented_run = true;
         }
     }
     ok &= check(checked_represented_run, id,
-        "fixture must include at least one represented text/blob run in the scrolled cached frame");
+        "fixture must include at least one represented text/blob run in the scrolled item frame");
 
     bool checked_indicator = false;
-    for (const Indicator_primitive& cached_indicator : cached_after.indicator_primitives) {
+    for (const Indicator_primitive& item_indicator : item_after.indicator_primitives) {
         for (const Indicator_primitive& direct_indicator : direct_after.indicator_primitives) {
-            if (!rect_y_nearly_equal(cached_indicator.rect, direct_indicator.rect)) {
+            if (!rect_y_nearly_equal(item_indicator.rect, direct_indicator.rect)) {
                 continue;
             }
 
-            ok &= check(rect_y_nearly_equal(cached_indicator.line_rect, direct_indicator.line_rect), id,
-                "indicator line_rect must match direct capture after scroll reuse");
-            ok &= check(rect_y_nearly_equal(cached_indicator.character_rect, direct_indicator.character_rect), id,
-                "indicator character_rect must match direct capture after scroll reuse");
+            ok &= check(rect_y_nearly_equal(item_indicator.line_rect, direct_indicator.line_rect), id,
+                "indicator line_rect must match direct capture after scrolled item-frame update");
+            ok &= check(rect_y_nearly_equal(item_indicator.character_rect, direct_indicator.character_rect), id,
+                "indicator character_rect must match direct capture after scrolled item-frame update");
             checked_indicator = true;
             break;
         }
     }
     ok &= check(checked_indicator, id,
-        "fixture must include at least one indicator primitive in the scrolled cached frame");
+        "fixture must include at least one indicator primitive in the scrolled item frame");
 
     bool checked_whitespace = false;
-    for (const Whitespace_mark_primitive& cached_ws : cached_after.whitespace_marks) {
-        const Visual_line_frame* cached_line = find_matching_visual_line(cached_after, cached_ws.rect);
-        if (!cached_line) {
+    for (const Whitespace_mark_primitive& item_ws : item_after.whitespace_marks) {
+        const Visual_line_frame* item_line = find_matching_visual_line(item_after, item_ws.rect);
+        if (!item_line) {
             continue;
         }
 
         const Whitespace_mark_primitive* direct_match = nullptr;
         for (const Whitespace_mark_primitive& direct_ws : direct_after.whitespace_marks) {
-            if (direct_ws.kind != cached_ws.kind ||
-                !nearly_equal(direct_ws.rect.left(), cached_ws.rect.left()) ||
-                !nearly_equal(direct_ws.rect.right(), cached_ws.rect.right()))
+            if (direct_ws.kind != item_ws.kind ||
+                !nearly_equal(direct_ws.rect.left(), item_ws.rect.left()) ||
+                !nearly_equal(direct_ws.rect.right(), item_ws.rect.right()))
             {
                 continue;
             }
 
             const Visual_line_frame* direct_line = find_matching_visual_line(direct_after, direct_ws.rect);
             if (direct_line &&
-                direct_line->key.document_line == cached_line->key.document_line &&
-                direct_line->key.subline_index == cached_line->key.subline_index)
+                direct_line->key.document_line == item_line->key.document_line &&
+                direct_line->key.subline_index == item_line->key.subline_index)
             {
                 direct_match = &direct_ws;
                 break;
@@ -835,106 +1045,106 @@ static bool test_vertical_scroll_reuse_translates_secondary_geometry()
             continue;
         }
 
-        ok &= check(rect_y_nearly_equal(cached_ws.rect, direct_match->rect), id,
-            "whitespace mark rect must match direct capture after scroll reuse");
-        ok &= check(nearly_equal(cached_ws.mid_y, direct_match->mid_y), id,
-            "whitespace mark mid_y must match direct capture after scroll reuse");
+        ok &= check(rect_y_nearly_equal(item_ws.rect, direct_match->rect), id,
+            "whitespace mark rect must match direct capture after scrolled item-frame update");
+        ok &= check(nearly_equal(item_ws.mid_y, direct_match->mid_y), id,
+            "whitespace mark mid_y must match direct capture after scrolled item-frame update");
         checked_whitespace = true;
     }
     ok &= check(checked_whitespace, id,
-        "fixture must include at least one matched whitespace mark in the scrolled cached frame");
+        "fixture must include at least one matched whitespace mark in the scrolled item frame");
 
     bool checked_margin_text = false;
-    for (const Margin_text_primitive& cached_margin : cached_after.margin_text_primitives) {
+    for (const Margin_text_primitive& item_margin : item_after.margin_text_primitives) {
         const auto direct_it = std::find_if(
             direct_after.margin_text_primitives.begin(),
             direct_after.margin_text_primitives.end(),
-            [&cached_margin](const Margin_text_primitive& direct_margin) {
-                return direct_margin.document_line == cached_margin.document_line &&
-                    direct_margin.subline_index == cached_margin.subline_index &&
-                    direct_margin.text == cached_margin.text;
+            [&item_margin](const Margin_text_primitive& direct_margin) {
+                return direct_margin.document_line == item_margin.document_line &&
+                    direct_margin.subline_index == item_margin.subline_index &&
+                    direct_margin.text == item_margin.text;
             });
         if (direct_it == direct_after.margin_text_primitives.end()) {
             continue;
         }
 
-        ok &= check(nearly_equal(cached_margin.position.y(), direct_it->position.y()), id,
-            "margin text position.y must match direct capture after scroll reuse");
-        ok &= check(rect_y_nearly_equal(cached_margin.clip_rect, direct_it->clip_rect), id,
-            "margin text clip_rect must match direct capture after scroll reuse");
-        ok &= check(nearly_equal(cached_margin.baseline_y, direct_it->baseline_y), id,
-            "margin text baseline_y must match direct capture after scroll reuse");
+        ok &= check(nearly_equal(item_margin.position.y(), direct_it->position.y()), id,
+            "margin text position.y must match direct capture after scrolled item-frame update");
+        ok &= check(rect_y_nearly_equal(item_margin.clip_rect, direct_it->clip_rect), id,
+            "margin text clip_rect must match direct capture after scrolled item-frame update");
+        ok &= check(nearly_equal(item_margin.baseline_y, direct_it->baseline_y), id,
+            "margin text baseline_y must match direct capture after scrolled item-frame update");
         checked_margin_text = true;
     }
     ok &= check(checked_margin_text, id,
-        "fixture must include at least one matched margin text primitive in the scrolled cached frame");
+        "fixture must include at least one matched margin text primitive in the scrolled item frame");
 
     bool checked_annotation = false;
-    for (const Annotation_primitive& cached_annotation : cached_after.annotations) {
+    for (const Annotation_primitive& item_annotation : item_after.annotations) {
         const auto direct_it = std::find_if(
             direct_after.annotations.begin(),
             direct_after.annotations.end(),
-            [&cached_annotation](const Annotation_primitive& direct_annotation) {
-                return direct_annotation.document_line == cached_annotation.document_line &&
-                    direct_annotation.annotation_line == cached_annotation.annotation_line &&
-                    direct_annotation.text == cached_annotation.text;
+            [&item_annotation](const Annotation_primitive& direct_annotation) {
+                return direct_annotation.document_line == item_annotation.document_line &&
+                    direct_annotation.annotation_line == item_annotation.annotation_line &&
+                    direct_annotation.text == item_annotation.text;
             });
         if (direct_it == direct_after.annotations.end()) {
             continue;
         }
 
-        ok &= check(nearly_equal(cached_annotation.position.y(), direct_it->position.y()), id,
-            "annotation position.y must match direct capture after scroll reuse");
-        ok &= check(rect_y_nearly_equal(cached_annotation.rect, direct_it->rect), id,
-            "annotation rect must match direct capture after scroll reuse");
-        ok &= check(nearly_equal(cached_annotation.baseline_y, direct_it->baseline_y), id,
-            "annotation baseline_y must match direct capture after scroll reuse");
+        ok &= check(nearly_equal(item_annotation.position.y(), direct_it->position.y()), id,
+            "annotation position.y must match direct capture after scrolled item-frame update");
+        ok &= check(rect_y_nearly_equal(item_annotation.rect, direct_it->rect), id,
+            "annotation rect must match direct capture after scrolled item-frame update");
+        ok &= check(nearly_equal(item_annotation.baseline_y, direct_it->baseline_y), id,
+            "annotation baseline_y must match direct capture after scrolled item-frame update");
         checked_annotation = true;
     }
     ok &= check(checked_annotation, id,
-        "fixture must include at least one matched annotation primitive in the scrolled cached frame");
+        "fixture must include at least one matched annotation primitive in the scrolled item frame");
 
     bool checked_eol_annotation = false;
-    for (const Eol_annotation_primitive& cached_eol : cached_after.eol_annotations) {
+    for (const Eol_annotation_primitive& item_eol : item_after.eol_annotations) {
         const auto direct_it = std::find_if(
             direct_after.eol_annotations.begin(),
             direct_after.eol_annotations.end(),
-            [&cached_eol](const Eol_annotation_primitive& direct_eol) {
-                return direct_eol.document_line == cached_eol.document_line &&
-                    direct_eol.text == cached_eol.text;
+            [&item_eol](const Eol_annotation_primitive& direct_eol) {
+                return direct_eol.document_line == item_eol.document_line &&
+                    direct_eol.text == item_eol.text;
             });
         if (direct_it == direct_after.eol_annotations.end()) {
             continue;
         }
 
-        ok &= check(nearly_equal(cached_eol.position.y(), direct_it->position.y()), id,
-            "EOL annotation position.y must match direct capture after scroll reuse");
-        ok &= check(rect_y_nearly_equal(cached_eol.rect, direct_it->rect), id,
-            "EOL annotation rect must match direct capture after scroll reuse");
-        ok &= check(nearly_equal(cached_eol.baseline_y, direct_it->baseline_y), id,
-            "EOL annotation baseline_y must match direct capture after scroll reuse");
+        ok &= check(nearly_equal(item_eol.position.y(), direct_it->position.y()), id,
+            "EOL annotation position.y must match direct capture after scrolled item-frame update");
+        ok &= check(rect_y_nearly_equal(item_eol.rect, direct_it->rect), id,
+            "EOL annotation rect must match direct capture after scrolled item-frame update");
+        ok &= check(nearly_equal(item_eol.baseline_y, direct_it->baseline_y), id,
+            "EOL annotation baseline_y must match direct capture after scrolled item-frame update");
         checked_eol_annotation = true;
     }
     ok &= check(checked_eol_annotation, id,
-        "fixture must include at least one matched EOL annotation primitive in the scrolled cached frame");
+        "fixture must include at least one matched EOL annotation primitive in the scrolled item frame");
 
-    ok &= check(!cached_after.indent_guides.empty(), id,
-        "fixture must include indent guide primitives in the scrolled cached frame");
+    ok &= check(!item_after.indent_guides.empty(), id,
+        "fixture must include indent guide primitives in the scrolled item frame");
     bool checked_indent_guide = false;
-    for (const Indent_guide_primitive& cached_guide : cached_after.indent_guides) {
-        const QRectF cached_rect(
-            cached_guide.x,
-            cached_guide.top,
+    for (const Indent_guide_primitive& item_guide : item_after.indent_guides) {
+        const QRectF item_rect(
+            item_guide.x,
+            item_guide.top,
             1.0,
-            cached_guide.bottom - cached_guide.top);
-        const Visual_line_frame* cached_line = find_matching_visual_line(cached_after, cached_rect);
-        if (!cached_line) {
+            item_guide.bottom - item_guide.top);
+        const Visual_line_frame* item_line = find_matching_visual_line(item_after, item_rect);
+        if (!item_line) {
             continue;
         }
 
         const Indent_guide_primitive* direct_match = nullptr;
         for (const Indent_guide_primitive& direct_guide : direct_after.indent_guides) {
-            if (!nearly_equal(direct_guide.x, cached_guide.x)) {
+            if (!nearly_equal(direct_guide.x, item_guide.x)) {
                 continue;
             }
 
@@ -945,8 +1155,8 @@ static bool test_vertical_scroll_reuse_translates_secondary_geometry()
                 direct_guide.bottom - direct_guide.top);
             const Visual_line_frame* direct_line = find_matching_visual_line(direct_after, direct_rect);
             if (direct_line &&
-                direct_line->key.document_line == cached_line->key.document_line &&
-                direct_line->key.subline_index == cached_line->key.subline_index)
+                direct_line->key.document_line == item_line->key.document_line &&
+                direct_line->key.subline_index == item_line->key.subline_index)
             {
                 direct_match = &direct_guide;
                 break;
@@ -957,38 +1167,117 @@ static bool test_vertical_scroll_reuse_translates_secondary_geometry()
             continue;
         }
 
-        ok &= check(nearly_equal(cached_guide.top, direct_match->top), id,
-            "indent guide top must match direct capture after scroll reuse");
-        ok &= check(nearly_equal(cached_guide.bottom, direct_match->bottom), id,
-            "indent guide bottom must match direct capture after scroll reuse");
+        ok &= check(nearly_equal(item_guide.top, direct_match->top), id,
+            "indent guide top must match direct capture after scrolled item-frame update");
+        ok &= check(nearly_equal(item_guide.bottom, direct_match->bottom), id,
+            "indent guide bottom must match direct capture after scrolled item-frame update");
         checked_indent_guide = true;
     }
     ok &= check(checked_indent_guide, id,
-        "fixture must include at least one matched indent guide in the scrolled cached frame");
+        "fixture must include at least one matched indent guide in the scrolled item frame");
 
     bool checked_underline = false;
-    for (const Decoration_underline_primitive& cached_underline : cached_after.decoration_underlines) {
+    for (const Decoration_underline_primitive& item_underline : item_after.decoration_underlines) {
         const auto direct_it = std::find_if(
             direct_after.decoration_underlines.begin(),
             direct_after.decoration_underlines.end(),
-            [&cached_underline](const Decoration_underline_primitive& direct_underline) {
-                return direct_underline.kind == cached_underline.kind &&
-                    nearly_equal(direct_underline.rect.left(), cached_underline.rect.left()) &&
-                    nearly_equal(direct_underline.rect.right(), cached_underline.rect.right());
+            [&item_underline](const Decoration_underline_primitive& direct_underline) {
+                return direct_underline.kind == item_underline.kind &&
+                    nearly_equal(direct_underline.rect.left(), item_underline.rect.left()) &&
+                    nearly_equal(direct_underline.rect.right(), item_underline.rect.right());
             });
         if (direct_it == direct_after.decoration_underlines.end()) {
             continue;
         }
 
-        ok &= check(rect_y_nearly_equal(cached_underline.rect, direct_it->rect), id,
-            "decoration underline rect must match direct capture after scroll reuse");
+        ok &= check(rect_y_nearly_equal(item_underline.rect, direct_it->rect), id,
+            "decoration underline rect must match direct capture after scrolled item-frame update");
         checked_underline = true;
     }
     ok &= check(checked_underline, id,
-        "fixture must include at least one matched decoration underline in the scrolled cached frame");
+        "fixture must include at least one matched decoration underline in the scrolled item frame");
 
-    ok &= check_no_overlapping_runs(cached_after, id);
-    ok &= check_visual_lines_no_vertical_overlap(cached_after, id);
+    ok &= check_no_overlapping_runs(item_after, id);
+    ok &= check_visual_lines_no_vertical_overlap(item_after, id);
+    return ok;
+}
+
+static bool test_edit_savepoint_one_line_scroll_matches_fresh_body_text()
+{
+    const char* id = "edit_savepoint_one_line_scroll_matches_fresh_body_text";
+    qDebug("--- %s", id);
+
+    const int initial_first_visible_line = 120;
+    const int edited_line                = 126;
+    const QByteArray inserted_line("inserted visible line\n");
+
+    const auto configure_editor = [](Fixture_editor& fixture) {
+        fixture.editor.setHeight(160);
+        fixture.editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
+        fixture.editor.send(SCI_SETMARGINTYPEN, 0, SC_MARGIN_NUMBER);
+        fixture.editor.send(SCI_SETMARGINWIDTHN, 0, 48);
+        fixture.editor.send(SCI_SETCARETWIDTH, 0);
+    };
+
+    const QString original_text = build_large_document(500);
+    QString final_text = original_text;
+    const QString edit_label = QStringLiteral("Line %1:").arg(edited_line + 1, 6, 10, QLatin1Char('0'));
+    const int insertion_pos = final_text.indexOf(edit_label);
+    bool ok = true;
+    ok &= check(insertion_pos >= 0, id, "fixture must find the edited visible body line");
+    if (insertion_pos < 0) {
+        return false;
+    }
+    final_text.insert(insertion_pos, QString::fromLatin1(inserted_line));
+
+    Fixture_editor f;
+    configure_editor(f);
+    const QByteArray original_utf8 = original_text.toUtf8();
+    f.set_text(original_utf8.constData());
+    f.editor.send(SCI_SETFIRSTVISIBLELINE, initial_first_visible_line);
+    const Render_frame initial_item_frame = f.capture_cached();
+
+    const int first_visible_before_edit = static_cast<int>(f.editor.send(SCI_GETFIRSTVISIBLELINE));
+    ok &= check(first_visible_before_edit == initial_first_visible_line, id,
+        "fixture must start at first visible line 120 before the edit");
+    ok &= check(!visible_body_line_signatures(initial_item_frame).empty(), id,
+        "initial item frame must contain visible body text lines");
+
+    const sptr_t edit_pos = f.editor.send(SCI_POSITIONFROMLINE, edited_line);
+    ok &= check(edit_pos >= 0, id, "fixture must resolve the edited visible body line position");
+    if (edit_pos < 0) {
+        return false;
+    }
+
+    f.editor.send(SCI_INSERTTEXT, edit_pos, reinterpret_cast<sptr_t>(inserted_line.constData()));
+    // Historical repro included a savepoint; these assertions do not depend on savepoint state.
+    f.editor.send(SCI_SETSAVEPOINT);
+    const Render_frame edited_item_frame = f.capture_cached();
+    ok &= check(!visible_body_line_signatures(edited_item_frame).empty(), id,
+        "edited item frame must contain visible body text lines before scrolling");
+
+    const int first_visible_before_scroll = static_cast<int>(f.editor.send(SCI_GETFIRSTVISIBLELINE));
+    ok &= check(first_visible_before_scroll == initial_first_visible_line, id,
+        "edit/savepoint must leave first visible line unchanged before the one-line scroll");
+
+    f.editor.scrollVertical(first_visible_before_scroll + 1);
+    const int first_visible_after_scroll = static_cast<int>(f.editor.send(SCI_GETFIRSTVISIBLELINE));
+    const Render_frame scrolled_item_frame = f.capture_cached();
+    dump_frame_summary(id, scrolled_item_frame);
+
+    ok &= check(first_visible_after_scroll == first_visible_before_scroll + 1, id,
+        "fixture must scroll by exactly one visible line after edit/savepoint");
+
+    Fixture_editor reference;
+    configure_editor(reference);
+    const QByteArray final_utf8 = final_text.toUtf8();
+    reference.set_text(final_utf8.constData());
+    reference.editor.send(SCI_SETFIRSTVISIBLELINE, first_visible_after_scroll);
+    const Render_frame fresh_reference_frame = reference.capture();
+
+    ok &= check_visible_body_lines_match(scrolled_item_frame, fresh_reference_frame, id);
+    ok &= check_no_overlapping_runs(scrolled_item_frame, id);
+    ok &= check_visual_lines_no_vertical_overlap(scrolled_item_frame, id);
     return ok;
 }
 
@@ -2466,8 +2755,12 @@ int main(int argc, char** argv)
         {"cached_frame_wrap_toggle_rebuilds",        test_cached_frame_wrap_toggle_rebuilds},
         {"horizontal_scroll_resets_on_doc_switch",   test_horizontal_scroll_resets_on_doc_switch},
         {"caret_left_scrolls_to_long_previous_line", test_caret_left_scrolls_to_long_previous_line},
-        {"vertical_scroll_reuse_translates_secondary_geometry",
-                                                    test_vertical_scroll_reuse_translates_secondary_geometry},
+        {"cached_overlay_only_selection_refreshes_overlay",
+                                                    test_cached_overlay_only_selection_refreshes_overlay},
+        {"scrolled_full_capture_matches_direct_secondary_geometry",
+                                                    test_scrolled_full_capture_matches_direct_secondary_geometry},
+        {"edit_savepoint_one_line_scroll_matches_fresh_body_text",
+                                                    test_edit_savepoint_one_line_scroll_matches_fresh_body_text},
         {"mixed_styles_wrap",                        test_mixed_styles_wrap},
         {"tab_layout_default",                       test_tab_layout_default},
         {"tab_layout_nondefault",                    test_tab_layout_nondefault},

@@ -298,11 +298,9 @@ void test_public_query_messages_take_fast_path()
         // Line / position lookups that are not named SCI_GET*. These
         // must take the fast path: if they fall through to the
         // conservative default, send() marks the scene graph dirty and
-        // defeats the vertical-scroll reuse fast path in
-        // `build_render_snapshot()`. This is a performance regression
-        // test as much as a correctness one -- the scroll reuse buffer
-        // and its unit test in the embedded benchmark both rely on
-        // these staying on the allow-list.
+        // turns pure lookups into repaint/property-sync work. The
+        // vertical-scroll reuse experiment is disabled, but these reads
+        // still need to stay on the allow-list.
         SCI_POSITIONFROMLINE,
         SCI_LINELENGTH,
         SCI_VISIBLEFROMDOCLINE,

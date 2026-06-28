@@ -78,6 +78,11 @@ namespace
 {
 
 constexpr int k_margin_count = SC_MAX_MARGIN + 1;
+// Vertical scroll-frame translation is compile-disabled; ordinary static
+// invalidation still recaptures. Prior scroll position and content-modified
+// state are still tracked; capture-base state initializes only when this reuse
+// path is enabled and validated.
+constexpr bool k_enable_vertical_scroll_frame_reuse = false;
 constexpr int k_vertical_scroll_reuse_buffer_min_lines = 16;
 
 // `scene_graph_update_request` and `scene_graph_update_request_info_t` live in
@@ -1585,39 +1590,48 @@ void ScintillaQuick_item::build_render_snapshot()
     const int current_first_visible_line = m_core ? static_cast<int>(send(SCI_GETFIRSTVISIBLELINE)) : -1;
     const int current_x_offset           = m_core ? static_cast<int>(send(SCI_GETXOFFSET))          : -1;
     const int previous_scroll_width      = m_core ? static_cast<int>(send(SCI_GETSCROLLWIDTH))      :  0;
-    const int scroll_delta_lines =
-        (m_render_data->previous_first_visible_line >= 0 && current_first_visible_line >= 0)
-            ? (current_first_visible_line - m_render_data->previous_first_visible_line)
-            : 0;
     const bool scroll_position_changed =
         m_render_data->previous_first_visible_line < 0                           ||
         m_render_data->previous_x_offset           < 0                           ||
         current_first_visible_line != m_render_data->previous_first_visible_line ||
         current_x_offset           != m_render_data->previous_x_offset;
-    const bool static_content_dirty =
-        scroll_position_changed ||
-        (m_render_data->static_content_dirty && m_render_data->content_modified_since_last_capture);
-    const bool overlay_only_capture = !static_content_dirty && m_render_data->overlay_content_dirty;
     Render_frame frame;
-    const int line_height = (m_core && m_core->vs.lineHeight > 0) ? m_core->vs.lineHeight : 1;
-    const int capture_buffer_lines = std::max(
-        k_vertical_scroll_reuse_buffer_min_lines,
-        std::max(1, static_cast<int>(height() / line_height) / 3 + 2));
-    const int capture_base_first_visible_line = m_render_data->capture_base_first_visible_line;
-    const int capture_max_first_visible_line =
-        capture_base_first_visible_line >= 0 ? capture_base_first_visible_line + capture_buffer_lines : -1;
-    const bool can_reuse_vertical_scroll =
-        m_render_data->static_content_dirty                           &&
-        m_render_data->scrolling_update                               &&
-        !m_render_data->content_modified_since_last_capture           &&
-        current_x_offset >= 0                                         &&
-        current_x_offset == m_render_data->previous_x_offset          &&
-        current_first_visible_line >= 0                               &&
-        scroll_delta_lines != 0                                       &&
-        std::abs(scroll_delta_lines) <= capture_buffer_lines          &&
-        capture_base_first_visible_line >= 0                          &&
-        current_first_visible_line >= capture_base_first_visible_line &&
-        current_first_visible_line <= capture_max_first_visible_line;
+    int extra_capture_lines        = 0;
+    int scroll_delta_lines         = 0;
+    int line_height                = 1;
+    bool can_reuse_vertical_scroll = false;
+    if constexpr (k_enable_vertical_scroll_frame_reuse) {
+        line_height = (m_core && m_core->vs.lineHeight > 0) ? m_core->vs.lineHeight : 1;
+        scroll_delta_lines =
+            (m_render_data->previous_first_visible_line >= 0 && current_first_visible_line >= 0)
+                ? (current_first_visible_line - m_render_data->previous_first_visible_line)
+                : 0;
+        const int capture_buffer_lines = std::max(
+            k_vertical_scroll_reuse_buffer_min_lines,
+            std::max(1, static_cast<int>(height() / line_height) / 3 + 2));
+        const int capture_base_first_visible_line = m_render_data->capture_base_first_visible_line;
+        const int capture_max_first_visible_line =
+            capture_base_first_visible_line >= 0 ? capture_base_first_visible_line + capture_buffer_lines : -1;
+
+        extra_capture_lines = capture_buffer_lines;
+        can_reuse_vertical_scroll =
+            m_render_data->static_content_dirty                           &&
+            m_render_data->scrolling_update                               &&
+            !m_render_data->content_modified_since_last_capture           &&
+            current_x_offset >= 0                                         &&
+            current_x_offset == m_render_data->previous_x_offset          &&
+            current_first_visible_line >= 0                               &&
+            scroll_delta_lines != 0                                       &&
+            std::abs(scroll_delta_lines) <= capture_buffer_lines          &&
+            capture_base_first_visible_line >= 0                          &&
+            current_first_visible_line >= capture_base_first_visible_line &&
+            current_first_visible_line <= capture_max_first_visible_line;
+    }
+
+    const bool static_content_dirty =
+        (scroll_position_changed || m_render_data->static_content_dirty) &&
+        !can_reuse_vertical_scroll;
+    const bool overlay_only_capture = !static_content_dirty && m_render_data->overlay_content_dirty;
 
     if (can_reuse_vertical_scroll || !static_content_dirty) {
         snapshot = m_render_data->snapshot;
@@ -1637,7 +1651,7 @@ void ScintillaQuick_item::build_render_snapshot()
             static_content_dirty,
             m_render_data->style_sync_needed && static_content_dirty,
             m_render_data->scrolling_update,
-            capture_buffer_lines);
+            extra_capture_lines);
     }
 
     if (can_reuse_vertical_scroll || !static_content_dirty) {
@@ -1672,8 +1686,10 @@ void ScintillaQuick_item::build_render_snapshot()
     m_render_data->scrolling_update                    = false;
     m_render_data->overlay_content_dirty               = false;
     m_render_data->content_modified_since_last_capture = false;
-    if (!can_reuse_vertical_scroll) {
-        m_render_data->capture_base_first_visible_line = current_first_visible_line;
+    if constexpr (k_enable_vertical_scroll_frame_reuse) {
+        if (!can_reuse_vertical_scroll) {
+            m_render_data->capture_base_first_visible_line = current_first_visible_line;
+        }
     }
     m_render_data->previous_first_visible_line = current_first_visible_line;
     m_render_data->previous_x_offset           = current_x_offset;

@@ -72,10 +72,15 @@ updates. A path that changes visible document text, style, margins, wrapping,
 scroll width, annotations, indicators, markers, whitespace settings, or
 representation settings must mark static content dirty.
 
-### Vertical Scroll Reuse
+### Vertical Scroll Reuse (Dormant)
 
-Vertical scroll reuse translates a previous frame instead of recapturing every
-primitive. The invariant is:
+Vertical scroll-frame translation is dormant while
+`k_enable_vertical_scroll_frame_reuse` is false. Normal vertical scrolling
+recaptures the frame. Prior scroll position and content-modified state are still
+tracked, and capture-base state initializes only when this reuse path is
+enabled. Re-enable it only after a causal reuse fix and reuse-path validation
+run with the flag enabled; visual-regression coverage is a manual/local
+supplement if CI excludes it. The invariant for any re-enabled reuse path is:
 
 > If a render primitive contains item-coordinate geometry, vertical scroll reuse
 > must translate every such field together.
@@ -87,16 +92,19 @@ Today that includes:
 - `Text_run::position`, `top`, `bottom`, `blob_text_clip_rect`,
   `blob_outer_rect`, `blob_inner_rect`
 - rectangles in selections, carets, indicators, current-line primitives,
-  markers, fold text, annotations, EOL annotations, whitespace, and decoration
-  underlines
+  markers, and decoration underlines
+- fold display text positions, rectangles, and baselines
+- annotation and EOL annotation positions, rectangles, and baselines
+- whitespace mark rectangles and `mid_y`
 - margin text positions, baselines, and clips
 - indent-guide `top` and `bottom`
 
-When adding a geometry field to `src/render/render_frame.h`, also update
-`translate_render_frame()` and add or extend frame-validation coverage for
-vertical scroll reuse. Visual-regression coverage should include represented
-text, blob/control-character drawing, indicators, whitespace, annotations,
-margins, and fold display text where practical.
+For reuse-path maintenance, update `translate_render_frame()` for every
+item-coordinate geometry field that an enabled reuse path may translate, and add
+or extend frame-validation coverage for vertical scroll reuse. Visual-regression
+coverage should include represented text, blob/control-character drawing,
+indicators, whitespace, annotations, margins, and fold display text where
+practical.
 
 ### Layering
 
@@ -136,11 +144,11 @@ measured and understood.
 | State | Meaning | Set when |
 | --- | --- | --- |
 | `snapshot_dirty` | A polish/update pass must rebuild or refresh the render snapshot before rendering. | Any path schedules visible scene-graph work. |
-| `static_content_dirty` | Captured static visual content cannot be reused without recapture or approved scroll translation. | Document mutations, style changes, margin changes, wrapping/layout changes, representation changes, scroll-position changes, annotations, indicators, markers, IME text changes. |
+| `static_content_dirty` | Captured static visual content cannot be reused without recapture or, if re-enabled, approved scroll translation. | Document mutations, style changes, item resize, margin changes, wrapping/layout changes, representation changes, scroll-position changes, annotations, indicators, markers, IME text changes. |
 | `overlay_content_dirty` | Overlay state needs refresh even if static content can be reused. | Caret blink, focus/caret visibility changes, selection/caret rectangle changes, input-method cursor/anchor updates. |
 | `style_sync_needed` | Scintilla styles need syncing into the Qt render snapshot before capture. | Style, font, zoom, element colour, marker/indicator style, or default-style changes. |
-| `scrolling_update` | The change was caused by scrolling and may be eligible for scroll-specific reuse. | Vertical or horizontal scroll commands and wheel scroll handling. |
-| `content_modified_since_last_capture` | Static content changed after the last capture, so vertical scroll reuse is unsafe. | Text/document modifications, IME composition mutations, style or representation mutations that alter captured primitives. |
+| `scrolling_update` | The change was caused by vertical scrolling and may be eligible for vertical-scroll-specific reuse. | `SCI_SETFIRSTVISIBLELINE`, public vertical scroll calls, and wheel scrolling routed through vertical scroll. |
+| `content_modified_since_last_capture` | Tracks static-content invalidations after the last capture so vertical scroll reuse eligibility can reject stale history. | Item resize, static-dirty dispatch requests including programmatic scroll/offset changes, text/document modifications, IME composition mutations, style or representation mutations that alter captured primitives. |
 
 Common cases:
 
@@ -151,11 +159,13 @@ Common cases:
   modified since last capture if captured geometry or glyph appearance changes.
 - Caret blink only: overlay dirty and snapshot dirty; do not recapture static
   content.
-- Vertical scroll: scrolling update and static dirty, but reuse is allowed only
-  when no content was modified since capture and the scroll delta fits the
-  capture buffer.
+- Vertical scroll: scrolling update and static dirty. While
+  `k_enable_vertical_scroll_frame_reuse` is false, recapture static content. If
+  reuse is re-enabled, it is allowed only when no content was modified since
+  capture and the scroll delta fits the capture buffer.
 - Horizontal scroll: static content dirty; do not use vertical scroll
-  translation.
+  translation. Programmatic `SCI_SETXOFFSET` dispatches also latch content
+  modified since last capture because they are static-dirty dispatch requests.
 - Notification from Scintilla: map the notification to document/style/view
   intent first, then schedule through the same dirty-state rules as public
   dispatch.

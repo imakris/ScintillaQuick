@@ -15,9 +15,11 @@
 #include <QImage>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QRect>
 #include <QWheelEvent>
 #include <QThread>
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 
@@ -271,13 +273,12 @@ bool image_has_visible_content(const QImage& image, const QColor& background)
     return false;
 }
 
-bool image_has_dark_text_pixels(
+int dark_text_pixel_count(
     const QImage &image,
-    int max_luma   = 160,
-    int min_pixels =  64)
+    int max_luma = 160)
 {
     if (image.isNull()) {
-        return false;
+        return 0;
     }
 
     QImage converted = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
@@ -296,14 +297,26 @@ bool image_has_dark_text_pixels(
                  qBlue(line[x]) * 114) / 1000;
             if (luma <= max_luma) {
                 ++dark_pixels;
-                if (dark_pixels >= min_pixels) {
-                    return true;
-                }
             }
         }
     }
 
-    return false;
+    return dark_pixels;
+}
+
+bool image_has_dark_text_pixels(
+    const QImage &image,
+    int max_luma   = 160,
+    int min_pixels =  64)
+{
+    return dark_text_pixel_count(image, max_luma) >= min_pixels;
+}
+
+QImage crop_body_text_area(const QImage& image, int body_left)
+{
+    const int left  = std::clamp(body_left, 0, image.width());
+    const int width = image.width() - left;
+    return image.copy(QRect(left, 0, width, image.height()));
 }
 
 // ---------------------------------------------------------------------------
@@ -942,6 +955,174 @@ static Fixture_outcome vr_scroll_wheel_bounce_wrapped()
         true);
 }
 
+static Fixture_outcome vr_edit_savepoint_one_line_scroll_matches_fresh_surface()
+{
+    const char* name = "edit_savepoint_one_line_scroll_matches_fresh_surface";
+    const int initial_first_visible_line = 120;
+    const int edited_line                = 126;
+    const int line_number_margin_width   = 48;
+    const int body_text_margin_gap       =  8;
+    const int body_left                  = line_number_margin_width + body_text_margin_gap;
+    const char* inserted_line            = "inserted visible line\n";
+    const QString edited_line_label =
+        QStringLiteral("Line %1:").arg(edited_line + 1, 6, 10, QChar('0'));
+
+    // Baseline-free end-to-end renderer/cache determinism invariant. This
+    // intentionally still runs in regenerate-baseline mode and writes no
+    // baseline file.
+    if (regenerate_baselines()) {
+        qDebug("  [%s] baseline-free invariant; no baseline generated", name);
+    }
+
+    const auto configure_editor = [line_number_margin_width](Fixture_editor& fixture) {
+        fixture.editor.send(SCI_SETWRAPMODE, SC_WRAP_NONE);
+        fixture.editor.send(SCI_SETMARGINTYPEN, 0, SC_MARGIN_NUMBER);
+        fixture.editor.send(SCI_SETMARGINWIDTHN, 0, line_number_margin_width);
+        fixture.editor.send(SCI_SETCARETWIDTH, 0);
+    };
+
+    QString final_text = build_large_document(500);
+    const int insertion_pos = final_text.indexOf(edited_line_label);
+    if (insertion_pos < 0) {
+        qWarning("  [%s] FAIL: could not find edited document line %s",
+            name, qPrintable(edited_line_label));
+        return Fixture_outcome::fail;
+    }
+    final_text.insert(insertion_pos, QString::fromLatin1(inserted_line));
+
+    Fixture_editor f;
+    configure_editor(f);
+    f.set_text(build_large_document(500));
+    f.editor.send(SCI_SETFIRSTVISIBLELINE, initial_first_visible_line);
+    f.pump();
+
+    const int first_visible_before_edit = static_cast<int>(f.editor.send(SCI_GETFIRSTVISIBLELINE));
+    if (first_visible_before_edit != initial_first_visible_line) {
+        qWarning("  [%s] FAIL: fixture did not reach first visible line 120", name);
+        return Fixture_outcome::fail;
+    }
+    if (!f.wait_for_ready(name)) {
+        qWarning("  [%s] FAIL: initial window did not become ready", name);
+        return Fixture_outcome::fail;
+    }
+    const QImage initial = capture_stable_image(f, QByteArray(name) + "_initial");
+    if (!image_has_dark_text_pixels(crop_body_text_area(initial, body_left))) {
+        QDir().mkpath(QStringLiteral(ARTIFACT_DIR));
+        initial.save(artifact_path(name, "initial_missing_body_text"));
+        qWarning("  [%s] FAIL: initial settled frame has no visible body text", name);
+        return Fixture_outcome::fail;
+    }
+
+    const sptr_t edit_pos = f.editor.send(SCI_POSITIONFROMLINE, edited_line);
+    const quint64 edit_paint_counter = f.paint_counter;
+    f.editor.send(SCI_INSERTTEXT, edit_pos, reinterpret_cast<sptr_t>(inserted_line));
+    // Historical repro included a savepoint; these assertions do not depend on savepoint state.
+    f.editor.send(SCI_SETSAVEPOINT);
+    f.pump();
+    if (!f.wait_for_next_paint(edit_paint_counter, 500)) {
+        qWarning("  [%s] FAIL: timed out waiting for repaint after edit/savepoint", name);
+        return Fixture_outcome::fail;
+    }
+
+    const int first_visible_before_scroll = static_cast<int>(f.editor.send(SCI_GETFIRSTVISIBLELINE));
+    if (first_visible_before_scroll != initial_first_visible_line) {
+        qWarning("  [%s] FAIL: edit/savepoint changed first visible line before scroll", name);
+        return Fixture_outcome::fail;
+    }
+
+    const quint64 scroll_paint_counter = f.paint_counter;
+    f.editor.scrollVertical(first_visible_before_scroll + 1);
+    f.pump();
+    if (!f.wait_for_next_paint(scroll_paint_counter, 500)) {
+        qWarning("  [%s] FAIL: timed out waiting for repaint after one-line scroll", name);
+        return Fixture_outcome::fail;
+    }
+
+    const int first_visible_after_scroll = static_cast<int>(f.editor.send(SCI_GETFIRSTVISIBLELINE));
+    if (first_visible_after_scroll != first_visible_before_scroll + 1) {
+        qWarning("  [%s] FAIL: fixture did not scroll by exactly one visible line", name);
+        return Fixture_outcome::fail;
+    }
+
+    const QImage post_scroll_sanity = f.capture_ready_window(name);
+    if (post_scroll_sanity.isNull()) {
+        f.dump_window_state(name, "post-scroll-sanity-grab-null");
+        qWarning("  [%s] FAIL: post-scroll sanity grabWindow() returned null", name);
+        return Fixture_outcome::fail;
+    }
+
+    const QImage post_scroll_sanity_body = crop_body_text_area(post_scroll_sanity, body_left);
+    if (!image_has_dark_text_pixels(post_scroll_sanity_body)) {
+        QDir().mkpath(QStringLiteral(ARTIFACT_DIR));
+        post_scroll_sanity.save(artifact_path(name, "post_scroll_sanity_missing_body_text"));
+        qWarning("  [%s] FAIL: post-scroll sanity capture has no visible body text", name);
+        return Fixture_outcome::fail;
+    }
+
+    // capture_ready_window() may pump before grabbing; this is only a nonblank
+    // sanity check. The stable capture below carries the deterministic compare.
+    const QImage scrolled = capture_stable_image(f, QByteArray(name) + "_scrolled");
+    if (scrolled.isNull()) {
+        f.dump_window_state(name, "post-scroll-grab-null");
+        qWarning("  [%s] FAIL: grabWindow() returned null after one-line scroll", name);
+        return Fixture_outcome::fail;
+    }
+
+    const QImage scrolled_body = crop_body_text_area(scrolled, body_left);
+    if (!image_has_dark_text_pixels(scrolled_body)) {
+        QDir().mkpath(QStringLiteral(ARTIFACT_DIR));
+        scrolled.save(artifact_path(name, "scrolled_missing_body_text"));
+        qWarning("  [%s] FAIL: one-line scroll after edit/savepoint produced no visible body text", name);
+        return Fixture_outcome::fail;
+    }
+
+    Fixture_editor reference;
+    configure_editor(reference);
+    reference.set_text(final_text);
+
+    const quint64 reference_jump_paint_counter = reference.paint_counter;
+    reference.editor.send(SCI_SETFIRSTVISIBLELINE, first_visible_after_scroll);
+    reference.pump();
+    if (!reference.wait_for_next_paint(reference_jump_paint_counter, 500)) {
+        qWarning("  [%s] FAIL: timed out waiting for reference repaint after large jump", name);
+        return Fixture_outcome::fail;
+    }
+
+    const int reference_first_visible = static_cast<int>(reference.editor.send(SCI_GETFIRSTVISIBLELINE));
+    if (reference_first_visible != first_visible_after_scroll) {
+        qWarning("  [%s] FAIL: reference fixture did not reach first visible line %d",
+            name, first_visible_after_scroll);
+        return Fixture_outcome::fail;
+    }
+    if (!reference.wait_for_ready(name)) {
+        qWarning("  [%s] FAIL: reference window did not become ready", name);
+        return Fixture_outcome::fail;
+    }
+
+    const QImage reference_image = capture_stable_image(reference, QByteArray(name) + "_reference");
+    const QImage reference_body  = crop_body_text_area(reference_image, body_left);
+    if (!image_has_dark_text_pixels(reference_body)) {
+        QDir().mkpath(QStringLiteral(ARTIFACT_DIR));
+        reference_image.save(artifact_path(name, "reference_missing_body_text"));
+        qWarning("  [%s] FAIL: direct reference frame has no visible body text", name);
+        return Fixture_outcome::fail;
+    }
+
+    const Comparison_result surface_cmp = compare_images(scrolled, reference_image);
+    if (!surface_cmp.passed) {
+        QDir().mkpath(QStringLiteral(ARTIFACT_DIR));
+        scrolled.save(artifact_path(name, "scrolled_actual"));
+        reference_image.save(artifact_path(name, "reference_expected"));
+        surface_cmp.diff_image.save(artifact_path(name, "surface_diff"));
+        qWarning("  [%s] FAIL: settled post-scroll surface differs from fresh reference: "
+                 "%d differing pixels (%.2f%%)",
+            name, surface_cmp.differing_pixels, surface_cmp.diff_ratio * 100.0);
+        return Fixture_outcome::fail;
+    }
+
+    return Fixture_outcome::pass;
+}
+
 // ---------------------------------------------------------------------------
 // Phase 8 VR fixtures: fold / marker / annotation fidelity
 // ---------------------------------------------------------------------------
@@ -1127,6 +1308,8 @@ int main(int argc, char** argv)
         {"scroll_wheel_bounce_margin_numbers_unwrapped",
                                           vr_scroll_wheel_bounce_margin_numbers_unwrapped},
         {"scroll_wheel_bounce_wrapped",   vr_scroll_wheel_bounce_wrapped},
+        {"edit_savepoint_one_line_scroll_matches_fresh_surface",
+                                          vr_edit_savepoint_one_line_scroll_matches_fresh_surface},
     };
 
     bool ran_any_fixture = false;
