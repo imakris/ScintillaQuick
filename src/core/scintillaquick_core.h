@@ -107,8 +107,7 @@ public:
     Render_frame current_render_frame(
         bool static_content_dirty = true,
         bool ensure_styled        = true,
-        bool scrolling            = false,
-        int extra_capture_lines   = 0);
+        bool scrolling            = false);
 
     // Called from `~ScintillaQuick_item()` before the derived
     // `ScintillaQuick_item` subobject finishes destructing. Stops all

@@ -38,7 +38,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <limits>
 #include <string_view>
 #include <utility>
@@ -66,9 +65,7 @@ public:
     bool style_sync_needed                   = true;
     bool scrolling_update                    = false;
     bool overlay_content_dirty               = true;
-    bool content_modified_since_last_capture = true;
     bool update_pending                      = false;
-    int capture_base_first_visible_line = -1;
     int previous_first_visible_line     = -1;
     int previous_x_offset               = -1;
     std::vector<Caret_primitive> captured_caret_primitives;
@@ -78,12 +75,6 @@ namespace
 {
 
 constexpr int k_margin_count = SC_MAX_MARGIN + 1;
-// Vertical scroll-frame translation is compile-disabled; ordinary static
-// invalidation still recaptures. Prior scroll position and content-modified
-// state are still tracked; capture-base state initializes only when this reuse
-// path is enabled and validated.
-constexpr bool k_enable_vertical_scroll_frame_reuse = false;
-constexpr int k_vertical_scroll_reuse_buffer_min_lines = 16;
 
 // `scene_graph_update_request` and `scene_graph_update_request_info_t` live in
 // src/core/scintillaquick_dispatch_table.h (included above) so that they can be
@@ -282,87 +273,6 @@ ScintillaQuick_notification notification_snapshot_from(const NotificationData& s
     copy_notification_text_payload(scn, snapshot);
     copy_notification_lparam_payload(scn, snapshot);
     return snapshot;
-}
-
-void translate_rect(QRectF& rect, qreal dy)
-{
-    if (!rect.isNull()) {
-        rect.translate(0.0, dy);
-    }
-}
-
-void translate_point(QPointF& point, qreal dy)
-{
-    point.setY(point.y() + dy);
-}
-
-void translate_render_frame(Render_frame& frame, qreal dy)
-{
-    translate_rect(frame.text_rect, dy);
-    translate_rect(frame.margin_rect, dy);
-
-    for (Visual_line_frame& visual_line : frame.visual_lines) {
-        translate_point(visual_line.origin, dy);
-        visual_line.baseline_y += dy;
-        translate_rect(visual_line.clip_rect, dy);
-        for (Text_run& run : visual_line.text_runs) {
-            translate_point(run.position, dy);
-            run.top += dy;
-            run.bottom += dy;
-            translate_rect(run.blob_text_clip_rect, dy);
-            translate_rect(run.blob_outer_rect, dy);
-            translate_rect(run.blob_inner_rect, dy);
-        }
-    }
-
-    for (Selection_primitive& selection : frame.selection_primitives) {
-        translate_rect(selection.rect, dy);
-    }
-    for (Caret_primitive& caret : frame.caret_primitives) {
-        translate_rect(caret.rect, dy);
-    }
-    for (Indicator_primitive& indicator : frame.indicator_primitives) {
-        translate_rect(indicator.rect, dy);
-        translate_rect(indicator.line_rect, dy);
-        translate_rect(indicator.character_rect, dy);
-    }
-    for (Current_line_primitive& current_line : frame.current_line_primitives) {
-        translate_rect(current_line.rect, dy);
-    }
-    for (Marker_primitive& marker : frame.marker_primitives) {
-        translate_rect(marker.rect, dy);
-    }
-    for (Margin_text_primitive& margin : frame.margin_text_primitives) {
-        translate_point(margin.position, dy);
-        translate_rect(margin.clip_rect, dy);
-        margin.baseline_y += dy;
-    }
-    for (Fold_display_text_primitive& fold : frame.fold_display_texts) {
-        translate_point(fold.position, dy);
-        translate_rect(fold.rect, dy);
-        fold.baseline_y += dy;
-    }
-    for (Eol_annotation_primitive& eol : frame.eol_annotations) {
-        translate_point(eol.position, dy);
-        translate_rect(eol.rect, dy);
-        eol.baseline_y += dy;
-    }
-    for (Annotation_primitive& annotation : frame.annotations) {
-        translate_point(annotation.position, dy);
-        translate_rect(annotation.rect, dy);
-        annotation.baseline_y += dy;
-    }
-    for (Whitespace_mark_primitive& mark : frame.whitespace_marks) {
-        translate_rect(mark.rect, dy);
-        mark.mid_y += dy;
-    }
-    for (Decoration_underline_primitive& underline : frame.decoration_underlines) {
-        translate_rect(underline.rect, dy);
-    }
-    for (Indent_guide_primitive& guide : frame.indent_guides) {
-        guide.top += dy;
-        guide.bottom += dy;
-    }
 }
 
 template <typename Dispatch, typename Apply_update>
@@ -572,9 +482,6 @@ void ScintillaQuick_item::apply_scene_graph_update_request(
         const bool needs_property_sync = static_content_dirty || needs_style_sync || scrolling;
         if (needs_property_sync) {
             self->syncQuickViewProperties();
-            if (static_content_dirty && m_render_data) {
-                m_render_data->content_modified_since_last_capture = true;
-            }
         }
         self->request_scene_graph_update(static_content_dirty, needs_style_sync, scrolling);
     }
@@ -734,9 +641,6 @@ void ScintillaQuick_item::wheelEvent(QWheelEvent* event)
         else {
             m_core->KeyCommand(Message::ZoomOut);
         }
-        if (m_render_data) {
-            m_render_data->content_modified_since_last_capture = true;
-        }
         syncQuickViewProperties();
         request_scene_graph_update(true, true, false);
         event->accept();
@@ -784,9 +688,6 @@ void ScintillaQuick_item::geometryChange(const QRectF& newGeometry, const QRectF
         m_core->ChangeSize();
         emit resized();
 
-        if (m_render_data) {
-            m_render_data->content_modified_since_last_capture = true;
-        }
         request_scene_graph_update(true, true, false);
     }
 }
@@ -1337,9 +1238,6 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
     m_core->ShowCaretAtCurrentPosition();
     cursorChangedUpdateMarker();
     syncQuickViewProperties();
-    if (m_render_data) {
-        m_render_data->content_modified_since_last_capture = true;
-    }
     request_scene_graph_update(true, true, false);
     event->accept();
 }
@@ -1596,79 +1494,38 @@ void ScintillaQuick_item::build_render_snapshot()
         current_first_visible_line != m_render_data->previous_first_visible_line ||
         current_x_offset           != m_render_data->previous_x_offset;
     Render_frame frame;
-    int extra_capture_lines        = 0;
-    int scroll_delta_lines         = 0;
-    int line_height                = 1;
-    bool can_reuse_vertical_scroll = false;
-    if constexpr (k_enable_vertical_scroll_frame_reuse) {
-        line_height = (m_core && m_core->vs.lineHeight > 0) ? m_core->vs.lineHeight : 1;
-        scroll_delta_lines =
-            (m_render_data->previous_first_visible_line >= 0 && current_first_visible_line >= 0)
-                ? (current_first_visible_line - m_render_data->previous_first_visible_line)
-                : 0;
-        const int capture_buffer_lines = std::max(
-            k_vertical_scroll_reuse_buffer_min_lines,
-            std::max(1, static_cast<int>(height() / line_height) / 3 + 2));
-        const int capture_base_first_visible_line = m_render_data->capture_base_first_visible_line;
-        const int capture_max_first_visible_line =
-            capture_base_first_visible_line >= 0 ? capture_base_first_visible_line + capture_buffer_lines : -1;
-
-        extra_capture_lines = capture_buffer_lines;
-        can_reuse_vertical_scroll =
-            m_render_data->static_content_dirty                           &&
-            m_render_data->scrolling_update                               &&
-            !m_render_data->content_modified_since_last_capture           &&
-            current_x_offset >= 0                                         &&
-            current_x_offset == m_render_data->previous_x_offset          &&
-            current_first_visible_line >= 0                               &&
-            scroll_delta_lines != 0                                       &&
-            std::abs(scroll_delta_lines) <= capture_buffer_lines          &&
-            capture_base_first_visible_line >= 0                          &&
-            current_first_visible_line >= capture_base_first_visible_line &&
-            current_first_visible_line <= capture_max_first_visible_line;
-    }
-
     const bool static_content_dirty =
-        (scroll_position_changed || m_render_data->static_content_dirty) &&
-        !can_reuse_vertical_scroll;
+        scroll_position_changed || m_render_data->static_content_dirty;
     const bool overlay_only_capture = !static_content_dirty && m_render_data->overlay_content_dirty;
 
-    if (can_reuse_vertical_scroll || !static_content_dirty) {
+    if (!static_content_dirty) {
         snapshot = m_render_data->snapshot;
     }
 
-    if (can_reuse_vertical_scroll) {
-        frame = m_render_data->frame;
-        translate_render_frame(frame, -static_cast<qreal>(scroll_delta_lines * line_height));
-    }
-    else
     if (overlay_only_capture && m_core) {
-        frame = m_core->current_render_frame(false, false, false, 0);
+        frame = m_core->current_render_frame(false, false, false);
     }
     else
     if (m_core) {
         frame = m_core->current_render_frame(
             static_content_dirty,
             m_render_data->style_sync_needed && static_content_dirty,
-            m_render_data->scrolling_update,
-            extra_capture_lines);
+            m_render_data->scrolling_update);
     }
 
-    if (can_reuse_vertical_scroll || !static_content_dirty) {
+    if (!static_content_dirty) {
         frame.text_rect   = m_render_data->frame.text_rect;
         frame.margin_rect = m_render_data->frame.margin_rect;
-        if (!can_reuse_vertical_scroll) {
-            frame.visual_lines           = std::move(m_render_data->frame.visual_lines);
-            frame.indicator_primitives   = std::move(m_render_data->frame.indicator_primitives);
-            frame.marker_primitives      = std::move(m_render_data->frame.marker_primitives);
-            frame.margin_text_primitives = std::move(m_render_data->frame.margin_text_primitives);
-            frame.fold_display_texts     = std::move(m_render_data->frame.fold_display_texts);
-            frame.eol_annotations        = std::move(m_render_data->frame.eol_annotations);
-            frame.annotations            = std::move(m_render_data->frame.annotations);
-            frame.whitespace_marks       = std::move(m_render_data->frame.whitespace_marks);
-            frame.decoration_underlines  = std::move(m_render_data->frame.decoration_underlines);
-            frame.indent_guides          = std::move(m_render_data->frame.indent_guides);
-        }
+        frame.visual_lines           = std::move(m_render_data->frame.visual_lines);
+        frame.indicator_primitives   = std::move(m_render_data->frame.indicator_primitives);
+        frame.marker_primitives      = std::move(m_render_data->frame.marker_primitives);
+        frame.margin_text_primitives = std::move(m_render_data->frame.margin_text_primitives);
+        frame.fold_display_texts     = std::move(m_render_data->frame.fold_display_texts);
+        frame.eol_annotations        = std::move(m_render_data->frame.eol_annotations);
+        frame.annotations            = std::move(m_render_data->frame.annotations);
+        frame.whitespace_marks       = std::move(m_render_data->frame.whitespace_marks);
+        frame.decoration_underlines  = std::move(m_render_data->frame.decoration_underlines);
+        frame.indent_guides          = std::move(m_render_data->frame.indent_guides);
     }
 
     m_render_data->captured_caret_primitives = frame.caret_primitives;
@@ -1685,12 +1542,6 @@ void ScintillaQuick_item::build_render_snapshot()
     m_render_data->style_sync_needed                   = false;
     m_render_data->scrolling_update                    = false;
     m_render_data->overlay_content_dirty               = false;
-    m_render_data->content_modified_since_last_capture = false;
-    if constexpr (k_enable_vertical_scroll_frame_reuse) {
-        if (!can_reuse_vertical_scroll) {
-            m_render_data->capture_base_first_visible_line = current_first_visible_line;
-        }
-    }
     m_render_data->previous_first_visible_line = current_first_visible_line;
     m_render_data->previous_x_offset           = current_x_offset;
 
@@ -1746,9 +1597,6 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
     switch (scn.nmhdr.code) {
         case Notification::StyleNeeded:
             emit styleNeeded(scn.position);
-            if (m_render_data) {
-                m_render_data->content_modified_since_last_capture = true;
-            }
             request_scene_graph_update(true, true, false);
             break;
 
@@ -1798,9 +1646,6 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
             }();
             emit modified(scn.modificationType, scn.position, scn.length,
                 scn.linesAdded, bytes, scn.line, scn.foldLevelNow, scn.foldLevelPrev);
-            if (m_render_data) {
-                m_render_data->content_modified_since_last_capture = true;
-            }
             if (deleted) {
                 reset_tracked_scroll_width();
             }
@@ -1841,9 +1686,6 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
             break;
 
         case Notification::Zoom:
-            if (m_render_data) {
-                m_render_data->content_modified_since_last_capture = true;
-            }
             reset_tracked_scroll_width();
             syncQuickViewProperties();
             request_scene_graph_update(true, true, false);
@@ -1947,9 +1789,6 @@ void ScintillaQuick_item::setFont(const QFont& newFont)
     setStylesFont(newFont, 0);
     syncQuickViewProperties();
     emit fontChanged();
-    if (m_render_data) {
-        m_render_data->content_modified_since_last_capture = true;
-    }
     request_scene_graph_update(true, true, false);
 }
 

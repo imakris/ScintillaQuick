@@ -298,9 +298,7 @@ void test_public_query_messages_take_fast_path()
         // Line / position lookups that are not named SCI_GET*. These
         // must take the fast path: if they fall through to the
         // conservative default, send() marks the scene graph dirty and
-        // turns pure lookups into repaint/property-sync work. The
-        // vertical-scroll reuse experiment is disabled, but these reads
-        // still need to stay on the allow-list.
+        // turns pure lookups into repaint/property-sync work.
         SCI_POSITIONFROMLINE,
         SCI_LINELENGTH,
         SCI_VISIBLEFROMDOCLINE,

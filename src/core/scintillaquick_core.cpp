@@ -435,8 +435,7 @@ ScintillaQuick_core::Style_attributes ScintillaQuick_core::style_attributes_for(
 Render_frame ScintillaQuick_core::current_render_frame(
     bool static_content_dirty,
     bool ensure_styled,
-    bool scrolling,
-    int extra_capture_lines)
+    bool scrolling)
 {
     Render_frame frame;
 
@@ -459,12 +458,10 @@ Render_frame ScintillaQuick_core::current_render_frame(
         std::max<XYPOSITION>(0.0, text_rect.left - client_rect.left),
         client_rect.Height());
 
-    const int capture_buffer_lines = std::max(0, extra_capture_lines);
     const int estimated_line_height = std::max(1, vs.lineHeight);
     const int estimated_lines = std::max<int>(
         1,
-        static_cast<int>(client_rect.Height() / estimated_line_height)
-            + (capture_buffer_lines * 2) + 2);
+        static_cast<int>(client_rect.Height() / estimated_line_height) + 2);
     frame.visual_lines.reserve(estimated_lines);
     frame.selection_primitives.reserve(4);
     frame.caret_primitives.reserve(4);
@@ -491,10 +488,6 @@ Render_frame ScintillaQuick_core::current_render_frame(
 
     Render_frame_builder collector(frame, static_content_dirty, *this);
     PRectangle capture_rect = client_rect;
-    if (capture_buffer_lines > 0 && vs.lineHeight > 0) {
-        capture_rect.top -= static_cast<XYPOSITION>(capture_buffer_lines * vs.lineHeight);
-        capture_rect.bottom += static_cast<XYPOSITION>(capture_buffer_lines * vs.lineHeight);
-    }
 
     const bool buffered_draw_before_capture = view.bufferedDraw;
     view.bufferedDraw = false;
