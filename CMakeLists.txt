@@ -110,6 +110,7 @@ add_library(
     src/platform/scintillaquick_platqt.h
     src/render/scintillaquick_scene_graph_renderer.cpp
     src/render/scintillaquick_scene_graph_renderer.h
+    src/public/scintillaquick_find_panel.cpp
     src/public/scintillaquick_item.cpp
     $<TARGET_OBJECTS:scintillaquick_scintilla_objects>)
 

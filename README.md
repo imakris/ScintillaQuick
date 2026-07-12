@@ -129,6 +129,39 @@ int main(int argc, char **argv) {
 For a runnable example, see
 [`examples/minimal_editor/main.cpp`](examples/minimal_editor/main.cpp).
 
+## Find and Replace
+
+`ScintillaQuick_item` includes a bottom find panel. `Ctrl+F` opens its find row,
+`Ctrl+H` opens both the find and replace rows, and `Escape` closes it. The panel
+provides Find Previous, Find Next, Select All, Replace, Replace & Find, and
+Replace All actions. Searches wrap at the beginning or end of the document.
+
+The panel can also be controlled directly from C++ or QML with
+`showFind()`, `showFindReplace()`, and `hideFindPanel()`. Search behavior is
+configured with Scintilla's `SCFIND_*` flags through `findOptions`:
+
+```cpp
+editor.setFindText(QStringLiteral("needle"));
+editor.setFindOptions(SCFIND_MATCHCASE | SCFIND_WHOLEWORD);
+editor.showFind();
+```
+
+The caller controls the panel font and its semantic colors:
+
+```cpp
+editor.setFindPanelFont(QFont(QStringLiteral("Inter"), 10));
+editor.setFindPanelBackgroundColor(QColor("#2d2d30"));
+editor.setFindPanelForegroundColor(QColor("#e6e6e6"));
+editor.setFindPanelFieldBackgroundColor(QColor("#252526"));
+editor.setFindPanelFieldForegroundColor(QColor("#f0f0f0"));
+editor.setFindPanelBorderColor(QColor("#3f3f46"));
+editor.setFindPanelButtonHoverColor(QColor("#3e3e42"));
+```
+
+Selection and disabled-state colors are separately available through
+`findPanelSelectionBackgroundColor`, `findPanelSelectionForegroundColor`, and
+`findPanelDisabledForegroundColor`.
+
 ## QML Registration
 
 The library exposes `register_scintilla_type()` in

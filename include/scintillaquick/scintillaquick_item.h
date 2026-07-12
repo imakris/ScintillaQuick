@@ -28,10 +28,12 @@
 #include "ScintillaStructures.h"
 
 #include <QByteArray>
+#include <QColor>
 #include <QFont>
 #include <QElapsedTimer>
 #include <QMimeData>
 #include <QPoint>
+#include <QPointer>
 #include <QQuickItem>
 #include <QTimer>
 #include <QVariant>
@@ -165,6 +167,34 @@ class SCINTILLAQUICK_EXPORT ScintillaQuick_item : public QQuickItem
     Q_PROPERTY(int firstVisibleColumn READ getFirstVisibleColumn NOTIFY firstVisibleColumnChanged)
     Q_PROPERTY(Qt::InputMethodHints inputMethodHints READ inputMethodHints WRITE setInputMethodHints
         NOTIFY inputMethodHintsChanged)
+    Q_PROPERTY(bool findPanelVisible READ findPanelVisible WRITE setFindPanelVisible
+        NOTIFY findPanelVisibleChanged)
+    Q_PROPERTY(bool findReplaceMode READ findReplaceMode WRITE setFindReplaceMode
+        NOTIFY findReplaceModeChanged)
+    Q_PROPERTY(QString findText READ findText WRITE setFindText NOTIFY findTextChanged)
+    Q_PROPERTY(QString replacementText READ replacementText WRITE setReplacementText
+        NOTIFY replacementTextChanged)
+    Q_PROPERTY(int findOptions READ findOptions WRITE setFindOptions NOTIFY findOptionsChanged)
+    Q_PROPERTY(QFont findPanelFont READ findPanelFont WRITE setFindPanelFont
+        NOTIFY findPanelFontChanged)
+    Q_PROPERTY(QColor findPanelBackgroundColor READ findPanelBackgroundColor
+        WRITE setFindPanelBackgroundColor NOTIFY findPanelBackgroundColorChanged)
+    Q_PROPERTY(QColor findPanelForegroundColor READ findPanelForegroundColor
+        WRITE setFindPanelForegroundColor NOTIFY findPanelForegroundColorChanged)
+    Q_PROPERTY(QColor findPanelFieldBackgroundColor READ findPanelFieldBackgroundColor
+        WRITE setFindPanelFieldBackgroundColor NOTIFY findPanelFieldBackgroundColorChanged)
+    Q_PROPERTY(QColor findPanelFieldForegroundColor READ findPanelFieldForegroundColor
+        WRITE setFindPanelFieldForegroundColor NOTIFY findPanelFieldForegroundColorChanged)
+    Q_PROPERTY(QColor findPanelBorderColor READ findPanelBorderColor
+        WRITE setFindPanelBorderColor NOTIFY findPanelBorderColorChanged)
+    Q_PROPERTY(QColor findPanelButtonHoverColor READ findPanelButtonHoverColor
+        WRITE setFindPanelButtonHoverColor NOTIFY findPanelButtonHoverColorChanged)
+    Q_PROPERTY(QColor findPanelDisabledForegroundColor READ findPanelDisabledForegroundColor
+        WRITE setFindPanelDisabledForegroundColor NOTIFY findPanelDisabledForegroundColorChanged)
+    Q_PROPERTY(QColor findPanelSelectionBackgroundColor READ findPanelSelectionBackgroundColor
+        WRITE setFindPanelSelectionBackgroundColor NOTIFY findPanelSelectionBackgroundColorChanged)
+    Q_PROPERTY(QColor findPanelSelectionForegroundColor READ findPanelSelectionForegroundColor
+        WRITE setFindPanelSelectionForegroundColor NOTIFY findPanelSelectionForegroundColorChanged)
 
 public:
     explicit ScintillaQuick_item(QQuickItem* parent = nullptr);
@@ -178,6 +208,46 @@ public:
     Q_INVOKABLE void scrollColumn(int delta_columns);
     Q_INVOKABLE void enableUpdate(bool enable);
     Q_INVOKABLE virtual void cmdContextMenu(int menu_id);
+    Q_INVOKABLE void showFind();
+    Q_INVOKABLE void showFindReplace();
+    Q_INVOKABLE void hideFindPanel();
+    Q_INVOKABLE bool findNext();
+    Q_INVOKABLE bool findPrevious();
+    Q_INVOKABLE int selectAllFindMatches();
+    Q_INVOKABLE bool replaceSelection();
+    Q_INVOKABLE bool replaceAndFind();
+    Q_INVOKABLE int replaceAll();
+
+    bool findPanelVisible() const;
+    void setFindPanelVisible(bool visible);
+    bool findReplaceMode() const;
+    void setFindReplaceMode(bool replace_mode);
+    QString findText() const;
+    void setFindText(const QString& text);
+    QString replacementText() const;
+    void setReplacementText(const QString& text);
+    int findOptions() const;
+    void setFindOptions(int options);
+    QFont findPanelFont() const;
+    void setFindPanelFont(const QFont& font);
+    QColor findPanelBackgroundColor() const;
+    void setFindPanelBackgroundColor(const QColor& color);
+    QColor findPanelForegroundColor() const;
+    void setFindPanelForegroundColor(const QColor& color);
+    QColor findPanelFieldBackgroundColor() const;
+    void setFindPanelFieldBackgroundColor(const QColor& color);
+    QColor findPanelFieldForegroundColor() const;
+    void setFindPanelFieldForegroundColor(const QColor& color);
+    QColor findPanelBorderColor() const;
+    void setFindPanelBorderColor(const QColor& color);
+    QColor findPanelButtonHoverColor() const;
+    void setFindPanelButtonHoverColor(const QColor& color);
+    QColor findPanelDisabledForegroundColor() const;
+    void setFindPanelDisabledForegroundColor(const QColor& color);
+    QColor findPanelSelectionBackgroundColor() const;
+    void setFindPanelSelectionBackgroundColor(const QColor& color);
+    QColor findPanelSelectionForegroundColor() const;
+    void setFindPanelSelectionForegroundColor(const QColor& color);
     void request_scene_graph_update(
         bool static_content_dirty = false,
         bool needs_style_sync     = false,
@@ -265,6 +335,21 @@ signals:
     void visibleLinesChanged();
     void visibleColumnsChanged();
     void inputMethodHintsChanged();
+    void findPanelVisibleChanged();
+    void findReplaceModeChanged();
+    void findTextChanged();
+    void replacementTextChanged();
+    void findOptionsChanged();
+    void findPanelFontChanged();
+    void findPanelBackgroundColorChanged();
+    void findPanelForegroundColorChanged();
+    void findPanelFieldBackgroundColorChanged();
+    void findPanelFieldForegroundColorChanged();
+    void findPanelBorderColorChanged();
+    void findPanelButtonHoverColorChanged();
+    void findPanelDisabledForegroundColorChanged();
+    void findPanelSelectionBackgroundColorChanged();
+    void findPanelSelectionForegroundColorChanged();
     void enableScrollViewInteraction(bool value);
     void showContextMenu(const QPoint& pos);
     void addToContextMenu(int menuId, const QString& txt, bool enabled);
@@ -299,6 +384,7 @@ private:
 #endif
 
     class Render_data;
+    class Find_panel;
     QString getText() const;
     void setText(const QString& txt);
     QFont getFont() const { return m_font; }
@@ -385,6 +471,29 @@ private:
     static Scintilla::KeyMod ModifiersOfKeyboard();
     Scintilla::KeyMod ModifiersOfMouse() const;
     void syncQuickViewProperties();
+    void ensureFindPanel();
+    void updateFindPanelGeometry();
+
+    QPointer<Find_panel> m_find_panel;
+    bool m_find_panel_visible = false;
+    bool m_find_replace_mode = false;
+    QString m_find_text;
+    QString m_replacement_text;
+    int m_find_options = 0;
+    QFont m_find_panel_font;
+    QColor m_find_panel_background_color = QColor(45, 45, 48);
+    QColor m_find_panel_foreground_color = QColor(230, 230, 230);
+    QColor m_find_panel_field_background_color = QColor(37, 37, 38);
+    QColor m_find_panel_field_foreground_color = QColor(240, 240, 240);
+    QColor m_find_panel_border_color = QColor(63, 63, 70);
+    QColor m_find_panel_button_hover_color = QColor(62, 62, 66);
+    QColor m_find_panel_disabled_foreground_color = QColor(112, 112, 112);
+    QColor m_find_panel_selection_background_color = QColor(38, 79, 120);
+    QColor m_find_panel_selection_foreground_color = QColor(255, 255, 255);
+    Scintilla::Position m_last_find_start = -1;
+    Scintilla::Position m_last_find_end = -1;
+    QString m_last_find_text;
+    int m_last_find_options = 0;
 };
 
 void register_scintilla_type();

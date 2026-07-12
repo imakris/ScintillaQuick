@@ -397,6 +397,7 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
     , m_render_data(std::make_unique<Render_data>())
 {
     register_notification_metatypes();
+    m_find_panel_font = QGuiApplication::font();
 
     setAcceptedMouseButtons(Qt::AllButtons);
     setAcceptTouchEvents(true);
@@ -690,10 +691,31 @@ void ScintillaQuick_item::geometryChange(const QRectF& newGeometry, const QRectF
 
         request_scene_graph_update(true, true, false);
     }
+
+    updateFindPanelGeometry();
 }
 
 void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
 {
+    const bool control_shortcut =
+        event->modifiers().testFlag(Qt::ControlModifier) &&
+        !event->modifiers().testFlag(Qt::AltModifier);
+    if (control_shortcut && event->key() == Qt::Key_F) {
+        showFind();
+        event->accept();
+        return;
+    }
+    if (control_shortcut && event->key() == Qt::Key_H) {
+        showFindReplace();
+        event->accept();
+        return;
+    }
+    if (event->key() == Qt::Key_Escape && findPanelVisible()) {
+        hideFindPanel();
+        event->accept();
+        return;
+    }
+
     bool view_changed = false;
 
     // All keystrokes containing the meta modifier are
@@ -1618,6 +1640,12 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
         case Notification::Modified: {
             const bool added = FlagSet(scn.modificationType, ModificationFlags::InsertText);
             const bool deleted = FlagSet(scn.modificationType, ModificationFlags::DeleteText);
+
+            if (added || deleted) {
+                m_last_find_start = -1;
+                m_last_find_end = -1;
+                m_last_find_text.clear();
+            }
 
             const Scintilla::Position length = send(SCI_GETTEXTLENGTH);
             bool first_line_added = (added && length == 1) || (deleted && length == 0);

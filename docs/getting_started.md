@@ -74,6 +74,14 @@ Typical C++ integration looks like this:
    `SCINTILLAQUICK_FIXED_FONT_FAMILY` can switch it to `Cousine`.
 6. Drive editor behavior with Scintilla messages through `send()`.
 
+The editor also has a built-in bottom find/replace panel. `Ctrl+F` shows the
+find row and `Ctrl+H` adds the replace row. Applications may invoke
+`showFind()`, `showFindReplace()`, and `hideFindPanel()` directly, bind to the
+`findPanelVisible` and `findReplaceMode` properties, and customize the panel
+with the `findPanelFont` and `findPanel*Color` properties. Set `findOptions` to
+a combination of Scintilla `SCFIND_*` flags when case-sensitive, whole-word,
+or regular-expression matching is required.
+
 See [`examples/minimal_editor/main.cpp`](../examples/minimal_editor/main.cpp)
 for a complete runnable example.
 

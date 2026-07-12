@@ -19,6 +19,7 @@
 #include <QDebug>
 #include <QGuiApplication>
 #include <QInputMethodEvent>
+#include <QKeyEvent>
 #include <QMetaType>
 #include <QPointer>
 #include <QQuickItem>
@@ -1084,6 +1085,168 @@ void test_wrap_mode_toggle(ScintillaQuick_item& editor)
     SQ_EXPECT(editor.send(SCI_GETWRAPMODE) == SC_WRAP_NONE);
 }
 
+void test_find_and_replace_panel(ScintillaQuick_item& editor)
+{
+    editor.setProperty("readonly", false);
+
+    editor.setProperty("text", QStringLiteral("selected"));
+    editor.setFindText(QStringLiteral("stale"));
+    editor.send(SCI_SETSEL, 0, 8);
+    editor.showFind();
+    SQ_EXPECT(editor.findText() == QStringLiteral("selected"));
+    editor.setFindText(QStringLiteral("stale"));
+    editor.send(SCI_SETSEL, 0, 1);
+    editor.showFindReplace();
+    SQ_EXPECT(editor.findText() == QStringLiteral("s"));
+
+    editor.setProperty("text", QStringLiteral("alpha beta alpha\nALPHA"));
+    editor.send(SCI_SETMULTIPLESELECTION, 0);
+    editor.send(SCI_SETSEL, 0, 0);
+    editor.setFindText(QStringLiteral("alpha"));
+    editor.setFindOptions(0);
+
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(selection_start(editor) == 0);
+    SQ_EXPECT(selection_end(editor) == 5);
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(selection_start(editor) == 11);
+    SQ_EXPECT(selection_end(editor) == 16);
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(selection_start(editor) == 17);
+    SQ_EXPECT(selection_end(editor) == 22);
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(selection_start(editor) == 0);
+    SQ_EXPECT(editor.findPrevious());
+    SQ_EXPECT(selection_start(editor) == 17);
+
+    editor.setProperty("text", QStringLiteral("a\nb"));
+    editor.setFindText(QStringLiteral("^"));
+    editor.setFindOptions(SCFIND_REGEXP);
+    editor.send(SCI_SETSEL, 0, 0);
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(selection_start(editor) == 0);
+    SQ_EXPECT(selection_end(editor) == 0);
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(selection_start(editor) == 2);
+    SQ_EXPECT(selection_end(editor) == 2);
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(selection_start(editor) == 0);
+    SQ_EXPECT(editor.findPrevious());
+    SQ_EXPECT(selection_start(editor) == 2);
+
+    editor.setProperty("text", QStringLiteral("a\nb"));
+    editor.setReplacementText(QStringLiteral(">"));
+    editor.send(SCI_SETSEL, 0, 0);
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(editor.replaceSelection());
+    SQ_EXPECT(editor.property("text").toString() == QStringLiteral(">a\nb"));
+
+    editor.setProperty("text", QStringLiteral("a\nb"));
+    editor.send(SCI_SETSEL, 0, 0);
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(editor.replaceAndFind());
+    SQ_EXPECT(editor.property("text").toString() == QStringLiteral(">a\nb"));
+    SQ_EXPECT(selection_start(editor) == 3);
+    SQ_EXPECT(selection_end(editor) == 3);
+
+    editor.send(SCI_SETSEL, 0, 0);
+    editor.setProperty("text", QStringLiteral("alpha beta alpha\nALPHA"));
+    editor.setFindText(QStringLiteral("alpha"));
+    editor.setFindOptions(0);
+    SQ_EXPECT(editor.selectAllFindMatches() == 3);
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONS) == 3);
+    SQ_EXPECT(current_position(editor) == 5);
+
+    editor.send(SCI_SETMULTIPLESELECTION, 0);
+    editor.setProperty("text", QStringLiteral("one two one"));
+    editor.setFindText(QStringLiteral("one"));
+    editor.setReplacementText(QStringLiteral("1"));
+    editor.send(SCI_SETSEL, 0, 0);
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(editor.replaceSelection());
+    SQ_EXPECT(editor.property("text").toString() == QStringLiteral("1 two one"));
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(selection_start(editor) == 6);
+
+    editor.setProperty("text", QStringLiteral("one two one"));
+    SQ_EXPECT(editor.replaceAll() == 2);
+    SQ_EXPECT(editor.property("text").toString() == QStringLiteral("1 two 1"));
+
+    editor.setProperty("text", QStringLiteral("v12 and v345"));
+    editor.setFindText(QStringLiteral("[0-9]+"));
+    editor.setReplacementText(QStringLiteral("#"));
+    editor.setFindOptions(SCFIND_REGEXP);
+    SQ_EXPECT(editor.replaceAll() == 2);
+    SQ_EXPECT(editor.property("text").toString() == QStringLiteral("v# and v#"));
+
+    editor.setProperty("text", QStringLiteral("é alpha é"));
+    editor.setFindText(QStringLiteral("é"));
+    editor.setReplacementText(QStringLiteral("ø"));
+    editor.setFindOptions(0);
+    SQ_EXPECT(editor.replaceAll() == 2);
+    SQ_EXPECT(editor.property("text").toString() == QStringLiteral("ø alpha ø"));
+
+    editor.setProperty("text", QStringLiteral("a"));
+    editor.setFindText(QStringLiteral("$"));
+    editor.setReplacementText(QStringLiteral("x"));
+    editor.setFindOptions(SCFIND_REGEXP);
+    SQ_EXPECT(editor.replaceAll() == 1);
+    SQ_EXPECT(editor.property("text").toString() == QStringLiteral("ax"));
+
+    editor.setProperty("readonly", true);
+    SQ_EXPECT(editor.replaceAll() == 0);
+    editor.setProperty("readonly", false);
+
+    const QFont panel_font(QStringLiteral("Cousine"), 12);
+    const QColor panel_color(12, 34, 56);
+    editor.setFindPanelFont(panel_font);
+    editor.setFindPanelBackgroundColor(panel_color);
+    SQ_EXPECT(editor.findPanelFont() == panel_font);
+    SQ_EXPECT(editor.findPanelBackgroundColor() == panel_color);
+
+    editor.hideFindPanel();
+    QKeyEvent find_event(QEvent::KeyPress, Qt::Key_F, Qt::ControlModifier, QStringLiteral("f"));
+    QCoreApplication::sendEvent(&editor, &find_event);
+    SQ_EXPECT(find_event.isAccepted());
+    SQ_EXPECT(editor.findPanelVisible());
+    SQ_EXPECT(!editor.findReplaceMode());
+
+    QKeyEvent replace_event(QEvent::KeyPress, Qt::Key_H, Qt::ControlModifier, QStringLiteral("h"));
+    QCoreApplication::sendEvent(&editor, &replace_event);
+    SQ_EXPECT(replace_event.isAccepted());
+    SQ_EXPECT(editor.findPanelVisible());
+    SQ_EXPECT(editor.findReplaceMode());
+
+    QQuickItem* find_panel =
+        editor.findChild<QQuickItem*>(QStringLiteral("scintillaquickFindPanel"), Qt::FindDirectChildrenOnly);
+    SQ_EXPECT(find_panel != nullptr);
+    if (find_panel) {
+        QQuickItem* find_field = find_panel->findChild<QQuickItem*>(
+            QStringLiteral("scintillaquickFindField"), Qt::FindDirectChildrenOnly);
+        QQuickItem* replace_field = find_panel->findChild<QQuickItem*>(
+            QStringLiteral("scintillaquickReplaceField"), Qt::FindDirectChildrenOnly);
+        SQ_EXPECT(find_field != nullptr);
+        SQ_EXPECT(replace_field != nullptr);
+        if (find_field && replace_field) {
+            SQ_EXPECT(std::abs(find_field->width() - replace_field->width()) < 0.001);
+        }
+
+        QPointer<QQuickItem> deleted_panel(find_panel);
+        delete find_panel;
+        SQ_EXPECT(deleted_panel.isNull());
+        editor.showFindReplace();
+        SQ_EXPECT(editor.findChild<QQuickItem*>(
+            QStringLiteral("scintillaquickFindPanel"), Qt::FindDirectChildrenOnly) != nullptr);
+    }
+
+    QKeyEvent escape_event(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QCoreApplication::sendEvent(&editor, &escape_event);
+    SQ_EXPECT(escape_event.isAccepted());
+    SQ_EXPECT(!editor.findPanelVisible());
+
+    editor.setFindOptions(0);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -1123,6 +1286,7 @@ int main(int argc, char** argv)
     test_call_tip_owned_destroy_and_external_delete(editor);
     test_autocomplete_list_box_owned_destroy_and_external_delete(editor);
     test_wrap_mode_toggle(editor);
+    test_find_and_replace_panel(editor);
 
     pump_events();
 
