@@ -23,6 +23,7 @@
 #include <QMetaType>
 #include <QPointer>
 #include <QQuickItem>
+#include <QScreen>
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QTextCharFormat>
@@ -136,6 +137,28 @@ void test_property_roundtrip(ScintillaQuick_item& editor)
     SQ_EXPECT(text_length(editor) == text.size());
     SQ_EXPECT(editor.width() == 640);
     SQ_EXPECT(editor.property("text").toString() == text);
+}
+
+void test_pixel_sized_font(ScintillaQuick_item& editor)
+{
+    constexpr int pixel_size = 16;
+    QFont font = QGuiApplication::font();
+    font.setPixelSize(pixel_size);
+
+    const QScreen* const screen = QGuiApplication::primaryScreen();
+    const qreal logical_dpi_y = screen ? screen->logicalDotsPerInchY() : 96.0;
+    const qreal expected_size = pixel_size * 72.0 / logical_dpi_y * SC_FONT_SIZE_MULTIPLIER;
+    const QFont previous_font = editor.property("font").value<QFont>();
+
+    editor.setProperty("font", font);
+    const sptr_t style_0_size = editor.send(SCI_STYLEGETSIZEFRACTIONAL, 0);
+    const sptr_t default_style_size = editor.send(SCI_STYLEGETSIZEFRACTIONAL, STYLE_DEFAULT);
+    SQ_EXPECT(font.pointSizeF() <= 0.0);
+    SQ_EXPECT(style_0_size > 0);
+    SQ_EXPECT(default_style_size > 0);
+    SQ_EXPECT(std::abs(style_0_size - expected_size) <= 1.0);
+    SQ_EXPECT(std::abs(default_style_size - expected_size) <= 1.0);
+    editor.setProperty("font", previous_font);
 }
 
 void test_insert_and_delete(ScintillaQuick_item& editor)
@@ -1262,6 +1285,7 @@ int main(int argc, char** argv)
     editor.setHeight(480);
 
     test_property_roundtrip(editor);
+    test_pixel_sized_font(editor);
     test_insert_and_delete(editor);
     test_sends_syncs_properties(editor);
     test_direct_function_syncs_properties(editor);

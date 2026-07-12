@@ -26,6 +26,7 @@
 #include <QMetaType>
 #include <QPalette>
 #include <QQuickWindow>
+#include <QScreen>
 #include <QSGNode>
 #include <QTextFormat>
 #include <QVarLengthArray>
@@ -2022,8 +2023,17 @@ void ScintillaQuick_item::reset_tracked_scroll_width()
 void ScintillaQuick_item::setStylesFont(const QFont& f, int style)
 {
     const QByteArray family = f.family().toLatin1();
+    qreal point_size = f.pointSizeF();
+    if (point_size <= 0.0 && f.pixelSize() > 0) {
+        const QScreen* const screen = window() ? window()->screen() : QGuiApplication::primaryScreen();
+        const qreal logical_dpi_y = std::max<qreal>(1.0, screen ? screen->logicalDotsPerInchY() : 96.0);
+        point_size = static_cast<qreal>(f.pixelSize()) * 72.0 / logical_dpi_y;
+    }
+
     send(SCI_STYLESETFONT,           style, reinterpret_cast<sptr_t>(family.constData()));
-    send(SCI_STYLESETSIZEFRACTIONAL, style, long(f.pointSizeF() * SC_FONT_SIZE_MULTIPLIER));
+    if (point_size > 0.0) {
+        send(SCI_STYLESETSIZEFRACTIONAL, style, long(point_size * SC_FONT_SIZE_MULTIPLIER));
+    }
 
     // Pass the Qt weight via the back door.
     send(SCI_STYLESETWEIGHT, style, -f.weight());
