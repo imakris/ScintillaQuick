@@ -349,8 +349,7 @@ ScintillaQuick_core::ScintillaQuick_core(::ScintillaQuick_item* parent)
     m_h_page(0),
     m_have_mouse_capture(false),
     m_drag_was_dropped(false),
-    m_rectangular_selection_modifier(SCMOD_ALT),
-    m_current_painter(nullptr)
+    m_rectangular_selection_modifier(SCMOD_ALT)
 {
     wMain = static_cast<QQuickItem*>(m_owner); // Scintilla wMain stores the platform window handle.
 
@@ -1271,46 +1270,6 @@ sptr_t ScintillaQuick_core::DirectStatusFunction(
         *p_status = static_cast<int>(status);
     }
     return return_value;
-}
-
-void ScintillaQuick_core::PartialPaint(const PRectangle& rect)
-{
-    PartialPaintQml(rect, nullptr);
-}
-
-// Raster reference path used by tests through ScintillaQuick_validation_access.
-// The production Qt Quick path builds Render_frame snapshots and renders those
-// with scene graph nodes.
-void ScintillaQuick_core::PartialPaintQml(const PRectangle& rect, QPainter* painter)
-{
-    m_current_painter   = painter;
-    rcPaint             = rect;
-    paintState          = PaintState::painting;
-    PRectangle rcClient = GetClientRectangle();
-    // TODO: analyze repaint problem when LineEnd should be marked...
-    paintingAllText     = rcPaint.Contains(rcClient);
-
-    AutoSurface surfacePaint(this, painter);
-    Paint(surfacePaint, rcPaint);
-    surfacePaint->Release();
-
-    if (paintState == PaintState::abandoned) {
-        // FIXME: Failure to paint the requested rectangle in each
-        // paint event causes flicker on some platforms (Mac?)
-        // Paint rect immediately.
-        paintState = PaintState::painting;
-        paintingAllText = true;
-
-        AutoSurface surface(this, painter);
-        Paint(surface, rcPaint);
-        surface->Release();
-
-        // Queue a full repaint.
-        m_owner->update();
-    }
-
-    paintState = PaintState::notPainting;
-    m_current_painter = nullptr;
 }
 
 void ScintillaQuick_core::DragEnter(const Point& point)

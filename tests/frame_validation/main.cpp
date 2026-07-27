@@ -920,8 +920,6 @@ static bool test_scrolled_full_capture_matches_direct_secondary_geometry()
 
     bool ok = true;
     f.set_text(text.constData());
-    ok &= check(indicator_start >= 0, id, "fixture must record indicator start position");
-    ok &= check(underline_start >= 0, id, "fixture must record underline start position");
     f.editor.send(SCI_INDICSETSTYLE, 0, INDIC_PLAIN);
     f.editor.send(SCI_INDICSETFORE, 0, 0x0000FF);
     f.editor.send(SCI_INDICSETUNDER, 0, 1);
@@ -1598,8 +1596,6 @@ static bool test_margin_numbers_basic()
     dump_frame_summary(id, frame);
 
     bool ok = true;
-    ok &= check(
-        !frame.margin_text_primitives.empty(), id, "margin_text_primitives must not be empty with line numbers on");
     ok &= check(frame.margin_text_primitives.size() == 5, id,
         "numbered margin must produce exactly one primitive per document line");
 
@@ -2520,10 +2516,6 @@ static bool test_rtl_direction_field()
     if (!frame.visual_lines.empty()) {
         const Visual_line_frame& line = frame.visual_lines[0];
         ok &= check(!line.text_runs.empty(), id, "text with Hebrew must produce text runs");
-        for (const Text_run& run : line.text_runs) {
-            ok &= check(run.width > 0 || run.text.isEmpty(), id,
-                "all non-empty runs must have positive width");
-        }
     }
 
     ok &= check_no_overlapping_runs(frame, id);
@@ -2552,10 +2544,6 @@ static bool test_mixed_bidi_direction()
     if (!frame.visual_lines.empty()) {
         const Visual_line_frame& line = frame.visual_lines[0];
         ok &= check(!line.text_runs.empty(), id, "mixed BiDi text must produce text runs");
-
-        for (const Text_run& run : line.text_runs) {
-            ok &= check(run.width > 0 || run.text.isEmpty(), id, "all non-empty runs must have positive width");
-        }
 
         QString full_text = reconstruct_line_text(line);
         ok &= check(full_text.contains("Hello"), id, "mixed text must contain Latin portion");

@@ -246,13 +246,6 @@ current interface uses `Editor::SetCtrlID()` / `GetCtrlID()` and the
 Do not reintroduce a parallel wrapper unless a Scintilla upgrade adds a real
 virtual/interface requirement.
 
-`PartialPaint()` and `PartialPaintQml()` are retained as a raster reference path
-for validation access. They let tests ask Scintilla to paint into a `QImage`
-oracle so frame and scene-graph output can be compared against Scintilla's
-raster behavior. They are not a second production renderer. Production Qt Quick
-rendering must continue to capture `Render_frame` data and render it through the
-scene graph.
-
 ## Signal Lifetime Rules
 
 Signals that expose owned Qt values, such as `QByteArray` copied from
@@ -274,7 +267,6 @@ Use fresh build directories for validation work.
 | --- | --- |
 | Dispatch table, `send()`, `sends()`, direct callbacks | `scintillaquick_dispatch_table_test`, smoke tests covering property sync and render invalidation, CI-compatible subset. |
 | Render-frame capture or translation | `scintillaquick_frame_validation_test`, relevant smoke tests, Linux visual-baseline gate for visible changes. |
-| Raster reference access through `PartialPaint()` / `PartialPaintQml()` | `scintillaquick_frame_validation_test`, plus the CI-compatible subset if source behavior changes. |
 | Scene-graph renderer, text cache, node pools, update scheduling | Frame validation, Linux visual-baseline gate, benchmark baseline and post-change comparison. |
 | IME/composition | Focused smoke tests for malformed attributes, commit/cancel, read-only/protected behavior; manual OS IME check when practical. |
 | Platform windows, list boxes, call tips, surfaces, fonts, menus | Lifecycle smoke tests, stale deletion tests where feasible, CI-compatible subset. |

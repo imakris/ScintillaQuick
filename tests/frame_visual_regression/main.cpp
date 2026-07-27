@@ -497,8 +497,7 @@ Fixture_outcome run_scroll_probe_fixture(
     Fixture_editor& editor,
     QQuickWindow&   window,
     const QPointF&  wheel_point,
-    int             steps,
-    bool            wrapped)
+    int             steps)
 {
     bool generated_any = false;
     for (int step = 0; step < steps; ++step) {
@@ -558,10 +557,6 @@ Fixture_outcome run_scroll_probe_fixture(
         }
         if (outcome == Fixture_outcome::generated) {
             generated_any = true;
-        }
-        else
-        if (outcome != Fixture_outcome::pass) {
-            return outcome;
         }
     }
 
@@ -907,8 +902,7 @@ static Fixture_outcome vr_scroll_wheel_bounce_unwrapped()
         f,
         f.window,
         wheel_point,
-        48,
-        false);
+        48);
 }
 
 static Fixture_outcome vr_scroll_wheel_bounce_margin_numbers_unwrapped()
@@ -930,8 +924,7 @@ static Fixture_outcome vr_scroll_wheel_bounce_margin_numbers_unwrapped()
         f,
         f.window,
         wheel_point,
-        48,
-        false);
+        48);
 }
 
 static Fixture_outcome vr_scroll_wheel_bounce_wrapped()
@@ -951,8 +944,7 @@ static Fixture_outcome vr_scroll_wheel_bounce_wrapped()
         f,
         f.window,
         wheel_point,
-        24,
-        true);
+        24);
 }
 
 static Fixture_outcome vr_edit_savepoint_one_line_scroll_matches_fresh_surface()

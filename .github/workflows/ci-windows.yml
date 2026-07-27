@@ -49,10 +49,6 @@ jobs:
         run: |
           "$PWD/build/Release" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Run unit tests (dispatch table)
-        working-directory: build
-        run: ctest -C Release --output-on-failure -R scintillaquick_dispatch_table_test
-
       - name: Run smoke + frame-validation tests (offscreen)
         working-directory: build
         env:

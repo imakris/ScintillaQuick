@@ -43,10 +43,6 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Run unit tests (dispatch table)
-        working-directory: build
-        run: ctest -C Release --output-on-failure -R scintillaquick_dispatch_table_test
-
       - name: Run smoke + frame-validation tests (offscreen)
         working-directory: build
         env:

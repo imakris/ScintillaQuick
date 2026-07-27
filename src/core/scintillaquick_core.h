@@ -62,7 +62,6 @@
 // actually need them.
 class QAction;
 class QMimeData;
-class QPainter;
 class QQuickItem;
 class QTimerEvent;
 
@@ -207,15 +206,7 @@ private:
         sptr_t       l_param,
         int*         p_status);
 
-    QPainter* GetPainter() { return m_current_painter; }
-
 protected:
-    // Raster paint adapter retained for validation-access reference captures.
-    // Production rendering captures Render_frame data and renders it through
-    // the Qt Quick scene graph.
-    void PartialPaint(const PRectangle& rect);
-    void PartialPaintQml(const PRectangle& rect, QPainter* painter);
-
     void DragEnter(const Point& point);
     void DragMove( const Point& point);
     void DragLeave();
@@ -248,8 +239,6 @@ private:
     bool m_have_mouse_capture;
     bool m_drag_was_dropped;
     int  m_rectangular_selection_modifier;
-
-    QPainter* m_current_painter; // temporary variable for paint() handling
 
     friend class ::ScintillaQuick_item;
 };
