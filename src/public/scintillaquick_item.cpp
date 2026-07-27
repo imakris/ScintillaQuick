@@ -856,7 +856,7 @@ void ScintillaQuick_item::mousePressEvent(QMouseEvent * event)
     if (event->button() == Qt::RightButton) {
         m_core->RightButtonDownWithModifiers(pos, m_elapsed_timer.elapsed(), ModifiersOfKeyboard());
 
-        Point ctx_global = PointFromQPoint(event->globalPos());
+        Point ctx_global = PointFromQPoint(event->globalPosition().toPoint());
         Point ctx_pt     = PointFromQPoint(event->pos());
         if (!m_core->PointInSelection(ctx_pt)) {
             m_core->SetEmptySelection(m_core->PositionFromLocation(ctx_pt));
@@ -949,7 +949,7 @@ void ScintillaQuick_item::dragEnterEvent(QDragEnterEvent * event)
     if (event->mimeData()->hasText()) {
         event->acceptProposedAction();
 
-        Point point = PointFromQPoint(event->pos());
+        Point point = PointFromQPoint(event->position().toPoint());
         m_core->DragEnter(point);
     }
     else {
@@ -971,7 +971,7 @@ void ScintillaQuick_item::dragMoveEvent(QDragMoveEvent * event)
     if (event->mimeData()->hasText()) {
         event->acceptProposedAction();
 
-        Point point = PointFromQPoint(event->pos());
+        Point point = PointFromQPoint(event->position().toPoint());
         m_core->DragMove(point);
     }
     else {
@@ -989,7 +989,7 @@ void ScintillaQuick_item::dropEvent(QDropEvent * event)
     if (event->mimeData()->hasText()) {
         event->acceptProposedAction();
 
-        Point point = PointFromQPoint(event->pos());
+        Point point = PointFromQPoint(event->position().toPoint());
         bool move = (event->source() == this && event->proposedAction() == Qt::MoveAction);
         m_core->Drop(point, event->mimeData(), move);
     }
@@ -1407,16 +1407,16 @@ void ScintillaQuick_item::touchEvent(QTouchEvent * event)
 
     forceActiveFocus();
 
-    if (event->touchPointStates() == Qt::TouchPointPressed && event->touchPoints().count() > 0) {
+    if (event->touchPointStates() == Qt::TouchPointPressed && event->points().count() > 0) {
         m_last_touch_press_time = m_elapsed_timer.elapsed();
         cursorChangedUpdateMarker();
     }
     else
-    if (event->touchPointStates() == Qt::TouchPointReleased && event->touchPoints().count() > 0) {
+    if (event->touchPointStates() == Qt::TouchPointReleased && event->points().count() > 0) {
         // is ths a short touch (m_elapsed_timer between press and release < 100ms) ?
         if (m_last_touch_press_time >= 0 && (m_elapsed_timer.elapsed() - m_last_touch_press_time) < 100) {
-            QTouchEvent::TouchPoint point = event->touchPoints().first();
-            QPoint mouse_pressed_point = point.pos().toPoint();
+            QTouchEvent::TouchPoint point = event->points().first();
+            QPoint mouse_pressed_point = point.position().toPoint();
             Point scintilla_point      = PointFromQPoint(mouse_pressed_point);
 
             Sci::Position pos = m_core->PositionFromLocation(scintilla_point);
