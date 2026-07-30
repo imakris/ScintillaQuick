@@ -260,7 +260,6 @@ public slots:
 
     // Emit Scintilla notifications as signals.
     void notifyParent(Scintilla::NotificationData scn);
-    void event_command(Scintilla::uptr_t w_param, Scintilla::sptr_t l_param);
 
 signals:
     void cursorPositionChanged();

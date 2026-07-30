@@ -182,6 +182,37 @@ void test_insert_and_delete(ScintillaQuick_item& editor)
     SQ_EXPECT(editor.send(SCI_GETLINECOUNT) == 2);
 }
 
+void test_command_signal_propagates_synchronously(ScintillaQuick_item& editor)
+{
+    constexpr int editor_id = 37;
+    editor.setProperty("text", QString());
+    editor.send(SCI_SETIDENTIFIER, editor_id);
+
+    const uptr_t expected_w_param = static_cast<uptr_t>(
+        Scintilla::Internal::Platform::LongFromTwoShorts(editor_id, SCEN_CHANGE));
+    const sptr_t expected_l_param =
+        reinterpret_cast<sptr_t>(static_cast<QQuickItem*>(&editor));
+    int  command_count = 0;
+    bool payloads_match = true;
+    const QMetaObject::Connection command_connection = QObject::connect(
+        &editor,
+        &ScintillaQuick_item::command,
+        &editor,
+        [&](uptr_t w_param, sptr_t l_param) {
+            ++command_count;
+            payloads_match =
+                payloads_match &&
+                w_param == expected_w_param &&
+                l_param == expected_l_param;
+        });
+
+    editor.sends(SCI_APPENDTEXT, 1, "x");
+
+    SQ_EXPECT(command_count == 3);
+    SQ_EXPECT(payloads_match);
+    QObject::disconnect(command_connection);
+}
+
 void test_sends_syncs_properties(ScintillaQuick_item& editor)
 {
     editor.setProperty("text", QStringLiteral("one"));
@@ -1287,6 +1318,7 @@ int main(int argc, char** argv)
     test_property_roundtrip(editor);
     test_pixel_sized_font(editor);
     test_insert_and_delete(editor);
+    test_command_signal_propagates_synchronously(editor);
     test_sends_syncs_properties(editor);
     test_direct_function_syncs_properties(editor);
     test_direct_callbacks_bypass_send_override();

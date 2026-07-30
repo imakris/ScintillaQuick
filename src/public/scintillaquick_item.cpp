@@ -430,7 +430,7 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
     connect(m_core, SIGNAL(notifyChange()), this, SIGNAL(notifyChange()));
 
     connect(m_core, SIGNAL(command(Scintilla::uptr_t, Scintilla::sptr_t)), this,
-        SLOT(event_command(Scintilla::uptr_t, Scintilla::sptr_t)));
+        SIGNAL(command(Scintilla::uptr_t, Scintilla::sptr_t)));
 
     connect(m_core, SIGNAL(aboutToCopy(QMimeData*)), this, SIGNAL(aboutToCopy(QMimeData*)));
 
@@ -1752,11 +1752,6 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
         default:
             return;
     }
-}
-
-void ScintillaQuick_item::event_command(uptr_t w_param, sptr_t l_param)
-{
-    emit command(w_param, l_param);
 }
 
 KeyMod ScintillaQuick_item::ModifiersOfKeyboard()
