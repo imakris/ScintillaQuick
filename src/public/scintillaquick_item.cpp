@@ -148,16 +148,24 @@ bool macro_lparam_contract_is_numeric(Message message)
     }
 }
 
-void copy_notification_text_payload(
-    const NotificationData& scn,
-    ScintillaQuick_notification& snapshot)
+// Owned copy of a notification's text payload, taken while `NotificationData::text`
+// and `NotificationData::length` still describe Scintilla's own buffer.
+struct notification_text_t
 {
+    QByteArray bytes;
+    bool       available = false;
+};
+
+notification_text_t notification_text_payload(const NotificationData& scn)
+{
+    notification_text_t payload;
+
     switch (scn.nmhdr.code) {
         case Notification::Modified: {
-            snapshot.textAvailable = scn.text != nullptr;
+            payload.available = scn.text != nullptr;
             qsizetype byte_count = 0;
             if (scn.text && scn.length > 0 && copy_position_byte_count(scn.length, byte_count)) {
-                snapshot.text = QByteArray(scn.text, byte_count);
+                payload.bytes = QByteArray(scn.text, byte_count);
             }
             break;
         }
@@ -167,15 +175,15 @@ void copy_notification_text_payload(
         case Notification::AutoCCompleted:
         case Notification::AutoCSelectionChange:
         case Notification::URIDropped:
-            snapshot.textAvailable = scn.text != nullptr;
-            snapshot.text = copy_nul_terminated_bytes(scn.text);
+            payload.available = scn.text != nullptr;
+            payload.bytes     = copy_nul_terminated_bytes(scn.text);
             break;
 
         default:
-            snapshot.textAvailable = false;
-            snapshot.text.clear();
             break;
     }
+
+    return payload;
 }
 
 void copy_macro_lparam_payload(
@@ -244,7 +252,9 @@ void copy_notification_lparam_payload(
     }
 }
 
-ScintillaQuick_notification notification_snapshot_from(const NotificationData& scn)
+ScintillaQuick_notification notification_snapshot_from(
+    const NotificationData&    scn,
+    const notification_text_t& text)
 {
     ScintillaQuick_notification snapshot;
     snapshot.hwndFrom = reinterpret_cast<uptr_t>(scn.nmhdr.hwndFrom);
@@ -271,7 +281,8 @@ ScintillaQuick_notification notification_snapshot_from(const NotificationData& s
     snapshot.listCompletionMethod = scn.listCompletionMethod;
     snapshot.characterSource = scn.characterSource;
 
-    copy_notification_text_payload(scn, snapshot);
+    snapshot.textAvailable = text.available;
+    snapshot.text          = text.bytes;
     copy_notification_lparam_payload(scn, snapshot);
     return snapshot;
 }
@@ -1602,17 +1613,47 @@ const Render_frame& ScintillaQuick_item::rendered_frame_for_test() const
     return m_render_data ? m_render_data->frame : empty_frame;
 }
 
+void ScintillaQuick_item::replace_notification_text(const QByteArray& text)
+{
+    if (!m_delivered_notification_text) {
+        qWarning("ScintillaQuick: replace_notification_text() is only meaningful from a slot "
+            "connected to ScintillaQuick_item::notify()");
+        return;
+    }
+
+    *m_delivered_notification_text = text;
+}
+
 void ScintillaQuick_item::notifyParent(NotificationData scn)
 {
     static const QMetaMethod notification_received_signal =
         QMetaMethod::fromSignal(&ScintillaQuick_item::notificationReceived);
     const bool safe_notification_connected = isSignalConnected(notification_received_signal);
-    const char* const pre_notify_text = scn.text;
-    const Position pre_notify_length = scn.length;
-    const ScintillaQuick_notification snapshot =
-        safe_notification_connected ? notification_snapshot_from(scn) : ScintillaQuick_notification();
 
+    // Copy the payload while `scn.text` and `scn.length` still describe Scintilla's own
+    // buffer. Everything below the `notify()` emission reads `delivered_text` instead:
+    // a legacy slot can repoint `scn.text` at storage that dies when the slot returns,
+    // and can widen `scn.length` past the end of Scintilla's buffer, so neither field is
+    // safe to dereference once a slot has seen them.
+    const notification_text_t notification_text = notification_text_payload(scn);
+    QByteArray delivered_text                   = notification_text.bytes;
+
+    const ScintillaQuick_notification snapshot = safe_notification_connected
+        ? notification_snapshot_from(scn, notification_text)
+        : ScintillaQuick_notification();
+
+    const char* const pre_notify_text      = scn.text;
+    QByteArray* const outer_delivered_text = m_delivered_notification_text;
+
+    m_delivered_notification_text = &delivered_text;
     emit notify(&scn);
+    m_delivered_notification_text = outer_delivered_text;
+
+    if (scn.text != pre_notify_text) {
+        qWarning("ScintillaQuick: assigning NotificationData::text from a notify() slot has no "
+            "effect; call ScintillaQuick_item::replace_notification_text() instead");
+    }
+
     if (safe_notification_connected) {
         emit notificationReceived(snapshot);
     }
@@ -1659,22 +1700,8 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
                 emit linesAdded(added ? 1 : -1);
             }
 
-            const QByteArray bytes = [&scn, safe_notification_connected, &snapshot,
-                pre_notify_text, pre_notify_length]() {
-                if (safe_notification_connected &&
-                    snapshot.code == Notification::Modified &&
-                    scn.text == pre_notify_text &&
-                    scn.length == pre_notify_length) {
-                    return snapshot.text;
-                }
-
-                qsizetype byte_count = 0;
-                return scn.text && scn.length > 0 && copy_position_byte_count(scn.length, byte_count)
-                    ? QByteArray(scn.text, byte_count)
-                    : QByteArray();
-            }();
             emit modified(scn.modificationType, scn.position, scn.length,
-                scn.linesAdded, bytes, scn.line, scn.foldLevelNow, scn.foldLevelPrev);
+                scn.linesAdded, delivered_text, scn.line, scn.foldLevelNow, scn.foldLevelPrev);
             if (deleted) {
                 reset_tracked_scroll_width();
             }
@@ -1703,7 +1730,7 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
             break;
 
         case Notification::URIDropped:
-            emit uriDropped(QString::fromUtf8(scn.text));
+            emit uriDropped(QString::fromUtf8(delivered_text));
             break;
 
         case Notification::DwellStart:
@@ -1734,7 +1761,7 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
             break;
 
         case Notification::AutoCSelection:
-            emit autoCompleteSelection(scn.lParam, QString::fromUtf8(scn.text));
+            emit autoCompleteSelection(scn.lParam, QString::fromUtf8(delivered_text));
             break;
 
         case Notification::AutoCCancelled:

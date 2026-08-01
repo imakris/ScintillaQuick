@@ -259,6 +259,18 @@ and do not expose new pointer-bearing notification APIs without API review.
 Keep the compatibility rule here: value-based notification signals must own
 copied payloads, and raw pointer signals remain direct-only.
 
+The same rule binds the write side of `notify(Scintilla::NotificationData*)`.
+`notifyParent()` copies the notification's text payload before it emits
+`notify()`, and every signal emitted afterwards reads that owned copy. A slot may
+still adjust the notification's scalar fields, including `length`, and those are
+forwarded as written; assigning `NotificationData::text` has no effect and is
+reported with a warning. A slot that needs to change the delivered text calls
+`ScintillaQuick_item::replace_notification_text()`, which copies the bytes.
+Never reintroduce a post-`notify()` read of `NotificationData::text` or a
+`NotificationData::length`-sized copy out of it: the item owns neither the
+buffer a slot may install nor any guarantee that a slot-supplied length still
+describes Scintilla's buffer.
+
 ## Test And Benchmark Playbook
 
 Use fresh build directories for validation work.

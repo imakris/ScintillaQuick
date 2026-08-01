@@ -253,6 +253,16 @@ public:
         bool needs_style_sync     = false,
         bool scrolling            = false);
 
+    // Replace the text payload that the typed notification signals - `modified`,
+    // `uriDropped` and `autoCompleteSelection` - deliver for the notification currently
+    // being dispatched. Only meaningful from a slot connected to `notify()`; the bytes
+    // are copied here, so this item never reads caller storage after the slot returns.
+    // Assigning `Scintilla::NotificationData::text` from such a slot does not change
+    // what the typed signals deliver, because this item must not dereference a pointer
+    // whose lifetime and extent it does not own. The scalar fields of the notification,
+    // including `length`, stay caller-mutable and are forwarded as written.
+    void replace_notification_text(const QByteArray& text);
+
 public slots:
     // Scroll events coming from GUI to be sent to Scintilla.
     void scrollHorizontal(int value);
@@ -445,6 +455,12 @@ private:
     QElapsedTimer m_elapsed_timer;
 
     Scintilla::Position m_preedit_pos;
+    // Owned text payload of the notification currently being delivered by
+    // `notifyParent()`, and the target of `replace_notification_text()`. Points into the
+    // active `notifyParent()` frame while `notify()` is being emitted and is null at all
+    // other times; saved and restored around that emission so a slot that re-enters
+    // Scintilla and triggers a nested notification cannot steal the outer delivery.
+    QByteArray* m_delivered_notification_text = nullptr;
     std::unique_ptr<Render_data> m_render_data;
     QTimer m_caret_blink_timer;
     bool m_caret_blink_visible = true;

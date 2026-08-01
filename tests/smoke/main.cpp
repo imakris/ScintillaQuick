@@ -441,7 +441,7 @@ void test_notification_received_order_and_legacy_mutation(ScintillaQuick_item& e
     QObject::disconnect(typed_connection);
 }
 
-void test_modified_signal_preserves_legacy_mutated_text_with_safe_receiver(ScintillaQuick_item& editor)
+void test_modified_signal_uses_replacement_text_with_safe_receiver(ScintillaQuick_item& editor)
 {
     QByteArray original_text("or\0ig", 5);
     QByteArray legacy_text("post\0notify", 11);
@@ -460,7 +460,7 @@ void test_modified_signal_preserves_legacy_mutated_text_with_safe_receiver(Scint
             if (scn->nmhdr.code != Scintilla::Notification::Modified) {
                 return;
             }
-            scn->text = legacy_text.constData();
+            editor.replace_notification_text(legacy_text);
             scn->length = legacy_text.size();
         });
     const QMetaObject::Connection safe_connection = QObject::connect(
@@ -507,7 +507,7 @@ void test_modified_signal_preserves_legacy_mutated_text_with_safe_receiver(Scint
     QObject::disconnect(typed_connection);
 }
 
-void test_modified_signal_reuses_safe_snapshot_text_when_unchanged(ScintillaQuick_item& editor)
+void test_modified_signal_and_snapshot_own_text_bytes(ScintillaQuick_item& editor)
 {
     QByteArray source("same\0bytes", 10);
     const QByteArray expected = source;
@@ -555,6 +555,119 @@ void test_modified_signal_reuses_safe_snapshot_text_when_unchanged(ScintillaQuic
 
     QObject::disconnect(safe_connection);
     QObject::disconnect(typed_connection);
+}
+
+void test_modified_signal_ignores_legacy_length_only_mutation(ScintillaQuick_item& editor)
+{
+    // A legacy `notify()` slot that widens `scn->length` while leaving Scintilla's own
+    // `scn->text` pointer in place must not make the item copy past the end of that
+    // buffer. No `notificationReceived` receiver is connected here, which is the default
+    // shipping configuration.
+    QByteArray original_text("orig", 4);
+    QByteArray typed_text;
+    Scintilla::Position typed_length = -1;
+    int typed_count = 0;
+
+    const QMetaObject::Connection legacy_connection = QObject::connect(
+        &editor,
+        &ScintillaQuick_item::notify,
+        &editor,
+        [&](Scintilla::NotificationData* scn) {
+            if (scn->nmhdr.code != Scintilla::Notification::Modified) {
+                return;
+            }
+            scn->length = original_text.size() + 64;
+        });
+    const QMetaObject::Connection typed_connection = QObject::connect(
+        &editor,
+        &ScintillaQuick_item::modified,
+        &editor,
+        [&](
+            Scintilla::ModificationFlags,
+            Scintilla::Position,
+            Scintilla::Position length,
+            Scintilla::Position,
+            const QByteArray& text,
+            Scintilla::Position,
+            Scintilla::FoldLevel,
+            Scintilla::FoldLevel) {
+            ++typed_count;
+            typed_text   = text;
+            typed_length = length;
+        });
+
+    Scintilla::NotificationData scn = make_notification(Scintilla::Notification::Modified);
+    scn.text = original_text.constData();
+    scn.length = original_text.size();
+    editor.notifyParent(scn);
+
+    SQ_EXPECT(typed_count == 1);
+    SQ_EXPECT(typed_text.size() == original_text.size());
+    SQ_EXPECT(typed_text == original_text);
+    SQ_EXPECT(typed_length == original_text.size() + 64);
+
+    QObject::disconnect(legacy_connection);
+    QObject::disconnect(typed_connection);
+}
+
+void test_string_notifications_use_owned_text(ScintillaQuick_item& editor)
+{
+    // `uriDropped` and `autoCompleteSelection` must carry the bytes Scintilla supplied,
+    // not whatever pointer a legacy `notify()` slot left in `scn->text`.
+    QByteArray uri_source("file:///tmp/original.txt");
+    QByteArray selection_source("original");
+    QByteArray slot_text("slot-owned");
+    QString typed_uri;
+    QString typed_selection;
+
+    const QMetaObject::Connection legacy_connection = QObject::connect(
+        &editor,
+        &ScintillaQuick_item::notify,
+        &editor,
+        [&](Scintilla::NotificationData* scn) {
+            scn->text = slot_text.constData();
+        });
+    const QMetaObject::Connection uri_connection = QObject::connect(
+        &editor,
+        &ScintillaQuick_item::uriDropped,
+        &editor,
+        [&](const QString& uri) { typed_uri = uri; });
+    const QMetaObject::Connection selection_connection = QObject::connect(
+        &editor,
+        &ScintillaQuick_item::autoCompleteSelection,
+        &editor,
+        [&](Scintilla::Position, const QString& text) { typed_selection = text; });
+
+    Scintilla::NotificationData uri_scn = make_notification(Scintilla::Notification::URIDropped);
+    uri_scn.text = uri_source.constData();
+    editor.notifyParent(uri_scn);
+
+    Scintilla::NotificationData selection_scn =
+        make_notification(Scintilla::Notification::AutoCSelection);
+    selection_scn.text = selection_source.constData();
+    editor.notifyParent(selection_scn);
+
+    SQ_EXPECT(typed_uri       == QString::fromUtf8(uri_source));
+    SQ_EXPECT(typed_selection == QString::fromUtf8(selection_source));
+
+    QObject::disconnect(legacy_connection);
+
+    // The same two signals do honour a replacement supplied through the value-owned API.
+    const QMetaObject::Connection replacement_connection = QObject::connect(
+        &editor,
+        &ScintillaQuick_item::notify,
+        &editor,
+        [&](Scintilla::NotificationData*) { editor.replace_notification_text(slot_text); });
+
+    editor.notifyParent(uri_scn);
+    editor.notifyParent(selection_scn);
+
+    SQ_EXPECT(typed_uri       == QString::fromUtf8(slot_text));
+    SQ_EXPECT(typed_selection == QString::fromUtf8(slot_text));
+
+    QObject::disconnect(replacement_connection);
+    QObject::disconnect(uri_connection);
+    QObject::disconnect(selection_connection);
 }
 
 void test_modified_signal_queued_owns_text_bytes(ScintillaQuick_item& editor)
@@ -1311,8 +1424,10 @@ int main(int argc, char** argv)
     test_modified_signal_owns_text_bytes(editor);
     test_notification_metatypes_registered();
     test_notification_received_order_and_legacy_mutation(editor);
-    test_modified_signal_preserves_legacy_mutated_text_with_safe_receiver(editor);
-    test_modified_signal_reuses_safe_snapshot_text_when_unchanged(editor);
+    test_modified_signal_uses_replacement_text_with_safe_receiver(editor);
+    test_modified_signal_and_snapshot_own_text_bytes(editor);
+    test_modified_signal_ignores_legacy_length_only_mutation(editor);
+    test_string_notifications_use_owned_text(editor);
     test_modified_signal_queued_owns_text_bytes(editor);
     test_notification_received_queued_modified_embedded_nul(editor);
     test_notification_received_queued_string_payload(editor);
