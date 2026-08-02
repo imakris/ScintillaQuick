@@ -26,6 +26,7 @@
 #include <QMetaType>
 #include <QPalette>
 #include <QQuickWindow>
+#include <QScopeGuard>
 #include <QScreen>
 #include <QSGNode>
 #include <QTextFormat>
@@ -1642,12 +1643,23 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
         ? notification_snapshot_from(scn, notification_text)
         : ScintillaQuick_notification();
 
-    const char* const pre_notify_text      = scn.text;
-    QByteArray* const outer_delivered_text = m_delivered_notification_text;
+    const char* const pre_notify_text = scn.text;
 
-    m_delivered_notification_text = &delivered_text;
-    emit notify(&scn);
-    m_delivered_notification_text = outer_delivered_text;
+    // Scope the swap so the outer pointer is restored on every exit path. The
+    // swap carries reentrancy (a nested notifyParent() hands this frame's pointer
+    // back when its own emission returns), and it has to survive a slot that
+    // leaves through an exception too: `delivered_text` dies with this frame, so
+    // a member left pointing at it would pass the null check in
+    // replace_notification_text() and write through a dangling pointer.
+    {
+        QByteArray* const outer_delivered_text = m_delivered_notification_text;
+        const auto restore_delivered_text = qScopeGuard([this, outer_delivered_text] {
+            m_delivered_notification_text = outer_delivered_text;
+        });
+
+        m_delivered_notification_text = &delivered_text;
+        emit notify(&scn);
+    }
 
     if (scn.text != pre_notify_text) {
         qWarning("ScintillaQuick: assigning NotificationData::text from a notify() slot has no "
