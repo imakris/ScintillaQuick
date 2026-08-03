@@ -45,13 +45,12 @@ so that consumers can find them without crawling history.
   non-Windows host, glyphs go through FreeType with grayscale
   antialiasing and 32 of the 33 fixtures fail. That depends on the
   platform plugin rather than on the host, so `offscreen` fails on
-  Windows too. Only the `windows` plugin reproduces the baselines, which
-  is why `scintillaquick_visual_regression_test` is excluded from ctest
-  in every CI workflow and is run locally instead, as described under
-  *Windows visual tests require a desktop session* below. Gating another
-  platform needs per-platform baselines that a human has inspected;
-  regenerating them from a run only records whatever that renderer
-  happened to produce.
+  Windows too. Only the `windows` plugin reproduces the baselines, so
+  `scintillaquick_visual_regression_test` is gated in the Windows CI
+  workflow and excluded from the Linux and macOS ones, which run under
+  `offscreen`. Gating another platform needs per-platform baselines that
+  a human has inspected; regenerating them from a run only records
+  whatever that renderer happened to produce.
 
 - **The benchmark target is opt-in.**
   Build it with `-DSCINTILLAQUICK_BUILD_BENCHMARKS=ON`. Treat benchmark
@@ -61,7 +60,13 @@ so that consumers can find them without crawling history.
   visual-regression runner uses the `windows` Qt platform plugin
   because that is the only rasteriser the baselines reproduce under,
   as described above. Run the Windows tests in an interactive
-  session or on a CI runner that provides one.
+  session or on a CI runner that provides one. The hosted
+  `windows-latest` image does: it renders with ClearType subpixel
+  antialiasing (`FontSmoothing` 2, `FontSmoothingType` 2), and all 33
+  fixtures reproduce there. That is a property of the runner image
+  rather than a guarantee, which is why `ci-windows.yml` logs those
+  settings on every run and uploads the `_actual`/`_expected`/`_diff`
+  triples when a fixture fails.
 
 ## Clipboard and drag-drop
 
