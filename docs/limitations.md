@@ -31,25 +31,36 @@ so that consumers can find them without crawling history.
 
 ## Tests and baselines
 
-- **Visual regression baselines are Linux-only.** The PNGs under
-  `tests/frame_visual_regression/baselines/` were generated on Linux
-  with Qt's software scene graph and the shared test-font helper in
-  `examples/common/scintillaquick_font.h`. Font-rendering differences
-  between FreeType (Linux), ClearType (Windows), and Core Text
-  (macOS) mean the visual tests will fail on Windows and macOS until
-  per-platform baselines are added. The helper defaults to `Cousine`
-  and can switch to `Cascadia Code` via `SCINTILLAQUICK_TEST_FONT_FAMILY`.
-  The CI workflow skips `scintillaquick_visual_regression_test` on
-  non-Linux hosts.
+- **Visual regression baselines are a Windows native-QPA oracle.** The
+  PNGs under `tests/frame_visual_regression/baselines/` were captured on
+  Windows through the native `windows` Qt platform plugin, which
+  rasterises glyphs with DirectWrite/GDI and LCD subpixel antialiasing.
+  The capture used the bundled `Cascadia Code` family at 11pt (the
+  default of the shared test-font helper in
+  `examples/common/scintillaquick_font.h`, switchable to `Cousine` via
+  `SCINTILLAQUICK_TEST_FONT_FAMILY`), `QT_FONT_DPI=96`,
+  `QT_SCALE_FACTOR=1`, `QT_ENABLE_HIGHDPI_SCALING=0`, and Qt's software
+  scene graph. A different rasteriser lays down different ink: under the
+  `offscreen` plugin, which `tests/CMakeLists.txt` selects on every
+  non-Windows host, glyphs go through FreeType with grayscale
+  antialiasing and 32 of the 33 fixtures fail. That depends on the
+  platform plugin rather than on the host, so `offscreen` fails on
+  Windows too. Only the `windows` plugin reproduces the baselines, which
+  is why `scintillaquick_visual_regression_test` is excluded from ctest
+  in every CI workflow and is run locally instead, as described under
+  *Windows visual tests require a desktop session* below. Gating another
+  platform needs per-platform baselines that a human has inspected;
+  regenerating them from a run only records whatever that renderer
+  happened to produce.
 
 - **The benchmark target is opt-in.**
   Build it with `-DSCINTILLAQUICK_BUILD_BENCHMARKS=ON`. Treat benchmark
   results as a local or dedicated-runner concern rather than a normal CI signal.
 
 - **Windows visual tests require a desktop session.** The
-  visual-regression runner uses the `windows` Qt platform plugin on
-  Windows (the `offscreen` plugin does not cover all of the code paths
-  the test exercises). Run the Windows tests in an interactive
+  visual-regression runner uses the `windows` Qt platform plugin
+  because that is the only rasteriser the baselines reproduce under,
+  as described above. Run the Windows tests in an interactive
   session or on a CI runner that provides one.
 
 ## Clipboard and drag-drop

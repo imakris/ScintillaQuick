@@ -89,7 +89,10 @@ General ordering expectations:
 - over-text indicators, carets, and focus-sensitive overlays last
 
 Do not reorder renderer node groups for cleanup alone. If ordering changes, run
-frame validation and the Linux visual-baseline gate.
+frame validation and `scintillaquick_visual_regression_test` locally on Windows
+under the native `windows` platform plugin. That suite is the only visual
+baseline gate that exists; it is excluded from every CI workflow because the
+baselines are a Windows native-QPA oracle (see `docs/limitations.md`).
 
 ### Threading
 
@@ -278,13 +281,17 @@ Use fresh build directories for validation work.
 | Change area | Required checks |
 | --- | --- |
 | Dispatch table, `send()`, `sends()`, direct callbacks | `scintillaquick_dispatch_table_test`, smoke tests covering property sync and render invalidation, CI-compatible subset. |
-| Render-frame capture or translation | `scintillaquick_frame_validation_test`, relevant smoke tests, Linux visual-baseline gate for visible changes. |
-| Scene-graph renderer, text cache, node pools, update scheduling | Frame validation, Linux visual-baseline gate, benchmark baseline and post-change comparison. |
+| Render-frame capture or translation | `scintillaquick_frame_validation_test`, relevant smoke tests, local Windows visual-baseline run for visible changes. |
+| Scene-graph renderer, text cache, node pools, update scheduling | Frame validation, local Windows visual-baseline run, benchmark baseline and post-change comparison. |
 | IME/composition | Focused smoke tests for malformed attributes, commit/cancel, read-only/protected behavior; manual OS IME check when practical. |
 | Platform windows, list boxes, call tips, surfaces, fonts, menus | Lifecycle smoke tests, stale deletion tests where feasible, CI-compatible subset. |
 | Mouse, wheel, keyboard, focus, selection | Smoke tests that assert event acceptance, focus state, selection/caret state, and repaint scheduling. |
 | Public API or signals | API review, examples if affected, install/consumer smoke if the installed surface changes. |
 | Documentation-only changes | `git diff --check` and link/cross-reference inspection. |
+
+A visual-baseline run means `scintillaquick_visual_regression_test` on Windows
+under the native `windows` platform plugin. No CI workflow runs it; see
+`docs/limitations.md` for why the baselines only reproduce there.
 
 Performance-sensitive changes need before/after measurement on the same machine.
 Run each selected benchmark scenario several times, record distribution rather
