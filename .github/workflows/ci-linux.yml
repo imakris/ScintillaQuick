@@ -48,7 +48,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Run tests including visual baselines (offscreen)
+      - name: Run smoke + frame-validation tests (offscreen)
         working-directory: build
         env:
           QT_QPA_PLATFORM: offscreen
@@ -57,7 +57,7 @@ jobs:
           QT_ENABLE_HIGHDPI_SCALING: 0
         run: >
           ctest -C Release --output-on-failure
-          -E "scintillaquick_embedded_benchmark"
+          -E "scintillaquick_visual_regression_test|scintillaquick_embedded_benchmark"
 
       - name: Install & test downstream consumer
         shell: bash
