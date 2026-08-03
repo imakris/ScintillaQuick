@@ -91,8 +91,9 @@ General ordering expectations:
 Do not reorder renderer node groups for cleanup alone. If ordering changes, run
 frame validation and `scintillaquick_visual_regression_test` locally on Windows
 under the native `windows` platform plugin. That suite is the only visual
-baseline gate that exists; it is excluded from every CI workflow because the
-baselines are a Windows native-QPA oracle (see `docs/limitations.md`).
+baseline gate that exists. `ci-windows.yml` runs it; the Linux and macOS
+workflows exclude it because the baselines are a Windows native-QPA oracle
+(see `docs/limitations.md`).
 
 ### Threading
 
@@ -290,7 +291,7 @@ Use fresh build directories for validation work.
 | Documentation-only changes | `git diff --check` and link/cross-reference inspection. |
 
 A visual-baseline run means `scintillaquick_visual_regression_test` on Windows
-under the native `windows` platform plugin. No CI workflow runs it; see
+under the native `windows` platform plugin. Only `ci-windows.yml` runs it; see
 `docs/limitations.md` for why the baselines only reproduce there.
 
 Performance-sensitive changes need before/after measurement on the same machine.
