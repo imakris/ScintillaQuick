@@ -237,6 +237,7 @@ void test_direct_status_reports_handler_rejection()
                 {}};
         });
 
+    editor.send(SCI_SETSTATUS, SC_STATUS_WARN_REGEX);
     int status = SC_STATUS_OK;
     const Scintilla::sptr_t replaced = direct_status(
         direct_pointer,
