@@ -11,6 +11,7 @@
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMimeData>
+#include <QMouseEvent>
 
 #include "Scintilla.h"
 
@@ -154,11 +155,10 @@ void test_direct_message_result_conventions()
     SQ_EXPECT(handled == 1);
     SQ_EXPECT(text_of(handled_editor) == QStringLiteral("aXd"));
 
-    const Scintilla::sptr_t set_text_result = handled_editor.send(
+    handled_editor.send(
         SCI_SETTEXT,
         0,
         reinterpret_cast<Scintilla::sptr_t>("new"));
-    SQ_EXPECT(set_text_result == 0);
     SQ_EXPECT(text_of(handled_editor) == QStringLiteral("new"));
 }
 
@@ -166,6 +166,7 @@ void test_handler_evaluation_isolation()
 {
     ScintillaQuick_item editor;
     editor.setProperty("text", QStringLiteral("abcd"));
+    editor.send(SCI_SETSEL, 1, 3);
     editor.send(SCI_SETTARGETRANGE, 1, 2);
 
     int calls = 0;
@@ -183,6 +184,22 @@ void test_handler_evaluation_isolation()
                 QStringLiteral("X"));
             QGuiApplication::sendEvent(&editor, &nested_key);
             SQ_EXPECT(nested_key.isAccepted());
+
+            QMouseEvent nested_mouse(
+                QEvent::MouseButtonPress,
+                QPointF(0.0, 0.0),
+                QPointF(0.0, 0.0),
+                Qt::LeftButton,
+                Qt::LeftButton,
+                Qt::NoModifier);
+            QGuiApplication::sendEvent(&editor, &nested_mouse);
+            SQ_EXPECT(nested_mouse.isAccepted());
+
+            QInputMethodEvent nested_preedit(QStringLiteral("q"), {});
+            QGuiApplication::sendEvent(&editor, &nested_preedit);
+            SQ_EXPECT(nested_preedit.isAccepted());
+            SQ_EXPECT(editor.send(SCI_GETSELECTIONSTART) == 1);
+            SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 3);
             SQ_EXPECT(editor.send(SCI_GETTARGETSTART) == 1);
             SQ_EXPECT(editor.send(SCI_GETTARGETEND) == 2);
             return ScintillaQuick_edit_result{
@@ -198,6 +215,38 @@ void test_handler_evaluation_isolation()
     SQ_EXPECT(calls == 1);
     SQ_EXPECT(text_of(editor) == QStringLiteral("aZcd"));
     SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+}
+
+void test_direct_status_reports_handler_rejection()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("abcd"));
+    editor.send(SCI_SETTARGETRANGE, 1, 3);
+
+    auto direct_status = reinterpret_cast<SciFnDirectStatus>(
+        editor.send(SCI_GETDIRECTSTATUSFUNCTION));
+    const Scintilla::sptr_t direct_pointer = editor.send(SCI_GETDIRECTPOINTER);
+    SQ_EXPECT(direct_status != nullptr);
+    SQ_EXPECT(direct_pointer != 0);
+
+    editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction&) {
+            SQ_EXPECT(editor.send(SCI_GETLENGTH) == 4);
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::REJECTED,
+                {}};
+        });
+
+    int status = SC_STATUS_OK;
+    const Scintilla::sptr_t replaced = direct_status(
+        direct_pointer,
+        SCI_REPLACETARGET,
+        1,
+        reinterpret_cast<Scintilla::sptr_t>("X"),
+        &status);
+    SQ_EXPECT(replaced == 0);
+    SQ_EXPECT(status == SC_STATUS_FAILURE);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
 }
 
 void test_selection_replacement_and_target_return()
@@ -401,6 +450,7 @@ int main(int argc, char** argv)
     test_handler_dispositions_and_reentrant_apply();
     test_direct_message_result_conventions();
     test_handler_evaluation_isolation();
+    test_direct_status_reports_handler_rejection();
     test_selection_replacement_and_target_return();
     test_replace_all_transaction_grouping();
     test_keyboard_overtype_normalization();

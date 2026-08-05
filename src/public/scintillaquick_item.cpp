@@ -101,6 +101,55 @@ bool edit_handler_query_is_safe(unsigned int message)
     }
 }
 
+bool edit_handler_event_is_blocked(QEvent::Type type)
+{
+    switch (type) {
+        case QEvent::KeyPress:
+        case QEvent::KeyRelease:
+        case QEvent::Shortcut:
+        case QEvent::ShortcutOverride:
+        case QEvent::FocusIn:
+        case QEvent::FocusOut:
+        case QEvent::Enter:
+        case QEvent::Leave:
+        case QEvent::HoverEnter:
+        case QEvent::HoverLeave:
+        case QEvent::HoverMove:
+        case QEvent::MouseButtonPress:
+        case QEvent::MouseButtonRelease:
+        case QEvent::MouseButtonDblClick:
+        case QEvent::MouseMove:
+        case QEvent::Wheel:
+        case QEvent::TabletMove:
+        case QEvent::TabletPress:
+        case QEvent::TabletRelease:
+        case QEvent::NativeGesture:
+        case QEvent::Gesture:
+        case QEvent::GestureOverride:
+        case QEvent::ContextMenu:
+        case QEvent::InputMethod:
+        case QEvent::DragEnter:
+        case QEvent::DragMove:
+        case QEvent::DragLeave:
+        case QEvent::Drop:
+        case QEvent::TouchBegin:
+        case QEvent::TouchUpdate:
+        case QEvent::TouchEnd:
+        case QEvent::TouchCancel:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool edit_handler_event_should_be_ignored(QEvent::Type type)
+{
+    return type == QEvent::DragEnter ||
+        type == QEvent::DragMove ||
+        type == QEvent::DragLeave ||
+        type == QEvent::Drop;
+}
+
 // `scene_graph_update_request` and `scene_graph_update_request_info_t` live in
 // src/core/scintillaquick_dispatch_table.h (included above) so that they can be
 // covered by dedicated unit tests without spinning up a Qt Quick window. They
@@ -861,6 +910,7 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
                 replacement.deleted_length = m_core->pdoc->Length();
                 replacement.inserted_text  = QByteArray(text);
                 normalized = true;
+                handled_result = 1;
             }
             break;
         }
@@ -1115,6 +1165,15 @@ void ScintillaQuick_item::scrollVertical(int value)
 
 bool ScintillaQuick_item::event(QEvent* event)
 {
+    if (m_evaluating_edit_handler > 0 && edit_handler_event_is_blocked(event->type())) {
+        dispatch_scintilla_message_raw(
+            SCI_SETSTATUS,
+            static_cast<uptr_t>(Status::Failure),
+            0);
+        event->setAccepted(!edit_handler_event_should_be_ignored(event->type()));
+        return true;
+    }
+
     if (event->type() == QEvent::KeyPress) {
         // Circumvent the tab focus convention.
         keyPressEvent(static_cast<QKeyEvent*>(event));

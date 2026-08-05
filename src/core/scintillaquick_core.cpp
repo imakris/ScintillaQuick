@@ -1222,7 +1222,13 @@ sptr_t ScintillaQuick_core::WndProc(Message i_message, uptr_t w_param, sptr_t l_
     }
 
     for (Direct_status_capture& capture : m_direct_status_captures) {
-        if (!capture.captured && capture.wnd_proc_depth == current_wnd_proc_depth) {
+        const bool replaces_captured_success =
+            capture.captured &&
+            capture.status == Status::Ok &&
+            errorStatus != Status::Ok;
+        if (capture.wnd_proc_depth == current_wnd_proc_depth &&
+            (!capture.captured || replaces_captured_success))
+        {
             capture.status   = errorStatus;
             capture.captured = true;
         }
