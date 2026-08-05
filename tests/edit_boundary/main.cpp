@@ -94,8 +94,10 @@ void test_handler_dispositions_and_reentrant_apply()
         [](const ScintillaQuick_edit_transaction&) {
             return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::REJECTED, {}};
         });
-    editor.sends(SCI_INSERTTEXT, 0, "x");
+    SQ_EXPECT(editor.sends(SCI_INSERTTEXT, 0, "x") == 0);
     SQ_EXPECT(text_of(editor) == QStringLiteral("abc"));
+    SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+    editor.send(SCI_SETSTATUS, SC_STATUS_OK);
 
     editor.set_edit_handler(
         [&](const ScintillaQuick_edit_transaction&) {
@@ -104,6 +106,98 @@ void test_handler_dispositions_and_reentrant_apply()
         });
     editor.sends(SCI_INSERTTEXT, 0, "z");
     SQ_EXPECT(text_of(editor) == QStringLiteral("zabc"));
+    SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+}
+
+void test_direct_message_result_conventions()
+{
+    ScintillaQuick_item rejected_editor;
+    rejected_editor.setProperty("text", QStringLiteral("abcd"));
+    rejected_editor.send(SCI_SETTARGETRANGE, 1, 3);
+    rejected_editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::REJECTED, {}};
+        });
+    const Scintilla::sptr_t rejected = rejected_editor.send(
+        SCI_REPLACETARGET,
+        1,
+        reinterpret_cast<Scintilla::sptr_t>("X"));
+    SQ_EXPECT(rejected == 0);
+    SQ_EXPECT(text_of(rejected_editor) == QStringLiteral("abcd"));
+    SQ_EXPECT(rejected_editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+
+    ScintillaQuick_item declined_editor;
+    declined_editor.setProperty("text", QStringLiteral("abcd"));
+    declined_editor.send(SCI_SETTARGETRANGE, 1, 3);
+    declined_editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::DECLINED, {}};
+        });
+    const Scintilla::sptr_t declined = declined_editor.send(
+        SCI_REPLACETARGET,
+        1,
+        reinterpret_cast<Scintilla::sptr_t>("X"));
+    SQ_EXPECT(declined == 1);
+    SQ_EXPECT(text_of(declined_editor) == QStringLiteral("aXd"));
+
+    ScintillaQuick_item handled_editor;
+    handled_editor.setProperty("text", QStringLiteral("abcd"));
+    handled_editor.send(SCI_SETTARGETRANGE, 1, 3);
+    handled_editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction& transaction) {
+            return apply_exactly(transaction);
+        });
+    const Scintilla::sptr_t handled = handled_editor.send(
+        SCI_REPLACETARGET,
+        1,
+        reinterpret_cast<Scintilla::sptr_t>("X"));
+    SQ_EXPECT(handled == 1);
+    SQ_EXPECT(text_of(handled_editor) == QStringLiteral("aXd"));
+
+    const Scintilla::sptr_t set_text_result = handled_editor.send(
+        SCI_SETTEXT,
+        0,
+        reinterpret_cast<Scintilla::sptr_t>("new"));
+    SQ_EXPECT(set_text_result == 0);
+    SQ_EXPECT(text_of(handled_editor) == QStringLiteral("new"));
+}
+
+void test_handler_evaluation_isolation()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("abcd"));
+    editor.send(SCI_SETTARGETRANGE, 1, 2);
+
+    int calls = 0;
+    editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction&) {
+            ++calls;
+            editor.send(SCI_SETTARGETRANGE, 0, 4);
+            editor.send(SCI_BEGINUNDOACTION);
+            SQ_EXPECT(editor.send(SCI_GETDIRECTPOINTER) == 0);
+
+            QKeyEvent nested_key(
+                QEvent::KeyPress,
+                Qt::Key_X,
+                Qt::NoModifier,
+                QStringLiteral("X"));
+            QGuiApplication::sendEvent(&editor, &nested_key);
+            SQ_EXPECT(nested_key.isAccepted());
+            SQ_EXPECT(editor.send(SCI_GETTARGETSTART) == 1);
+            SQ_EXPECT(editor.send(SCI_GETTARGETEND) == 2);
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::DECLINED,
+                {}};
+        });
+
+    const Scintilla::sptr_t replaced = editor.send(
+        SCI_REPLACETARGET,
+        1,
+        reinterpret_cast<Scintilla::sptr_t>("Z"));
+    SQ_EXPECT(replaced == 1);
+    SQ_EXPECT(calls == 1);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("aZcd"));
+    SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
 }
 
 void test_selection_replacement_and_target_return()
@@ -251,6 +345,30 @@ void test_clipboard_and_drop_ingress()
     SQ_EXPECT(drop.isAccepted());
     SQ_EXPECT(observed.size() == 3);
     SQ_EXPECT(observed.back().inserted_text == QByteArray("z"));
+
+    Event_editor eol_editor;
+    eol_editor.setProperty("text", QStringLiteral("x"));
+    eol_editor.send(SCI_SETEOLMODE, SC_EOL_LF);
+    ScintillaQuick_edit_replacement observed_drop;
+    eol_editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction& transaction) {
+            observed_drop = transaction.replacements.front();
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::REJECTED,
+                {}};
+        });
+    QMimeData cross_eol_mime_data;
+    cross_eol_mime_data.setText(QStringLiteral("a\r\nb"));
+    QDropEvent cross_eol_drop(
+        QPointF(0.0, 0.0),
+        Qt::CopyAction,
+        &cross_eol_mime_data,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    eol_editor.deliver_drop(&cross_eol_drop);
+    SQ_EXPECT(cross_eol_drop.isAccepted());
+    SQ_EXPECT(observed_drop.inserted_text == QByteArray("a\nb"));
+    SQ_EXPECT(text_of(eol_editor) == QStringLiteral("x"));
 }
 
 void test_unsupported_multi_selection_fails_closed()
@@ -281,6 +399,8 @@ int main(int argc, char** argv)
 
     test_handler_absent_preserves_direct_edit();
     test_handler_dispositions_and_reentrant_apply();
+    test_direct_message_result_conventions();
+    test_handler_evaluation_isolation();
     test_selection_replacement_and_target_return();
     test_replace_all_transaction_grouping();
     test_keyboard_overtype_normalization();

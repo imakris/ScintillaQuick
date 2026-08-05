@@ -40,6 +40,7 @@
 
 #include <algorithm>
 #include <array>
+#include <exception>
 #include <limits>
 #include <string_view>
 #include <utility>
@@ -77,6 +78,28 @@ namespace
 {
 
 constexpr int k_margin_count = SC_MAX_MARGIN + 1;
+
+bool edit_handler_query_is_safe(unsigned int message)
+{
+    if (!scene_graph_message_is_known_read_only(message)) {
+        return false;
+    }
+
+    switch (message) {
+        case SCI_BEGINUNDOACTION:
+        case SCI_ENDUNDOACTION:
+        case SCI_SETTARGETRANGE:
+        case SCI_GETDIRECTFUNCTION:
+        case SCI_GETDIRECTSTATUSFUNCTION:
+        case SCI_GETDIRECTPOINTER:
+        case SCI_GETDOCPOINTER:
+        case SCI_GETCHARACTERPOINTER:
+        case SCI_GETRANGEPOINTER:
+            return false;
+        default:
+            return true;
+    }
+}
 
 // `scene_graph_update_request` and `scene_graph_update_request_info_t` live in
 // src/core/scintillaquick_dispatch_table.h (included above) so that they can be
@@ -508,7 +531,7 @@ sptr_t ScintillaQuick_item::send(
 {
     ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
     if (self->m_evaluating_edit_handler > 0 &&
-        !scene_graph_message_is_known_read_only(i_message))
+        !edit_handler_query_is_safe(i_message))
     {
         self->dispatch_scintilla_message_raw(
             SCI_SETSTATUS,
@@ -621,6 +644,13 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
     if (!m_edit_handler) {
         return ScintillaQuick_edit_disposition::DECLINED;
     }
+    if (m_evaluating_edit_handler > 0) {
+        dispatch_scintilla_message_raw(
+            SCI_SETSTATUS,
+            static_cast<uptr_t>(Status::Failure),
+            0);
+        return ScintillaQuick_edit_disposition::REJECTED;
+    }
 
     ScintillaQuick_edit_transaction transaction;
     transaction.transaction_id = edit_transaction_id();
@@ -640,17 +670,20 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
     }
     --m_evaluating_edit_handler;
 
+    if (result.disposition == ScintillaQuick_edit_disposition::REJECTED) {
+        dispatch_scintilla_message_raw(
+            SCI_SETSTATUS,
+            static_cast<uptr_t>(Status::Failure),
+            0);
+    }
+
     if (result.disposition == ScintillaQuick_edit_disposition::HANDLED && result.apply) {
         ++m_applying_handled_edit;
         try {
             result.apply(*this);
         }
         catch (...) {
-            result.disposition = ScintillaQuick_edit_disposition::REJECTED;
-            dispatch_scintilla_message_raw(
-                SCI_SETSTATUS,
-                static_cast<uptr_t>(Status::Failure),
-                0);
+            std::terminate();
         }
         --m_applying_handled_edit;
     }
@@ -828,7 +861,6 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
                 replacement.deleted_length = m_core->pdoc->Length();
                 replacement.inserted_text  = QByteArray(text);
                 normalized = true;
-                handled_result = 1;
             }
             break;
         }
@@ -984,6 +1016,10 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
     m_last_edit_disposition = disposition;
     if (disposition == ScintillaQuick_edit_disposition::DECLINED) {
         return false;
+    }
+    if (disposition == ScintillaQuick_edit_disposition::REJECTED) {
+        result = 0;
+        return true;
     }
     if (disposition == ScintillaQuick_edit_disposition::HANDLED && copy_cut_text) {
         m_core->CopyToClipboard(cut_text);
@@ -1611,6 +1647,9 @@ void ScintillaQuick_item::dropEvent(QDropEvent * event)
         Point point = PointFromQPoint(event->position().toPoint());
         bool move = (event->source() == this && event->proposedAction() == Qt::MoveAction);
         if (edit_handler_active()) {
+            if (move) {
+                m_core->mark_drop_inside();
+            }
             const SelectionPosition drop_position = m_core->SPositionFromLocation(
                 point, false, false, m_core->UserVirtualSpace());
             const bool simple_drop =
@@ -1630,7 +1669,7 @@ void ScintillaQuick_item::dropEvent(QDropEvent * event)
             }
 
             std::vector<ScintillaQuick_edit_replacement> replacements;
-            const QByteArray text = m_core->BytesForDocument(event->mimeData()->text());
+            const QByteArray text = m_core->drop_text_bytes(event->mimeData()->text());
             const SelectionRange& selection = m_core->sel.RangeMain();
             const Position selection_start = selection.Start().Position();
             const Position selection_length = selection.Length();

@@ -165,6 +165,8 @@ private:
     void CopyToModeClipboard(const SelectionText& selected_text, QClipboard::Mode clipboard_mode);
     bool mime_data_paste_is_stream(const QMimeData* mime_data, bool selection_empty) const;
     QByteArray stream_paste_bytes(const QString& text) const;
+    QByteArray drop_text_bytes(const QString& text) const;
+    void mark_drop_inside();
     void Copy() override;
     void CopyToClipboard(const SelectionText& selected_text) override;
     void PasteFromMode(QClipboard::Mode clipboard_mode);

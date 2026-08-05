@@ -175,6 +175,9 @@ enum class ScintillaQuick_edit_disposition
 struct SCINTILLAQUICK_EXPORT ScintillaQuick_edit_result
 {
     ScintillaQuick_edit_disposition disposition = ScintillaQuick_edit_disposition::DECLINED;
+    // A HANDLED callback must not throw. An escaping exception terminates the
+    // process because the callback may already have applied part of a compound
+    // replacement and ScintillaQuick cannot roll that external state back.
     std::function<void(ScintillaQuick_item&)> apply;
 };
 
@@ -248,12 +251,12 @@ public:
     // messages. Compound operations reuse one nonzero transaction id.
     //
     // A HANDLED result may update this derived editor only through `apply`, which
-    // runs synchronously with recursive delegation disabled. A DECLINED handler
-    // must be side-effect-free; its `apply` callback is ignored and Scintilla's
-    // existing operation runs unchanged. With a handler installed, an edit that
-    // cannot be normalized is rejected with SC_STATUS_FAILURE. This includes
-    // multi/rectangular/virtual-space editing, line paste, autocomplete, undo,
-    // and redo.
+    // runs synchronously with recursive delegation disabled and must not throw.
+    // A DECLINED handler must be side-effect-free; its `apply` callback is ignored
+    // and Scintilla's existing operation runs unchanged. With a handler installed,
+    // an edit that cannot be normalized is rejected with SC_STATUS_FAILURE. This
+    // includes multi/rectangular/virtual-space editing, line paste, autocomplete,
+    // undo, and redo.
     void set_edit_handler(ScintillaQuick_edit_handler handler);
 
     Q_INVOKABLE void scrollRow(int delta_lines);

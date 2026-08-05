@@ -706,6 +706,23 @@ QByteArray ScintillaQuick_core::stream_paste_bytes(const QString& text) const
     return QByteArray(converted.data(), static_cast<qsizetype>(converted.size()));
 }
 
+QByteArray ScintillaQuick_core::drop_text_bytes(const QString& text) const
+{
+    const QByteArray bytes = BytesForDocument(text);
+    const std::string converted = Document::TransformLineEnds(
+        bytes.constData(),
+        bytes.size(),
+        pdoc->eolMode);
+    return QByteArray(converted.data(), static_cast<qsizetype>(converted.size()));
+}
+
+void ScintillaQuick_core::mark_drop_inside()
+{
+    if (inDragDrop == DragDrop::dragging) {
+        dropWentOutside = false;
+    }
+}
+
 bool ScintillaQuick_core::ValidCodePage(int code_page) const
 {
     return code_page == SC_CP_UTF8;
