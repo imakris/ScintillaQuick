@@ -682,6 +682,30 @@ static bool is_line_cut_copy_in_mime(const QMimeData* mime_data)
     return false;
 }
 
+bool ScintillaQuick_core::mime_data_paste_is_stream(
+    const QMimeData* mime_data,
+    bool             selection_empty) const
+{
+    return mime_data &&
+        mime_data->hasText() &&
+        !is_rectangular_in_mime(mime_data) &&
+        !(selection_empty && is_line_cut_copy_in_mime(mime_data));
+}
+
+QByteArray ScintillaQuick_core::stream_paste_bytes(const QString& text) const
+{
+    QByteArray bytes = BytesForDocument(text);
+    if (!convertPastes) {
+        return bytes;
+    }
+
+    const std::string converted = Document::TransformLineEnds(
+        bytes.constData(),
+        bytes.size(),
+        pdoc->eolMode);
+    return QByteArray(converted.data(), static_cast<qsizetype>(converted.size()));
+}
+
 bool ScintillaQuick_core::ValidCodePage(int code_page) const
 {
     return code_page == SC_CP_UTF8;

@@ -986,6 +986,9 @@ bool ScintillaQuick_item::replaceSelection()
     const QByteArray replacement = m_replacement_text.toUtf8();
     const unsigned int replace_message = (m_find_options & SCFIND_REGEXP) ? SCI_REPLACETARGETRE : SCI_REPLACETARGET;
     sends(replace_message, static_cast<Scintilla::uptr_t>(replacement.size()), replacement.constData());
+    if (m_last_edit_disposition == ScintillaQuick_edit_disposition::REJECTED) {
+        return false;
+    }
     send(SCI_SETSEL, send(SCI_GETTARGETSTART), send(SCI_GETTARGETEND));
     return true;
 }
@@ -1017,6 +1020,9 @@ int ScintillaQuick_item::replaceAll()
         }
         const Scintilla::Position old_match_end = static_cast<Scintilla::Position>(send(SCI_GETTARGETEND));
         sends(replace_message, static_cast<Scintilla::uptr_t>(replacement.size()), replacement.constData());
+        if (m_last_edit_disposition == ScintillaQuick_edit_disposition::REJECTED) {
+            break;
+        }
         ++replacements;
 
         const Scintilla::Position replacement_end = static_cast<Scintilla::Position>(send(SCI_GETTARGETEND));

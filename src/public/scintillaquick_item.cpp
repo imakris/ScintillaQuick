@@ -506,6 +506,32 @@ sptr_t ScintillaQuick_item::send(
     uptr_t       w_param,
     sptr_t       l_param) const
 {
+    ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
+    if (self->m_evaluating_edit_handler > 0 &&
+        !scene_graph_message_is_known_read_only(i_message))
+    {
+        self->dispatch_scintilla_message_raw(
+            SCI_SETSTATUS,
+            static_cast<uptr_t>(Status::Failure),
+            0);
+        return 0;
+    }
+
+    sptr_t edit_result = 0;
+    if (self->m_applying_handled_edit == 0 &&
+        self->dispatch_direct_edit_message(i_message, w_param, l_param, edit_result))
+    {
+        return edit_result;
+    }
+
+    return dispatch_scintilla_message_raw(i_message, w_param, l_param);
+}
+
+sptr_t ScintillaQuick_item::dispatch_scintilla_message_raw(
+    unsigned int i_message,
+    uptr_t       w_param,
+    sptr_t       l_param) const
+{
     auto apply_update_request = [this](const scene_graph_update_request_info_t& request) {
         apply_scene_graph_update_request(
             request.scroll_width_reset,
@@ -530,23 +556,441 @@ sptr_t ScintillaQuick_item::sends(
     uptr_t       w_param,
     const char*  s) const
 {
-    auto apply_update_request = [this](const scene_graph_update_request_info_t& request) {
-        apply_scene_graph_update_request(
-            request.scroll_width_reset,
-            request.needed,
-            request.static_content_dirty,
-            request.needs_style_sync,
-            request.scrolling);
-    };
-
-    return dispatch_scintilla_message(
+    return ScintillaQuick_item::send(
         i_message,
         w_param,
-        reinterpret_cast<sptr_t>(s),
-        [this](Message message, uptr_t w, sptr_t l) {
-            return m_core->WndProc(message, w, l);
-        },
-        apply_update_request);
+        reinterpret_cast<sptr_t>(s));
+}
+
+void ScintillaQuick_item::set_edit_handler(ScintillaQuick_edit_handler handler)
+{
+    m_edit_handler = std::move(handler);
+    m_last_edit_disposition = ScintillaQuick_edit_disposition::DECLINED;
+}
+
+bool ScintillaQuick_item::edit_handler_active() const
+{
+    return static_cast<bool>(m_edit_handler);
+}
+
+std::uint64_t ScintillaQuick_item::edit_transaction_id()
+{
+    if (m_active_edit_transaction_id != 0) {
+        return m_active_edit_transaction_id;
+    }
+
+    const std::uint64_t transaction_id = m_next_edit_transaction_id++;
+    if (m_next_edit_transaction_id == 0) {
+        m_next_edit_transaction_id = 1;
+    }
+    return transaction_id;
+}
+
+void ScintillaQuick_item::begin_edit_transaction()
+{
+    if (m_edit_transaction_depth++ == 0) {
+        m_active_edit_transaction_id = edit_transaction_id();
+    }
+}
+
+void ScintillaQuick_item::end_edit_transaction()
+{
+    if (m_edit_transaction_depth <= 0) {
+        return;
+    }
+    if (--m_edit_transaction_depth == 0) {
+        m_active_edit_transaction_id = 0;
+    }
+}
+
+ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit(
+    ScintillaQuick_edit_replacement replacement)
+{
+    return dispatch_edit_span({&replacement, 1});
+}
+
+ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edits(
+    std::vector<ScintillaQuick_edit_replacement> replacements)
+{
+    return dispatch_edit_span(replacements);
+}
+
+ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
+    std::span<const ScintillaQuick_edit_replacement> replacements)
+{
+    if (!m_edit_handler) {
+        return ScintillaQuick_edit_disposition::DECLINED;
+    }
+
+    ScintillaQuick_edit_transaction transaction;
+    transaction.transaction_id = edit_transaction_id();
+    transaction.replacements   = replacements;
+
+    ScintillaQuick_edit_result result;
+    ++m_evaluating_edit_handler;
+    try {
+        result = m_edit_handler(transaction);
+    }
+    catch (...) {
+        result.disposition = ScintillaQuick_edit_disposition::REJECTED;
+        dispatch_scintilla_message_raw(
+            SCI_SETSTATUS,
+            static_cast<uptr_t>(Status::Failure),
+            0);
+    }
+    --m_evaluating_edit_handler;
+
+    if (result.disposition == ScintillaQuick_edit_disposition::HANDLED && result.apply) {
+        ++m_applying_handled_edit;
+        try {
+            result.apply(*this);
+        }
+        catch (...) {
+            result.disposition = ScintillaQuick_edit_disposition::REJECTED;
+            dispatch_scintilla_message_raw(
+                SCI_SETSTATUS,
+                static_cast<uptr_t>(Status::Failure),
+                0);
+        }
+        --m_applying_handled_edit;
+    }
+
+    return result.disposition;
+}
+
+bool ScintillaQuick_item::single_stream_replacement(
+    QByteArray                     inserted_text,
+    ScintillaQuick_edit_replacement& replacement,
+    bool                           overtype) const
+{
+    if (m_core->pdoc->IsReadOnly() ||
+        m_core->sel.Count() != 1 ||
+        m_core->sel.selType != Selection::SelTypes::stream)
+    {
+        return false;
+    }
+
+    const SelectionRange& selection = m_core->sel.RangeMain();
+    if (selection.caret.VirtualSpace() != 0 || selection.anchor.VirtualSpace() != 0) {
+        return false;
+    }
+
+    replacement.position       = selection.Start().Position();
+    replacement.deleted_length = selection.Length();
+    replacement.inserted_text  = std::move(inserted_text);
+    if (overtype && replacement.deleted_length == 0 &&
+        replacement.position < m_core->pdoc->Length() &&
+        !m_core->pdoc->IsPositionInLineEnd(replacement.position))
+    {
+        replacement.deleted_length = m_core->pdoc->LenChar(replacement.position);
+    }
+
+    return !m_core->RangeContainsProtected(
+        replacement.position,
+        replacement.position + replacement.deleted_length);
+}
+
+bool ScintillaQuick_item::delete_key_replacement(
+    bool                            backward,
+    ScintillaQuick_edit_replacement& replacement) const
+{
+    if (!single_stream_replacement({}, replacement)) {
+        return false;
+    }
+    if (replacement.deleted_length > 0) {
+        return true;
+    }
+
+    const Position caret = replacement.position;
+    if (backward) {
+        if (caret <= 0 || dispatch_scintilla_message_raw(SCI_GETBACKSPACEUNINDENTS, 0, 0) != 0) {
+            return false;
+        }
+        const Position previous = m_core->pdoc->NextPosition(caret, -1);
+        if (previous < 0 || previous >= caret) {
+            return false;
+        }
+        replacement.position       = previous;
+        replacement.deleted_length = caret - previous;
+    }
+    else {
+        if (caret >= m_core->pdoc->Length()) {
+            return false;
+        }
+        replacement.deleted_length = m_core->pdoc->LenChar(caret);
+    }
+
+    return !m_core->RangeContainsProtected(
+        replacement.position,
+        replacement.position + replacement.deleted_length);
+}
+
+bool ScintillaQuick_item::stream_paste_replacement(
+    const QMimeData*                 mime_data,
+    ScintillaQuick_edit_replacement& replacement) const
+{
+    if (!single_stream_replacement({}, replacement) ||
+        m_core->multiPasteMode != MultiPaste::Once ||
+        !m_core->mime_data_paste_is_stream(mime_data, replacement.deleted_length == 0))
+    {
+        return false;
+    }
+
+    replacement.inserted_text = m_core->stream_paste_bytes(mime_data->text());
+    return true;
+}
+
+bool ScintillaQuick_item::document_edit_message(unsigned int i_message) const
+{
+    switch (i_message) {
+        case SCI_ADDTEXT:
+        case SCI_ADDSTYLEDTEXT:
+        case SCI_INSERTTEXT:
+        case SCI_APPENDTEXT:
+        case SCI_CLEARALL:
+        case SCI_DELETERANGE:
+        case SCI_CUT:
+        case SCI_PASTE:
+        case SCI_CLEAR:
+        case SCI_REPLACESEL:
+        case SCI_REPLACETARGET:
+        case SCI_REPLACETARGETRE:
+        case SCI_REPLACETARGETMINIMAL:
+        case SCI_REPLACERECTANGULAR:
+        case SCI_SETTEXT:
+        case SCI_CONVERTEOLS:
+        case SCI_SETLINEINDENTATION:
+        case SCI_TAB:
+        case SCI_BACKTAB:
+        case SCI_NEWLINE:
+        case SCI_FORMFEED:
+        case SCI_LINECUT:
+        case SCI_LINEDELETE:
+        case SCI_LINETRANSPOSE:
+        case SCI_LINEREVERSE:
+        case SCI_LINEDUPLICATE:
+        case SCI_SELECTIONDUPLICATE:
+        case SCI_LOWERCASE:
+        case SCI_UPPERCASE:
+        case SCI_LINESJOIN:
+        case SCI_LINESSPLIT:
+        case SCI_DELWORDLEFT:
+        case SCI_DELWORDRIGHT:
+        case SCI_DELWORDRIGHTEND:
+        case SCI_DELLINELEFT:
+        case SCI_DELLINERIGHT:
+        case SCI_DELETEBACK:
+        case SCI_DELETEBACKNOTLINE:
+        case SCI_MOVESELECTEDLINESUP:
+        case SCI_MOVESELECTEDLINESDOWN:
+        case SCI_AUTOCSELECT:
+        case SCI_AUTOCCOMPLETE:
+        case SCI_UNDO:
+        case SCI_REDO:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool ScintillaQuick_item::dispatch_direct_edit_message(
+    unsigned int i_message,
+    uptr_t       w_param,
+    sptr_t       l_param,
+    sptr_t&      result)
+{
+    if (!m_edit_handler) {
+        return false;
+    }
+
+    if (i_message == SCI_BEGINUNDOACTION) {
+        begin_edit_transaction();
+        result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
+        return true;
+    }
+    if (i_message == SCI_ENDUNDOACTION) {
+        result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
+        end_edit_transaction();
+        return true;
+    }
+
+    ScintillaQuick_edit_replacement replacement;
+    SelectionText cut_text;
+    sptr_t handled_result = 0;
+    bool copy_cut_text = false;
+    bool normalized = false;
+
+    switch (i_message) {
+        case SCI_SETTEXT: {
+            const char* text = reinterpret_cast<const char*>(l_param);
+            if (text && !m_core->pdoc->IsReadOnly()) {
+                replacement.position       = 0;
+                replacement.deleted_length = m_core->pdoc->Length();
+                replacement.inserted_text  = QByteArray(text);
+                normalized = true;
+                handled_result = 1;
+            }
+            break;
+        }
+
+        case SCI_ADDTEXT: {
+            qsizetype byte_count = 0;
+            const char* text = reinterpret_cast<const char*>(l_param);
+            if (copy_byte_count(w_param, byte_count) && text && !m_core->pdoc->IsReadOnly()) {
+                replacement.position      = m_core->CurrentPosition();
+                replacement.inserted_text = QByteArray(text, byte_count);
+                normalized = true;
+            }
+            break;
+        }
+
+        case SCI_APPENDTEXT: {
+            qsizetype byte_count = 0;
+            const char* text = reinterpret_cast<const char*>(l_param);
+            if (copy_byte_count(w_param, byte_count) && text && !m_core->pdoc->IsReadOnly()) {
+                replacement.position      = m_core->pdoc->Length();
+                replacement.inserted_text = QByteArray(text, byte_count);
+                normalized = true;
+            }
+            break;
+        }
+
+        case SCI_INSERTTEXT: {
+            const char* text = reinterpret_cast<const char*>(l_param);
+            Position position = static_cast<Position>(w_param);
+            if (position == -1) {
+                position = m_core->CurrentPosition();
+            }
+            if (text && position >= 0 && position <= m_core->pdoc->Length() &&
+                !m_core->pdoc->IsReadOnly())
+            {
+                replacement.position      = position;
+                replacement.inserted_text = QByteArray(text);
+                normalized = true;
+            }
+            break;
+        }
+
+        case SCI_DELETERANGE: {
+            const Position position = static_cast<Position>(w_param);
+            const Position length   = static_cast<Position>(l_param);
+            const Position document_length = m_core->pdoc->Length();
+            if (position >= 0 && position <= document_length &&
+                length > 0 && length <= document_length - position &&
+                !m_core->pdoc->IsReadOnly())
+            {
+                replacement.position       = position;
+                replacement.deleted_length = length;
+                normalized = true;
+            }
+            break;
+        }
+
+        case SCI_REPLACESEL: {
+            const char* text = reinterpret_cast<const char*>(l_param);
+            if (text && !m_core->pdoc->IsReadOnly() &&
+                m_core->sel.Count() == 1 &&
+                m_core->sel.selType == Selection::SelTypes::stream &&
+                m_core->sel.RangeMain().caret.VirtualSpace() == 0 &&
+                m_core->sel.RangeMain().anchor.VirtualSpace() == 0)
+            {
+                const SelectionRange& selection = m_core->sel.RangeMain();
+                const bool protected_selection = m_core->RangeContainsProtected(
+                    selection.Start().Position(),
+                    selection.End().Position());
+                replacement.position = protected_selection
+                    ? selection.caret.Position()
+                    : selection.Start().Position();
+                replacement.deleted_length = protected_selection ? 0 : selection.Length();
+                replacement.inserted_text = QByteArray(text);
+                normalized = true;
+            }
+            break;
+        }
+
+        case SCI_CUT:
+        case SCI_CLEAR:
+            normalized = single_stream_replacement({}, replacement) &&
+                replacement.deleted_length > 0;
+            if (normalized && i_message == SCI_CUT) {
+                m_core->CopySelectionRange(&cut_text);
+                copy_cut_text = true;
+            }
+            break;
+
+        case SCI_PASTE:
+            normalized = stream_paste_replacement(
+                QGuiApplication::clipboard()->mimeData(),
+                replacement);
+            break;
+
+        case SCI_REPLACETARGET:
+        case SCI_REPLACETARGETRE: {
+            const char* text = reinterpret_cast<const char*>(l_param);
+            qsizetype byte_count = 0;
+            if (w_param == std::numeric_limits<uptr_t>::max()) {
+                if (text) {
+                    replacement.inserted_text = QByteArray(text);
+                    normalized = true;
+                }
+            }
+            else
+            if (copy_byte_count(w_param, byte_count) && (byte_count == 0 || text)) {
+                replacement.inserted_text = QByteArray(text ? text : "", byte_count);
+                normalized = true;
+            }
+            if (!normalized || m_core->pdoc->IsReadOnly() ||
+                m_core->targetRange.start.VirtualSpace() != 0)
+            {
+                normalized = false;
+                break;
+            }
+
+            replacement.position       = m_core->targetRange.start.Position();
+            replacement.deleted_length = m_core->targetRange.Length();
+            if (i_message == SCI_REPLACETARGETRE) {
+                Position expanded_length = replacement.inserted_text.size();
+                const char* expanded = m_core->pdoc->SubstituteByPosition(
+                    replacement.inserted_text.constData(),
+                    &expanded_length);
+                if (!expanded) {
+                    normalized = false;
+                    break;
+                }
+                replacement.inserted_text = QByteArray(expanded, expanded_length);
+            }
+            handled_result = replacement.inserted_text.size();
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    if (!normalized) {
+        if (document_edit_message(i_message)) {
+            m_last_edit_disposition = ScintillaQuick_edit_disposition::REJECTED;
+            dispatch_scintilla_message_raw(
+                SCI_SETSTATUS,
+                static_cast<uptr_t>(Status::Failure),
+                0);
+            result = 0;
+            return true;
+        }
+        return false;
+    }
+
+    const ScintillaQuick_edit_disposition disposition = dispatch_edit(std::move(replacement));
+    m_last_edit_disposition = disposition;
+    if (disposition == ScintillaQuick_edit_disposition::DECLINED) {
+        return false;
+    }
+    if (disposition == ScintillaQuick_edit_disposition::HANDLED && copy_cut_text) {
+        m_core->CopyToClipboard(cut_text);
+    }
+
+    result = handled_result;
+    return true;
 }
 
 void ScintillaQuick_item::request_scene_graph_update(
@@ -591,6 +1035,24 @@ void ScintillaQuick_item::scrollColumn(int delta_columns)
 
 void ScintillaQuick_item::cmdContextMenu(int menu_id)
 {
+    if (edit_handler_active()) {
+        constexpr int k_context_cut    = 12;
+        constexpr int k_context_paste  = 14;
+        constexpr int k_context_delete = 15;
+        switch (menu_id) {
+            case k_context_cut:
+                send(SCI_CUT);
+                return;
+            case k_context_paste:
+                send(SCI_PASTE);
+                return;
+            case k_context_delete:
+                send(SCI_CLEAR);
+                return;
+            default:
+                break;
+        }
+    }
     m_core->Command(menu_id);
 }
 
@@ -778,6 +1240,128 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
     bool alt   = event->modifiers() & Qt::AltModifier;
 #endif
 
+    if (edit_handler_active()) {
+        const KeyMod modifiers = ModifierFlags(shift, ctrl, alt);
+        const Message mapped_command = m_core->kmap.Find(
+            static_cast<Keys>(key),
+            modifiers);
+        const bool input = (!ctrl || alt)
+#ifndef Q_OS_MAC
+            && (!alt || ctrl)
+#endif
+            ;
+        const bool inserts_printable =
+            mapped_command == static_cast<Message>(0) &&
+            input &&
+            !event->text().isEmpty() &&
+            event->text().front().isPrint();
+        const bool edit_command =
+            inserts_printable ||
+            mapped_command == Message::NewLine ||
+            mapped_command == Message::DeleteBack ||
+            mapped_command == Message::DeleteBackNotLine ||
+            mapped_command == Message::Clear ||
+            mapped_command == Message::Cut ||
+            mapped_command == Message::Paste;
+
+        if ((edit_command || document_edit_message(static_cast<unsigned int>(mapped_command))) &&
+            m_core->ac.Active())
+        {
+            dispatch_scintilla_message_raw(
+                SCI_SETSTATUS,
+                static_cast<uptr_t>(Status::Failure),
+                0);
+            event->accept();
+            emit keyPressed(event);
+            return;
+        }
+
+        if (edit_command) {
+            ScintillaQuick_edit_replacement replacement;
+            SelectionText cut_text;
+            bool copy_cut_text = false;
+            bool normalized = false;
+            if (inserts_printable) {
+                normalized = single_stream_replacement(
+                    m_core->BytesForDocument(event->text()),
+                    replacement,
+                    m_core->inOverstrike);
+            }
+            else
+            if (mapped_command == Message::NewLine) {
+                QByteArray eol;
+                switch (m_core->pdoc->eolMode) {
+                    case EndOfLine::CrLf: eol = QByteArray("\r\n", 2); break;
+                    case EndOfLine::Cr:   eol = QByteArray("\r", 1);   break;
+                    default:              eol = QByteArray("\n", 1);   break;
+                }
+                normalized = single_stream_replacement(std::move(eol), replacement);
+            }
+            else
+            if (mapped_command == Message::DeleteBack ||
+                mapped_command == Message::DeleteBackNotLine)
+            {
+                normalized = delete_key_replacement(true, replacement);
+            }
+            else
+            if (mapped_command == Message::Clear) {
+                normalized = delete_key_replacement(false, replacement);
+            }
+            else
+            if (mapped_command == Message::Cut) {
+                normalized = single_stream_replacement({}, replacement) &&
+                    replacement.deleted_length > 0;
+                if (normalized) {
+                    m_core->CopySelectionRange(&cut_text);
+                    copy_cut_text = true;
+                }
+            }
+            else
+            if (mapped_command == Message::Paste) {
+                normalized = stream_paste_replacement(
+                    QGuiApplication::clipboard()->mimeData(),
+                    replacement);
+            }
+
+            if (!normalized) {
+                dispatch_scintilla_message_raw(
+                    SCI_SETSTATUS,
+                    static_cast<uptr_t>(Status::Failure),
+                    0);
+                event->accept();
+                emit keyPressed(event);
+                return;
+            }
+
+            const ScintillaQuick_edit_disposition disposition =
+                dispatch_edit(std::move(replacement));
+            if (disposition != ScintillaQuick_edit_disposition::DECLINED) {
+                if (disposition == ScintillaQuick_edit_disposition::HANDLED &&
+                    copy_cut_text)
+                {
+                    m_core->CopyToClipboard(cut_text);
+                }
+                if (disposition == ScintillaQuick_edit_disposition::HANDLED) {
+                    cursorChangedUpdateMarker();
+                    request_scene_graph_update(false, false, false);
+                }
+                event->accept();
+                emit keyPressed(event);
+                return;
+            }
+        }
+        else
+        if (document_edit_message(static_cast<unsigned int>(mapped_command))) {
+            dispatch_scintilla_message_raw(
+                SCI_SETSTATUS,
+                static_cast<uptr_t>(Status::Failure),
+                0);
+            event->accept();
+            emit keyPressed(event);
+            return;
+        }
+    }
+
     bool consumed = false;
     bool added = m_core->KeyDownWithModifiers(
         static_cast<Keys>(key),
@@ -851,6 +1435,29 @@ void ScintillaQuick_item::mousePressEvent(QMouseEvent * event)
             pos, false, false, m_core->UserVirtualSpace());
         m_core->sel.Clear();
         m_core->SetSelection(selPos, selPos);
+        if (edit_handler_active()) {
+            ScintillaQuick_edit_replacement replacement;
+            const QMimeData* mime_data =
+                QGuiApplication::clipboard()->mimeData(QClipboard::Selection);
+            if (!stream_paste_replacement(mime_data, replacement)) {
+                dispatch_scintilla_message_raw(
+                    SCI_SETSTATUS,
+                    static_cast<uptr_t>(Status::Failure),
+                    0);
+                finish_consumed_press();
+                return;
+            }
+            const ScintillaQuick_edit_disposition disposition =
+                dispatch_edit(std::move(replacement));
+            if (disposition != ScintillaQuick_edit_disposition::DECLINED) {
+                if (disposition == ScintillaQuick_edit_disposition::HANDLED) {
+                    cursorChangedUpdateMarker();
+                    request_scene_graph_update(true, true, false);
+                }
+                finish_consumed_press();
+                return;
+            }
+        }
         m_core->PasteFromMode(QClipboard::Selection);
         cursorChangedUpdateMarker();
         request_scene_graph_update(true, true, false);
@@ -1003,6 +1610,60 @@ void ScintillaQuick_item::dropEvent(QDropEvent * event)
 
         Point point = PointFromQPoint(event->position().toPoint());
         bool move = (event->source() == this && event->proposedAction() == Qt::MoveAction);
+        if (edit_handler_active()) {
+            const SelectionPosition drop_position = m_core->SPositionFromLocation(
+                point, false, false, m_core->UserVirtualSpace());
+            const bool simple_drop =
+                drop_position.VirtualSpace() == 0 &&
+                m_core->sel.Count() == 1 &&
+                m_core->sel.selType == Selection::SelTypes::stream &&
+                m_core->sel.RangeMain().caret.VirtualSpace() == 0 &&
+                m_core->sel.RangeMain().anchor.VirtualSpace() == 0 &&
+                m_core->mime_data_paste_is_stream(event->mimeData(), false) &&
+                !m_core->pdoc->IsReadOnly();
+            if (!simple_drop) {
+                dispatch_scintilla_message_raw(
+                    SCI_SETSTATUS,
+                    static_cast<uptr_t>(Status::Failure),
+                    0);
+                return;
+            }
+
+            std::vector<ScintillaQuick_edit_replacement> replacements;
+            const QByteArray text = m_core->BytesForDocument(event->mimeData()->text());
+            const SelectionRange& selection = m_core->sel.RangeMain();
+            const Position selection_start = selection.Start().Position();
+            const Position selection_length = selection.Length();
+            Position insertion_position = drop_position.Position();
+            if (move) {
+                if (insertion_position >= selection_start &&
+                    insertion_position <= selection_start + selection_length)
+                {
+                    return;
+                }
+                if (m_core->RangeContainsProtected(
+                        selection_start,
+                        selection_start + selection_length))
+                {
+                    return;
+                }
+                replacements.push_back({selection_start, selection_length, {}});
+                if (insertion_position > selection_start) {
+                    insertion_position -= selection_length;
+                }
+            }
+            replacements.push_back({insertion_position, 0, text});
+
+            const ScintillaQuick_edit_disposition disposition =
+                dispatch_edits(std::move(replacements));
+            if (disposition != ScintillaQuick_edit_disposition::DECLINED) {
+                if (disposition == ScintillaQuick_edit_disposition::HANDLED) {
+                    cursorChangedUpdateMarker();
+                    request_scene_graph_update(true, true, false);
+                }
+                return;
+            }
+        }
         m_core->Drop(point, event->mimeData(), move);
     }
     else {
@@ -1200,6 +1861,11 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
     bool initial_compose = false;
     if (m_core->pdoc->TentativeActive()) {
         m_core->pdoc->TentativeUndo();
+        if (m_handler_ime_active) {
+            m_core->SetSelection(
+                SelectionPosition(m_handler_ime_caret),
+                SelectionPosition(m_handler_ime_anchor));
+        }
     }
     else {
         // No tentative undo means start of this composition so
@@ -1213,14 +1879,39 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         const QString& commit_str = event->commitString();
         const int commit_str_len  = commit_str.length();
 
-        for (int i = 0; i < commit_str_len;) {
-            const int uc_width           = commit_str.at(i).isHighSurrogate() ? 2 : 1;
-            const QString one_char_utf16 = commit_str.mid(i, uc_width);
-            const QByteArray one_char    = m_core->BytesForDocument(one_char_utf16);
+        bool insert_with_scintilla = true;
+        if (edit_handler_active()) {
+            ScintillaQuick_edit_replacement replacement;
+            const bool normalized = single_stream_replacement(
+                m_core->BytesForDocument(commit_str),
+                replacement);
+            if (!normalized) {
+                dispatch_scintilla_message_raw(
+                    SCI_SETSTATUS,
+                    static_cast<uptr_t>(Status::Failure),
+                    0);
+                insert_with_scintilla = false;
+            }
+            else {
+                const ScintillaQuick_edit_disposition disposition =
+                    dispatch_edit(std::move(replacement));
+                insert_with_scintilla =
+                    disposition == ScintillaQuick_edit_disposition::DECLINED;
+            }
+            m_handler_ime_active = false;
+            m_preedit_pos = -1;
+        }
 
-            m_core->InsertCharacter(
-                std::string_view(one_char.data(), one_char.length()), CharacterSource::DirectInput);
-            i += uc_width;
+        if (insert_with_scintilla) {
+            for (int i = 0; i < commit_str_len;) {
+                const int uc_width           = commit_str.at(i).isHighSurrogate() ? 2 : 1;
+                const QString one_char_utf16 = commit_str.mid(i, uc_width);
+                const QByteArray one_char    = m_core->BytesForDocument(one_char_utf16);
+
+                m_core->InsertCharacter(
+                    std::string_view(one_char.data(), one_char.length()), CharacterSource::DirectInput);
+                i += uc_width;
+            }
         }
     }
     else
@@ -1228,10 +1919,31 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         const QString preedit_str = event->preeditString();
         const int preedit_str_len = preedit_str.length();
 
-        if (initial_compose) {
+        if (edit_handler_active()) {
+            ScintillaQuick_edit_replacement replacement;
+            if (!single_stream_replacement({}, replacement)) {
+                dispatch_scintilla_message_raw(
+                    SCI_SETSTATUS,
+                    static_cast<uptr_t>(Status::Failure),
+                    0);
+                event->accept();
+                return;
+            }
+            if (!m_handler_ime_active) {
+                const SelectionRange& selection = m_core->sel.RangeMain();
+                m_handler_ime_anchor = selection.anchor.Position();
+                m_handler_ime_caret  = selection.caret.Position();
+                m_handler_ime_active = true;
+            }
+            m_core->pdoc->TentativeStart();
             m_core->ClearBeforeTentativeStart();
         }
-        m_core->pdoc->TentativeStart(); // TentativeActive() from now on.
+        else {
+            if (initial_compose) {
+                m_core->ClearBeforeTentativeStart();
+            }
+            m_core->pdoc->TentativeStart(); // TentativeActive() from now on.
+        }
 
         std::vector<int> ime_indicator = MapImeIndicators(event);
 
@@ -1269,6 +1981,11 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         // Set candidate box position for Qt::ImMicroFocus.
         m_preedit_pos = m_core->CurrentPosition();
         m_core->EnsureCaretVisible();
+    }
+    else
+    if (m_handler_ime_active) {
+        m_handler_ime_active = false;
+        m_preedit_pos = -1;
     }
     m_core->ShowCaretAtCurrentPosition();
     cursorChangedUpdateMarker();

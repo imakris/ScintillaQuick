@@ -92,6 +92,15 @@ scintillaquick_register_validation_test(
     scintillaquick_smoke_test
     "")
 
+scintillaquick_add_quick_test_target(
+    scintillaquick_edit_boundary_test
+    edit_boundary/main.cpp)
+
+scintillaquick_register_validation_test(
+    scintillaquick_edit_boundary_test
+    scintillaquick_edit_boundary_test
+    "")
+
 # --- Dispatch table unit tests -------------------------------------------
 #
 # Pure-function tests against the scene-graph update dispatch table at

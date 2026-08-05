@@ -9,7 +9,10 @@
 #define SCINTILLAQUICK_SCINTILLAQUICK_ITEM_H
 
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -144,6 +147,40 @@ Q_DECLARE_METATYPE(ScintillaQuick_notification)
 Q_DECLARE_METATYPE(Scintilla::ModificationFlags)
 Q_DECLARE_METATYPE(Scintilla::FoldLevel)
 
+class ScintillaQuick_item;
+
+struct SCINTILLAQUICK_EXPORT ScintillaQuick_edit_replacement
+{
+    Scintilla::Position position       = 0;
+    Scintilla::Position deleted_length = 0;
+    QByteArray inserted_text;
+};
+
+struct SCINTILLAQUICK_EXPORT ScintillaQuick_edit_transaction
+{
+    std::uint64_t transaction_id = 0;
+    // This view is valid only during the synchronous handler call. Replacements
+    // are ordered; each position addresses the document produced by the
+    // preceding replacement in this transaction.
+    std::span<const ScintillaQuick_edit_replacement> replacements;
+};
+
+enum class ScintillaQuick_edit_disposition
+{
+    DECLINED,
+    HANDLED,
+    REJECTED,
+};
+
+struct SCINTILLAQUICK_EXPORT ScintillaQuick_edit_result
+{
+    ScintillaQuick_edit_disposition disposition = ScintillaQuick_edit_disposition::DECLINED;
+    std::function<void(ScintillaQuick_item&)> apply;
+};
+
+using ScintillaQuick_edit_handler =
+    std::function<ScintillaQuick_edit_result(const ScintillaQuick_edit_transaction&)>;
+
 // Scrollbar interaction is handled by the surrounding Qt Quick container
 // rather than by embedding widget-style scrollbars into the editor item
 // itself. The item therefore renders the full editor surface and relies on
@@ -203,6 +240,21 @@ public:
     virtual sptr_t send(unsigned int i_message, uptr_t w_param = 0, sptr_t l_param = 0) const;
 
     virtual sptr_t sends(unsigned int i_message, uptr_t w_param = 0, const char* s = 0) const;
+
+    // The handler receives normalized replacements before the document changes.
+    // It covers stream selections without virtual space, ordinary typing and
+    // deletion (including overtype), stream clipboard and text-drop operations,
+    // committed inline IME, find replacement, and direct text/range replacement
+    // messages. Compound operations reuse one nonzero transaction id.
+    //
+    // A HANDLED result may update this derived editor only through `apply`, which
+    // runs synchronously with recursive delegation disabled. A DECLINED handler
+    // must be side-effect-free; its `apply` callback is ignored and Scintilla's
+    // existing operation runs unchanged. With a handler installed, an edit that
+    // cannot be normalized is rejected with SC_STATUS_FAILURE. This includes
+    // multi/rectangular/virtual-space editing, line paste, autocomplete, undo,
+    // and redo.
+    void set_edit_handler(ScintillaQuick_edit_handler handler);
 
     Q_INVOKABLE void scrollRow(int delta_lines);
     Q_INVOKABLE void scrollColumn(int delta_columns);
@@ -428,6 +480,36 @@ private:
         bool static_content_dirty,
         bool needs_style_sync,
         bool scrolling) const;
+    sptr_t dispatch_scintilla_message_raw(
+        unsigned int i_message,
+        uptr_t       w_param,
+        sptr_t       l_param) const;
+    bool dispatch_direct_edit_message(
+        unsigned int i_message,
+        uptr_t       w_param,
+        sptr_t       l_param,
+        sptr_t&      result);
+    ScintillaQuick_edit_disposition dispatch_edit(
+        ScintillaQuick_edit_replacement replacement);
+    ScintillaQuick_edit_disposition dispatch_edits(
+        std::vector<ScintillaQuick_edit_replacement> replacements);
+    ScintillaQuick_edit_disposition dispatch_edit_span(
+        std::span<const ScintillaQuick_edit_replacement> replacements);
+    bool single_stream_replacement(
+        QByteArray                    inserted_text,
+        ScintillaQuick_edit_replacement& replacement,
+        bool                          overtype = false) const;
+    bool delete_key_replacement(
+        bool                           backward,
+        ScintillaQuick_edit_replacement& replacement) const;
+    bool stream_paste_replacement(
+        const QMimeData*                mime_data,
+        ScintillaQuick_edit_replacement& replacement) const;
+    bool document_edit_message(unsigned int i_message) const;
+    std::uint64_t edit_transaction_id();
+    void begin_edit_transaction();
+    void end_edit_transaction();
+    bool edit_handler_active() const;
 
     bool m_updates_enabled;
     int m_logical_width;
@@ -455,6 +537,9 @@ private:
     QElapsedTimer m_elapsed_timer;
 
     Scintilla::Position m_preedit_pos;
+    Scintilla::Position m_handler_ime_anchor = 0;
+    Scintilla::Position m_handler_ime_caret  = 0;
+    bool m_handler_ime_active = false;
     // Owned text payload of the notification currently being delivered by
     // `notifyParent()`, and the target of `replace_notification_text()`. Points into the
     // active `notifyParent()` frame while `notify()` is being emitted and is null at all
@@ -479,6 +564,15 @@ private:
     // Declared mutable because `send()` is const for Q_PROPERTY readers, even
     // though mutating Scintilla messages can also flow through it.
     mutable bool m_in_sync_quick_view_properties = false;
+
+    ScintillaQuick_edit_handler m_edit_handler;
+    std::uint64_t m_next_edit_transaction_id = 1;
+    std::uint64_t m_active_edit_transaction_id = 0;
+    int m_edit_transaction_depth = 0;
+    int m_evaluating_edit_handler = 0;
+    int m_applying_handled_edit = 0;
+    ScintillaQuick_edit_disposition m_last_edit_disposition =
+        ScintillaQuick_edit_disposition::DECLINED;
 
     static bool IsHangul(const QChar qchar);
     void MoveImeCarets(Scintilla::Position offset);
