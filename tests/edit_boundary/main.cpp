@@ -322,6 +322,88 @@ void test_keyboard_overtype_normalization()
     SQ_EXPECT(text_of(editor) == QStringLiteral("aXcd"));
 }
 
+void test_direct_delete_back_normalization()
+{
+    constexpr Scintilla::Position k_line_start = 6;
+
+    ScintillaQuick_item handled_editor;
+    handled_editor.setProperty("text", QStringLiteral("left\r\nright"));
+    handled_editor.send(SCI_SETSEL, k_line_start, k_line_start);
+
+    ScintillaQuick_edit_replacement handled_replacement;
+    handled_editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction& transaction) {
+            handled_replacement = transaction.replacements.front();
+            return apply_exactly(transaction);
+        });
+    SQ_EXPECT(handled_editor.send(SCI_DELETEBACK) == 0);
+    SQ_EXPECT(handled_replacement.position == 4);
+    SQ_EXPECT(handled_replacement.deleted_length == 2);
+    SQ_EXPECT(handled_replacement.inserted_text.isEmpty());
+    SQ_EXPECT(text_of(handled_editor) == QStringLiteral("leftright"));
+
+    ScintillaQuick_item declined_editor;
+    declined_editor.setProperty("text", QStringLiteral("left\r\nright"));
+    declined_editor.send(SCI_SETSEL, k_line_start, k_line_start);
+
+    ScintillaQuick_edit_replacement declined_replacement;
+    declined_editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction& transaction) {
+            declined_replacement = transaction.replacements.front();
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::DECLINED,
+                {}};
+        });
+    SQ_EXPECT(declined_editor.send(SCI_DELETEBACK) == 0);
+    SQ_EXPECT(declined_replacement.position == 4);
+    SQ_EXPECT(declined_replacement.deleted_length == 2);
+    SQ_EXPECT(declined_replacement.inserted_text.isEmpty());
+    SQ_EXPECT(text_of(declined_editor) == QStringLiteral("leftright"));
+
+    ScintillaQuick_item rejected_editor;
+    rejected_editor.setProperty("text", QStringLiteral("left\r\nright"));
+    rejected_editor.send(SCI_SETSEL, k_line_start, k_line_start);
+
+    ScintillaQuick_edit_replacement rejected_replacement;
+    rejected_editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction& transaction) {
+            rejected_replacement = transaction.replacements.front();
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::REJECTED,
+                {}};
+        });
+    SQ_EXPECT(rejected_editor.send(SCI_DELETEBACK) == 0);
+    SQ_EXPECT(rejected_replacement.position == 4);
+    SQ_EXPECT(rejected_replacement.deleted_length == 2);
+    SQ_EXPECT(rejected_replacement.inserted_text.isEmpty());
+    SQ_EXPECT(text_of(rejected_editor) == QStringLiteral("left\r\nright"));
+    SQ_EXPECT(rejected_editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+
+    ScintillaQuick_item native_editor;
+    native_editor.setProperty("text", QStringLiteral("left\r\nright"));
+    native_editor.send(SCI_SETSEL, k_line_start, k_line_start);
+    SQ_EXPECT(native_editor.send(SCI_DELETEBACK) == 0);
+    SQ_EXPECT(text_of(native_editor) == QStringLiteral("leftright"));
+
+    ScintillaQuick_item unindent_editor;
+    unindent_editor.setProperty("text", QStringLiteral("    value"));
+    unindent_editor.send(SCI_SETSEL, 4, 4);
+    unindent_editor.send(SCI_SETBACKSPACEUNINDENTS, 1);
+
+    int unindent_handler_calls = 0;
+    unindent_editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction&) {
+            ++unindent_handler_calls;
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::DECLINED,
+                {}};
+        });
+    SQ_EXPECT(unindent_editor.send(SCI_DELETEBACK) == 0);
+    SQ_EXPECT(unindent_handler_calls == 0);
+    SQ_EXPECT(text_of(unindent_editor) == QStringLiteral("    value"));
+    SQ_EXPECT(unindent_editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+}
+
 void test_committed_ime_restores_preedit_selection()
 {
     Event_editor editor;
@@ -455,6 +537,7 @@ int main(int argc, char** argv)
     test_selection_replacement_and_target_return();
     test_replace_all_transaction_grouping();
     test_keyboard_overtype_normalization();
+    test_direct_delete_back_normalization();
     test_committed_ime_restores_preedit_selection();
     test_clipboard_and_drop_ingress();
     test_unsupported_multi_selection_fails_closed();

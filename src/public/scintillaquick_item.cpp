@@ -788,7 +788,9 @@ bool ScintillaQuick_item::delete_key_replacement(
         if (caret <= 0 || dispatch_scintilla_message_raw(SCI_GETBACKSPACEUNINDENTS, 0, 0) != 0) {
             return false;
         }
-        const Position previous = m_core->pdoc->NextPosition(caret, -1);
+        const Position previous = caret >= 2 && m_core->pdoc->IsCrLf(caret - 2)
+            ? caret - 2
+            : m_core->pdoc->NextPosition(caret, -1);
         if (previous < 0 || previous >= caret) {
             return false;
         }
@@ -1004,6 +1006,12 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
             normalized = stream_paste_replacement(
                 QGuiApplication::clipboard()->mimeData(),
                 replacement);
+            break;
+
+        case SCI_DELETEBACK:
+            if (!m_core->ac.Active()) {
+                normalized = delete_key_replacement(true, replacement);
+            }
             break;
 
         case SCI_REPLACETARGET:
