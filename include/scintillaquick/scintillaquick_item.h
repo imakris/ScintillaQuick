@@ -498,12 +498,18 @@ private:
         std::vector<ScintillaQuick_edit_replacement> replacements);
     ScintillaQuick_edit_disposition dispatch_edit_span(
         std::span<const ScintillaQuick_edit_replacement> replacements);
+    enum class Delete_key_replacement_result
+    {
+        UNSUPPORTED,
+        REPLACEMENT,
+        NO_OP,
+    };
     bool single_stream_replacement(
         QByteArray                    inserted_text,
         ScintillaQuick_edit_replacement& replacement,
         bool                          overtype = false) const;
-    bool delete_key_replacement(
-        bool                           backward,
+    Delete_key_replacement_result delete_key_replacement(
+        Scintilla::Message             command,
         ScintillaQuick_edit_replacement& replacement) const;
     bool stream_paste_replacement(
         const QMimeData*                mime_data,

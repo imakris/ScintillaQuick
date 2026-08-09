@@ -772,41 +772,65 @@ bool ScintillaQuick_item::single_stream_replacement(
         replacement.position + replacement.deleted_length);
 }
 
-bool ScintillaQuick_item::delete_key_replacement(
-    bool                            backward,
+ScintillaQuick_item::Delete_key_replacement_result ScintillaQuick_item::delete_key_replacement(
+    Message                         command,
     ScintillaQuick_edit_replacement& replacement) const
 {
     if (!single_stream_replacement({}, replacement)) {
-        return false;
+        return Delete_key_replacement_result::UNSUPPORTED;
     }
     if (replacement.deleted_length > 0) {
-        return true;
+        return Delete_key_replacement_result::REPLACEMENT;
     }
 
     const Position caret = replacement.position;
-    if (backward) {
-        if (caret <= 0 || dispatch_scintilla_message_raw(SCI_GETBACKSPACEUNINDENTS, 0, 0) != 0) {
-            return false;
+    if (command == Message::DeleteBack || command == Message::DeleteBackNotLine) {
+        if (caret <= 0) {
+            return Delete_key_replacement_result::NO_OP;
         }
+
+        const Line line = m_core->pdoc->SciLineFromPosition(caret);
+        if (command == Message::DeleteBackNotLine &&
+            m_core->pdoc->LineStart(line) == caret)
+        {
+            return Delete_key_replacement_result::NO_OP;
+        }
+
+        const int column = m_core->pdoc->GetColumn(caret);
+        if (dispatch_scintilla_message_raw(SCI_GETBACKSPACEUNINDENTS, 0, 0) != 0 &&
+            column <= m_core->pdoc->GetLineIndentation(line) &&
+            column > 0)
+        {
+            return Delete_key_replacement_result::UNSUPPORTED;
+        }
+
         const Position previous = caret >= 2 && m_core->pdoc->IsCrLf(caret - 2)
             ? caret - 2
             : m_core->pdoc->NextPosition(caret, -1);
         if (previous < 0 || previous >= caret) {
-            return false;
+            return Delete_key_replacement_result::UNSUPPORTED;
         }
         replacement.position       = previous;
         replacement.deleted_length = caret - previous;
     }
-    else {
+    else
+    if (command == Message::Clear) {
         if (caret >= m_core->pdoc->Length()) {
-            return false;
+            return Delete_key_replacement_result::NO_OP;
         }
         replacement.deleted_length = m_core->pdoc->LenChar(caret);
     }
+    else {
+        return Delete_key_replacement_result::UNSUPPORTED;
+    }
 
-    return !m_core->RangeContainsProtected(
-        replacement.position,
-        replacement.position + replacement.deleted_length);
+    if (m_core->RangeContainsProtected(
+            replacement.position,
+            replacement.position + replacement.deleted_length))
+    {
+        return Delete_key_replacement_result::UNSUPPORTED;
+    }
+    return Delete_key_replacement_result::REPLACEMENT;
 }
 
 bool ScintillaQuick_item::stream_paste_replacement(
@@ -1010,7 +1034,8 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
 
         case SCI_DELETEBACK:
             if (!m_core->ac.Active()) {
-                normalized = delete_key_replacement(true, replacement);
+                normalized = delete_key_replacement(Message::DeleteBack, replacement) ==
+                    Delete_key_replacement_result::REPLACEMENT;
             }
             break;
 
@@ -1402,13 +1427,17 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
             }
             else
             if (mapped_command == Message::DeleteBack ||
-                mapped_command == Message::DeleteBackNotLine)
+                mapped_command == Message::DeleteBackNotLine ||
+                mapped_command == Message::Clear)
             {
-                normalized = delete_key_replacement(true, replacement);
-            }
-            else
-            if (mapped_command == Message::Clear) {
-                normalized = delete_key_replacement(false, replacement);
+                const Delete_key_replacement_result delete_result =
+                    delete_key_replacement(mapped_command, replacement);
+                if (delete_result == Delete_key_replacement_result::NO_OP) {
+                    event->accept();
+                    emit keyPressed(event);
+                    return;
+                }
+                normalized = delete_result == Delete_key_replacement_result::REPLACEMENT;
             }
             else
             if (mapped_command == Message::Cut) {

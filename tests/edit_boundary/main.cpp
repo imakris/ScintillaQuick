@@ -12,6 +12,7 @@
 #include <QKeyEvent>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QObject>
 
 #include "Scintilla.h"
 
@@ -322,6 +323,116 @@ void test_keyboard_overtype_normalization()
     SQ_EXPECT(text_of(editor) == QStringLiteral("aXcd"));
 }
 
+void test_keyboard_delete_back_not_line_preserves_line_start()
+{
+    constexpr Scintilla::Position k_line_start = 5;
+
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("left\nright"));
+    editor.send(SCI_SETSEL, k_line_start, k_line_start);
+    editor.send(SCI_ASSIGNCMDKEY, SCK_BACK, SCI_DELETEBACKNOTLINE);
+
+    int handler_calls = 0;
+    editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction& transaction) {
+            ++handler_calls;
+            return apply_exactly(transaction);
+        });
+
+    int key_pressed_count = 0;
+    QObject::connect(
+        &editor,
+        &ScintillaQuick_item::keyPressed,
+        [&](QKeyEvent*) { ++key_pressed_count; });
+
+    QKeyEvent event(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
+    QGuiApplication::sendEvent(&editor, &event);
+
+    SQ_EXPECT(event.isAccepted());
+    SQ_EXPECT(key_pressed_count == 1);
+    SQ_EXPECT(handler_calls == 0);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("left\nright"));
+    SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == k_line_start);
+    SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_OK);
+}
+
+void test_keyboard_delete_boundaries_are_no_ops()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("abcd"));
+
+    int handler_calls = 0;
+    editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction&) {
+            ++handler_calls;
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::DECLINED,
+                {}};
+        });
+
+    int key_pressed_count = 0;
+    QObject::connect(
+        &editor,
+        &ScintillaQuick_item::keyPressed,
+        [&](QKeyEvent*) { ++key_pressed_count; });
+
+    editor.send(SCI_SETSEL, 0, 0);
+    QKeyEvent backspace_event(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
+    QGuiApplication::sendEvent(&editor, &backspace_event);
+    SQ_EXPECT(backspace_event.isAccepted());
+    SQ_EXPECT(key_pressed_count == 1);
+    SQ_EXPECT(handler_calls == 0);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+    SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 0);
+    SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_OK);
+
+    editor.send(SCI_SETSEL, 4, 4);
+    editor.send(SCI_SETSTATUS, SC_STATUS_OK);
+    QKeyEvent delete_event(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier);
+    QGuiApplication::sendEvent(&editor, &delete_event);
+    SQ_EXPECT(delete_event.isAccepted());
+    SQ_EXPECT(key_pressed_count == 2);
+    SQ_EXPECT(handler_calls == 0);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+    SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 4);
+    SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_OK);
+}
+
+void test_keyboard_backspace_unindents_only_blocks_unindent()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("    value"));
+    editor.send(SCI_SETSEL, 7, 7);
+    editor.send(SCI_SETBACKSPACEUNINDENTS, 1);
+
+    int handler_calls = 0;
+    ScintillaQuick_edit_replacement observed;
+    editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction& transaction) {
+            ++handler_calls;
+            observed = transaction.replacements.front();
+            return apply_exactly(transaction);
+        });
+
+    int key_pressed_count = 0;
+    QObject::connect(
+        &editor,
+        &ScintillaQuick_item::keyPressed,
+        [&](QKeyEvent*) { ++key_pressed_count; });
+
+    QKeyEvent event(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
+    QGuiApplication::sendEvent(&editor, &event);
+
+    SQ_EXPECT(event.isAccepted());
+    SQ_EXPECT(key_pressed_count == 1);
+    SQ_EXPECT(handler_calls == 1);
+    SQ_EXPECT(observed.position == 6);
+    SQ_EXPECT(observed.deleted_length == 1);
+    SQ_EXPECT(observed.inserted_text.isEmpty());
+    SQ_EXPECT(text_of(editor) == QStringLiteral("    vaue"));
+    SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_OK);
+}
+
 void test_direct_delete_back_normalization()
 {
     constexpr Scintilla::Position k_line_start = 6;
@@ -537,6 +648,9 @@ int main(int argc, char** argv)
     test_selection_replacement_and_target_return();
     test_replace_all_transaction_grouping();
     test_keyboard_overtype_normalization();
+    test_keyboard_delete_back_not_line_preserves_line_start();
+    test_keyboard_delete_boundaries_are_no_ops();
+    test_keyboard_backspace_unindents_only_blocks_unindent();
     test_direct_delete_back_normalization();
     test_committed_ime_restores_preedit_selection();
     test_clipboard_and_drop_ingress();
