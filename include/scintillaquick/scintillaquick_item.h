@@ -487,17 +487,40 @@ private:
         unsigned int i_message,
         uptr_t       w_param,
         sptr_t       l_param) const;
-    bool dispatch_direct_edit_message(
+
+    // Structured result of one message passing the edit boundary. Unlike a
+    // scalar message return, this records whether the edit handler
+    // intercepted the message, the disposition it returned, and whether the
+    // local Scintilla document changed. `send()`/`sends()` retain their
+    // scalar ABI; internal callers that make control-flow decisions use
+    // `send_with_outcome()` so the result travels per call instead of
+    // through item-wide mutable state.
+    struct Edit_dispatch_outcome
+    {
+        bool intercepted = false;
+        ScintillaQuick_edit_disposition disposition =
+            ScintillaQuick_edit_disposition::DECLINED;
+        sptr_t message_result = 0;
+        bool local_document_changed = false;
+    };
+
+    Edit_dispatch_outcome send_with_outcome(
         unsigned int i_message,
-        uptr_t       w_param,
-        sptr_t       l_param,
-        sptr_t&      result);
+        uptr_t       w_param = 0,
+        sptr_t       l_param = 0) const;
+
+    bool dispatch_direct_edit_message(
+        unsigned int           i_message,
+        uptr_t                 w_param,
+        sptr_t                 l_param,
+        Edit_dispatch_outcome& outcome);
     ScintillaQuick_edit_disposition dispatch_edit(
         ScintillaQuick_edit_replacement replacement);
     ScintillaQuick_edit_disposition dispatch_edits(
         std::vector<ScintillaQuick_edit_replacement> replacements);
     ScintillaQuick_edit_disposition dispatch_edit_span(
-        std::span<const ScintillaQuick_edit_replacement> replacements);
+        std::span<const ScintillaQuick_edit_replacement> replacements,
+        bool* apply_ran = nullptr);
     enum class Delete_key_replacement_result
     {
         UNSUPPORTED,
@@ -519,6 +542,22 @@ private:
     void begin_edit_transaction();
     void end_edit_transaction();
     bool edit_handler_active() const;
+
+    // Internal form of `replaceSelection()` that distinguishes the edit
+    // boundary outcomes:
+    //   NOT_A_MATCH      - current selection is not the tracked find match
+    //   CHANGED          - replacement applied to the local document
+    //   HANDLED_EXTERNAL - an edit handler claimed the replacement without
+    //                      changing the local document (no apply callback)
+    //   REJECTED         - the edit boundary rejected the replacement
+    enum class Replace_result
+    {
+        NOT_A_MATCH,
+        CHANGED,
+        HANDLED_EXTERNAL,
+        REJECTED,
+    };
+    Replace_result replace_selection_outcome();
 
     bool m_updates_enabled;
     int m_logical_width;
@@ -580,8 +619,16 @@ private:
     int m_edit_transaction_depth = 0;
     int m_evaluating_edit_handler = 0;
     int m_applying_handled_edit = 0;
-    ScintillaQuick_edit_disposition m_last_edit_disposition =
-        ScintillaQuick_edit_disposition::DECLINED;
+
+    // Mutation-notification coalescing for the `text` property. SCN_MODIFIED
+    // insert/delete notifications set `m_text_dirty`; the outermost
+    // `send_with_outcome()` exit then emits `textChanged()` once. Mutations
+    // that reach Scintilla without passing through `send()` (event handlers
+    // calling `m_core` directly) emit immediately at notification time.
+    // Declared mutable because `send()` is const for Q_PROPERTY readers.
+    mutable int  m_dispatch_depth = 0;
+    mutable bool m_text_dirty     = false;
+    void note_text_mutation();
 
     static bool IsHangul(const QChar qchar);
     void MoveImeCarets(Scintilla::Position offset);

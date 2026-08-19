@@ -96,9 +96,13 @@ void update_geometry_node(
     const std::vector<QPointF>& geometry_points = visible ? points : hidden_points;
 
     QSGGeometry* geometry = node->geometry();
-    if (!geometry || geometry->vertexCount() != static_cast<int>(geometry_points.size())) {
-        geometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), static_cast<int>(geometry_points.size()));
+    const int vertex_count = static_cast<int>(geometry_points.size());
+    if (!geometry) {
+        geometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), vertex_count);
         node->setGeometry(geometry);
+    }
+    else if (geometry->vertexCount() != vertex_count) {
+        geometry->allocate(vertex_count);
     }
     geometry->setDrawingMode(draw_mode);
 

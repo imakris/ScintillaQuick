@@ -970,7 +970,7 @@ int ScintillaQuick_item::selectAllFindMatches()
     return static_cast<int>(matches.size());
 }
 
-bool ScintillaQuick_item::replaceSelection()
+ScintillaQuick_item::Replace_result ScintillaQuick_item::replace_selection_outcome()
 {
     const QByteArray needle = m_find_text.toUtf8();
     const Scintilla::Position selection_start = static_cast<Scintilla::Position>(send(SCI_GETSELECTIONSTART));
@@ -980,24 +980,43 @@ bool ScintillaQuick_item::replaceSelection()
                                      m_find_options == m_last_find_options;
     if (needle.isEmpty() || send(SCI_GETREADONLY) != 0 || !selection_is_find_match(*this, needle, tracked_empty_match))
     {
-        return false;
+        return Replace_result::NOT_A_MATCH;
     }
 
     const QByteArray replacement = m_replacement_text.toUtf8();
     const unsigned int replace_message = (m_find_options & SCFIND_REGEXP) ? SCI_REPLACETARGETRE : SCI_REPLACETARGET;
-    sends(replace_message, static_cast<Scintilla::uptr_t>(replacement.size()), replacement.constData());
-    if (m_last_edit_disposition == ScintillaQuick_edit_disposition::REJECTED) {
-        return false;
+    const Edit_dispatch_outcome outcome = send_with_outcome(
+        replace_message,
+        static_cast<Scintilla::uptr_t>(replacement.size()),
+        reinterpret_cast<Scintilla::sptr_t>(replacement.constData()));
+    if (outcome.disposition == ScintillaQuick_edit_disposition::REJECTED) {
+        return Replace_result::REJECTED;
+    }
+    if (outcome.intercepted && !outcome.local_document_changed) {
+        // The handler claims to have dealt with the replacement externally;
+        // the local target/selection state is unchanged and must not be
+        // trusted.
+        return Replace_result::HANDLED_EXTERNAL;
     }
     send(SCI_SETSEL, send(SCI_GETTARGETSTART), send(SCI_GETTARGETEND));
-    return true;
+    return Replace_result::CHANGED;
+}
+
+bool ScintillaQuick_item::replaceSelection()
+{
+    const Replace_result result = replace_selection_outcome();
+    return result == Replace_result::CHANGED || result == Replace_result::HANDLED_EXTERNAL;
 }
 
 bool ScintillaQuick_item::replaceAndFind()
 {
-    const bool replaced = replaceSelection();
+    const Replace_result result = replace_selection_outcome();
+    if (result == Replace_result::REJECTED) {
+        // Do not advance past the current match after a rejected replacement.
+        return false;
+    }
     const bool found = findNext();
-    return replaced || found;
+    return result != Replace_result::NOT_A_MATCH || found;
 }
 
 int ScintillaQuick_item::replaceAll()
@@ -1019,11 +1038,20 @@ int ScintillaQuick_item::replaceAll()
             break;
         }
         const Scintilla::Position old_match_end = static_cast<Scintilla::Position>(send(SCI_GETTARGETEND));
-        sends(replace_message, static_cast<Scintilla::uptr_t>(replacement.size()), replacement.constData());
-        if (m_last_edit_disposition == ScintillaQuick_edit_disposition::REJECTED) {
+        const Edit_dispatch_outcome outcome = send_with_outcome(
+            replace_message,
+            static_cast<Scintilla::uptr_t>(replacement.size()),
+            reinterpret_cast<Scintilla::sptr_t>(replacement.constData()));
+        if (outcome.disposition == ScintillaQuick_edit_disposition::REJECTED) {
             break;
         }
         ++replacements;
+        if (outcome.intercepted && !outcome.local_document_changed) {
+            // The handler claims the edit but the local document is
+            // unchanged; the local target state is stale, so continuing the
+            // loop would operate on phantom positions.
+            break;
+        }
 
         const Scintilla::Position replacement_end = static_cast<Scintilla::Position>(send(SCI_GETTARGETEND));
         if (old_match_end > match) {

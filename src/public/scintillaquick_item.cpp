@@ -71,6 +71,7 @@ public:
     bool update_pending                      = false;
     int previous_first_visible_line     = -1;
     int previous_x_offset               = -1;
+    bool caret_capture_valid             = false;
     std::vector<Caret_primitive> captured_caret_primitives;
 };
 
@@ -388,6 +389,21 @@ QColor color_from_scintilla(sptr_t value)
     return QColorFromColourRGBA(ColourRGBA::FromIpRGB(value));
 }
 
+// Qt delivers key text as UTF-16. A supplementary-plane code point appears
+// as a surrogate pair whose first QChar is a high surrogate, which isPrint()
+// rejects; judge printability by the first full code point instead.
+bool starts_with_printable_character(const QString& text)
+{
+    if (text.isEmpty()) {
+        return false;
+    }
+    const QChar first = text.front();
+    if (first.isHighSurrogate() && text.size() > 1) {
+        return QChar::isPrint(QChar::surrogateToUcs4(first, text[1]));
+    }
+    return first.isPrint();
+}
+
 struct Style_attributes
 {
     QColor foreground;
@@ -399,11 +415,15 @@ using Style_cache = std::array<std::optional<Style_attributes>, STYLE_MAX + 1>;
 
 QFont font_for_style(const ScintillaQuick_item* item, int style)
 {
-    char font_name[128] = {};
-    item->sends(SCI_STYLEGETFONT, style, font_name);
+    const sptr_t font_name_length = item->send(SCI_STYLEGETFONT, style);
+    QByteArray font_name(static_cast<qsizetype>(font_name_length) + 1, '\0');
+    item->send(
+        SCI_STYLEGETFONT,
+        static_cast<uptr_t>(style),
+        reinterpret_cast<sptr_t>(font_name.data()));
 
     QFont font;
-    font.setFamily(QString::fromUtf8(font_name));
+    font.setFamily(QString::fromUtf8(font_name.constData(), static_cast<qsizetype>(font_name_length)));
 
     const sptr_t size_fractional = item->send(SCI_STYLEGETSIZEFRACTIONAL, style);
     if (size_fractional > 0) {
@@ -578,7 +598,29 @@ sptr_t ScintillaQuick_item::send(
     uptr_t       w_param,
     sptr_t       l_param) const
 {
+    return send_with_outcome(i_message, w_param, l_param).message_result;
+}
+
+ScintillaQuick_item::Edit_dispatch_outcome ScintillaQuick_item::send_with_outcome(
+    unsigned int i_message,
+    uptr_t       w_param,
+    sptr_t       l_param) const
+{
     ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
+
+    // Coalesced `textChanged()` emission: SCN_MODIFIED insert/delete
+    // notifications that arrive while a send is in flight only set
+    // `m_text_dirty`; the outermost send emits once on exit.
+    ++m_dispatch_depth;
+    const auto dispatch_depth_guard = qScopeGuard([this, self] {
+        --m_dispatch_depth;
+        if (m_dispatch_depth == 0 && m_text_dirty) {
+            m_text_dirty = false;
+            emit self->textChanged();
+        }
+    });
+
+    Edit_dispatch_outcome outcome;
     if (self->m_evaluating_edit_handler > 0 &&
         !edit_handler_query_is_safe(i_message))
     {
@@ -586,17 +628,23 @@ sptr_t ScintillaQuick_item::send(
             SCI_SETSTATUS,
             static_cast<uptr_t>(Status::Failure),
             0);
-        return 0;
+        outcome.intercepted = true;
+        outcome.disposition = ScintillaQuick_edit_disposition::REJECTED;
+        return outcome;
     }
 
-    sptr_t edit_result = 0;
     if (self->m_applying_handled_edit == 0 &&
-        self->dispatch_direct_edit_message(i_message, w_param, l_param, edit_result))
+        self->dispatch_direct_edit_message(i_message, w_param, l_param, outcome))
     {
-        return edit_result;
+        return outcome;
     }
 
-    return dispatch_scintilla_message_raw(i_message, w_param, l_param);
+    outcome.intercepted  = false;
+    outcome.disposition  = ScintillaQuick_edit_disposition::DECLINED;
+    outcome.message_result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
+    outcome.local_document_changed =
+        document_edit_message(i_message) && !m_core->pdoc->IsReadOnly();
+    return outcome;
 }
 
 sptr_t ScintillaQuick_item::dispatch_scintilla_message_raw(
@@ -637,7 +685,6 @@ sptr_t ScintillaQuick_item::sends(
 void ScintillaQuick_item::set_edit_handler(ScintillaQuick_edit_handler handler)
 {
     m_edit_handler = std::move(handler);
-    m_last_edit_disposition = ScintillaQuick_edit_disposition::DECLINED;
 }
 
 bool ScintillaQuick_item::edit_handler_active() const
@@ -688,8 +735,12 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edits(
 }
 
 ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
-    std::span<const ScintillaQuick_edit_replacement> replacements)
+    std::span<const ScintillaQuick_edit_replacement> replacements,
+    bool* apply_ran)
 {
+    if (apply_ran) {
+        *apply_ran = false;
+    }
     if (!m_edit_handler) {
         return ScintillaQuick_edit_disposition::DECLINED;
     }
@@ -705,10 +756,24 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
     transaction.transaction_id = edit_transaction_id();
     transaction.replacements   = replacements;
 
+    ScintillaQuick_edit_handler active_handler;
+    try {
+        // A handler may clear or replace the registered handler while it runs.
+        // Invoke a snapshot so the active callable remains alive until return.
+        active_handler = m_edit_handler;
+    }
+    catch (...) {
+        dispatch_scintilla_message_raw(
+            SCI_SETSTATUS,
+            static_cast<uptr_t>(Status::Failure),
+            0);
+        return ScintillaQuick_edit_disposition::REJECTED;
+    }
+
     ScintillaQuick_edit_result result;
     ++m_evaluating_edit_handler;
     try {
-        result = m_edit_handler(transaction);
+        result = active_handler(transaction);
     }
     catch (...) {
         result.disposition = ScintillaQuick_edit_disposition::REJECTED;
@@ -719,6 +784,20 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
     }
     --m_evaluating_edit_handler;
 
+    switch (result.disposition) {
+        case ScintillaQuick_edit_disposition::DECLINED:
+        case ScintillaQuick_edit_disposition::HANDLED:
+        case ScintillaQuick_edit_disposition::REJECTED:
+            break;
+        default:
+            result.disposition = ScintillaQuick_edit_disposition::REJECTED;
+            dispatch_scintilla_message_raw(
+                SCI_SETSTATUS,
+                static_cast<uptr_t>(Status::Failure),
+                0);
+            break;
+    }
+
     if (result.disposition == ScintillaQuick_edit_disposition::REJECTED) {
         dispatch_scintilla_message_raw(
             SCI_SETSTATUS,
@@ -727,6 +806,9 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
     }
 
     if (result.disposition == ScintillaQuick_edit_disposition::HANDLED && result.apply) {
+        if (apply_ran) {
+            *apply_ran = true;
+        }
         ++m_applying_handled_edit;
         try {
             result.apply(*this);
@@ -902,26 +984,31 @@ bool ScintillaQuick_item::document_edit_message(unsigned int i_message) const
 }
 
 bool ScintillaQuick_item::dispatch_direct_edit_message(
-    unsigned int i_message,
-    uptr_t       w_param,
-    sptr_t       l_param,
-    sptr_t&      result)
+    unsigned int           i_message,
+    uptr_t                 w_param,
+    sptr_t                 l_param,
+    Edit_dispatch_outcome& outcome)
 {
-    if (!m_edit_handler) {
-        return false;
-    }
-
-    if (i_message == SCI_BEGINUNDOACTION) {
-        begin_edit_transaction();
-        result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
-        return true;
-    }
-    if (i_message == SCI_ENDUNDOACTION) {
-        result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
+    // Finish a transaction that began while a handler was installed even if
+    // the handler was removed before SCI_ENDUNDOACTION arrived.
+    if (i_message == SCI_ENDUNDOACTION && m_edit_transaction_depth > 0) {
+        outcome.intercepted    = true;
+        outcome.message_result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
         end_edit_transaction();
         return true;
     }
 
+    if (!m_edit_handler) {
+        return false;
+    }
+
+    outcome.intercepted = true;
+
+    if (i_message == SCI_BEGINUNDOACTION) {
+        begin_edit_transaction();
+        outcome.message_result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
+        return true;
+    }
     ScintillaQuick_edit_replacement replacement;
     SelectionText cut_text;
     sptr_t handled_result = 0;
@@ -1084,31 +1171,36 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
 
     if (!normalized) {
         if (document_edit_message(i_message)) {
-            m_last_edit_disposition = ScintillaQuick_edit_disposition::REJECTED;
+            outcome.disposition = ScintillaQuick_edit_disposition::REJECTED;
             dispatch_scintilla_message_raw(
                 SCI_SETSTATUS,
                 static_cast<uptr_t>(Status::Failure),
                 0);
-            result = 0;
+            outcome.message_result = 0;
             return true;
         }
         return false;
     }
 
-    const ScintillaQuick_edit_disposition disposition = dispatch_edit(std::move(replacement));
-    m_last_edit_disposition = disposition;
+    bool apply_ran = false;
+    const ScintillaQuick_edit_disposition disposition =
+        dispatch_edit_span({&replacement, 1}, &apply_ran);
     if (disposition == ScintillaQuick_edit_disposition::DECLINED) {
         return false;
     }
+    outcome.disposition = disposition;
     if (disposition == ScintillaQuick_edit_disposition::REJECTED) {
-        result = 0;
+        outcome.message_result = 0;
         return true;
     }
     if (disposition == ScintillaQuick_edit_disposition::HANDLED && copy_cut_text) {
         m_core->CopyToClipboard(cut_text);
     }
 
-    result = handled_result;
+    // A handler that reported HANDLED without an apply callback claims to
+    // have dealt with the edit externally; the local document is unchanged.
+    outcome.local_document_changed = apply_ran;
+    outcome.message_result = handled_result;
     return true;
 }
 
@@ -1381,8 +1473,7 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
         const bool inserts_printable =
             mapped_command == static_cast<Message>(0) &&
             input &&
-            !event->text().isEmpty() &&
-            event->text().front().isPrint();
+            starts_with_printable_character(event->text());
         const bool edit_command =
             inserts_printable ||
             mapped_command == Message::NewLine ||
@@ -1517,7 +1608,7 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
 #endif
 
         QString text = event->text();
-        if (input && !text.isEmpty() && text[0].isPrint()) {
+        if (input && starts_with_printable_character(text)) {
             QByteArray utext = m_core->BytesForDocument(text);
             m_core->InsertCharacter(std::string_view(utext.data(), utext.size()), CharacterSource::DirectInput);
             view_changed = true;
@@ -1733,13 +1824,11 @@ void ScintillaQuick_item::dragMoveEvent(QDragMoveEvent * event)
 void ScintillaQuick_item::dropEvent(QDropEvent * event)
 {
     if (event->mimeData()->hasUrls()) {
-        event->acceptProposedAction();
         m_core->DropUrls(event->mimeData());
+        event->acceptProposedAction();
     }
     else
     if (event->mimeData()->hasText()) {
-        event->acceptProposedAction();
-
         Point point = PointFromQPoint(event->position().toPoint());
         bool move = (event->source() == this && event->proposedAction() == Qt::MoveAction);
         if (edit_handler_active()) {
@@ -1761,6 +1850,7 @@ void ScintillaQuick_item::dropEvent(QDropEvent * event)
                     SCI_SETSTATUS,
                     static_cast<uptr_t>(Status::Failure),
                     0);
+                event->ignore();
                 return;
             }
 
@@ -1774,12 +1864,14 @@ void ScintillaQuick_item::dropEvent(QDropEvent * event)
                 if (insertion_position >= selection_start &&
                     insertion_position <= selection_start + selection_length)
                 {
+                    event->ignore();
                     return;
                 }
                 if (m_core->RangeContainsProtected(
                         selection_start,
                         selection_start + selection_length))
                 {
+                    event->ignore();
                     return;
                 }
                 replacements.push_back({selection_start, selection_length, {}});
@@ -1795,11 +1887,20 @@ void ScintillaQuick_item::dropEvent(QDropEvent * event)
                 if (disposition == ScintillaQuick_edit_disposition::HANDLED) {
                     cursorChangedUpdateMarker();
                     request_scene_graph_update(true, true, false);
+                    event->acceptProposedAction();
+                }
+                else {
+                    event->ignore();
                 }
                 return;
             }
         }
+        if (m_core->pdoc->IsReadOnly()) {
+            event->ignore();
+            return;
+        }
         m_core->Drop(point, event->mimeData(), move);
+        event->acceptProposedAction();
     }
     else {
         event->ignore();
@@ -2167,25 +2268,28 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
         }
         case Qt::ImHints:
             return QVariant((int)inputMethodHints());
+        case Qt::ImReadOnly:
+            return QVariant(m_core->pdoc->IsReadOnly());
         case Qt::ImInputItemClipRectangle:
             return QQuickItem::inputMethodQuery(query);
         // see: QQuickTextControl::inputMethodQuery()
         case Qt::ImMaximumTextLength:
             return QVariant(); // No limit.
         case Qt::ImAnchorRectangle: {
-            SelectionPosition sel_end   = m_core->SelectionEnd();
-            Point pt_end                = m_core->LocationFromPosition(sel_end);
+            const SelectionPosition anchor = m_core->sel.RangeMain().anchor;
+            const Point pt_anchor          = m_core->LocationFromPosition(anchor);
 
-            int width  = send(SCI_GETCARETWIDTH);
-            int height = send(SCI_TEXTHEIGHT, line);
-            return QRect(pt_end.x, pt_end.y, width, height);
+            const int width  = static_cast<int>(send(SCI_GETCARETWIDTH));
+            const int height = static_cast<int>(
+                send(SCI_TEXTHEIGHT, send(SCI_LINEFROMPOSITION, anchor.Position())));
+            return QRect(pt_anchor.x, pt_anchor.y, width, height);
         }
         // selection == Position <--> AnchorPosition
         case Qt::ImAnchorPosition: {
-            SelectionPosition sel_end   = m_core->SelectionEnd();
+            const SelectionPosition anchor = m_core->sel.RangeMain().anchor;
 
             int para_start = m_core->pdoc->ParaUp(pos);
-            return (int)sel_end.Position() - para_start;
+            return (int)anchor.Position() - para_start;
         }
         case Qt::ImAbsolutePosition: {
             return QVariant((int)pos);
@@ -2252,7 +2356,9 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
         }
 
         case Qt::ImCurrentSelection: {
-            QVarLengthArray<char, 1024> buffer(send(SCI_GETSELTEXT));
+            const qsizetype selection_length =
+                static_cast<qsizetype>(send(SCI_GETSELTEXT));
+            QVarLengthArray<char, 1024> buffer(selection_length + 1);
             sends(SCI_GETSELTEXT, 0, buffer.data());
 
             return m_core->StringFromDocument(buffer.constData());
@@ -2340,7 +2446,7 @@ void ScintillaQuick_item::build_render_snapshot()
     }
 
     if (!m_render_data->static_content_dirty && !m_render_data->overlay_content_dirty &&
-        !m_render_data->captured_caret_primitives.empty())
+        m_render_data->caret_capture_valid)
     {
         const int caret_width = static_cast<int>(send(SCI_GETCARETWIDTH));
         if (hasActiveFocus() && m_core && m_core->caret.active && m_caret_blink_visible && caret_width > 0) {
@@ -2351,25 +2457,6 @@ void ScintillaQuick_item::build_render_snapshot()
         }
         m_render_data->snapshot_dirty = false;
         return;
-    }
-
-    Render_snapshot snapshot;
-    Style_cache cache;
-    snapshot.item_size  = QSizeF(width(), height());
-    snapshot.background = style_attributes_for(this, cache, STYLE_DEFAULT).background;
-    snapshot.gutter_bands.reserve(k_margin_count);
-    qreal margin_left = 0.0;
-    for (int margin = 0; margin < k_margin_count; ++margin) {
-        const int margin_width = static_cast<int>(send(SCI_GETMARGINWIDTHN, margin));
-        if (margin_width <= 0) {
-            continue;
-        }
-
-        snapshot.gutter_bands.push_back({
-            QRectF(margin_left, 0.0, static_cast<qreal>(margin_width), height()),
-            margin_background_color_for(this, cache, margin),
-        });
-        margin_left += margin_width;
     }
 
     const int current_first_visible_line = m_core ? static_cast<int>(send(SCI_GETFIRSTVISIBLELINE)) : -1;
@@ -2385,8 +2472,28 @@ void ScintillaQuick_item::build_render_snapshot()
         scroll_position_changed || m_render_data->static_content_dirty;
     const bool overlay_only_capture = !static_content_dirty && m_render_data->overlay_content_dirty;
 
+    Render_snapshot snapshot;
     if (!static_content_dirty) {
         snapshot = m_render_data->snapshot;
+    }
+    else {
+        Style_cache cache;
+        snapshot.item_size  = QSizeF(width(), height());
+        snapshot.background = style_attributes_for(this, cache, STYLE_DEFAULT).background;
+        snapshot.gutter_bands.reserve(k_margin_count);
+        qreal margin_left = 0.0;
+        for (int margin = 0; margin < k_margin_count; ++margin) {
+            const int margin_width = static_cast<int>(send(SCI_GETMARGINWIDTHN, margin));
+            if (margin_width <= 0) {
+                continue;
+            }
+
+            snapshot.gutter_bands.push_back({
+                QRectF(margin_left, 0.0, static_cast<qreal>(margin_width), height()),
+                margin_background_color_for(this, cache, margin),
+            });
+            margin_left += margin_width;
+        }
     }
 
     if (overlay_only_capture && m_core) {
@@ -2416,6 +2523,7 @@ void ScintillaQuick_item::build_render_snapshot()
     }
 
     m_render_data->captured_caret_primitives = frame.caret_primitives;
+    m_render_data->caret_capture_valid = true;
 
     const int caret_width = static_cast<int>(send(SCI_GETCARETWIDTH));
     if (!(hasActiveFocus() && m_core && m_core->caret.active && m_caret_blink_visible && caret_width > 0)) {
@@ -2475,6 +2583,19 @@ void ScintillaQuick_item::replace_notification_text(const QByteArray& text)
     }
 
     *m_delivered_notification_text = text;
+}
+
+void ScintillaQuick_item::note_text_mutation()
+{
+    if (m_dispatch_depth > 0) {
+        // Inside a send(): defer to the outermost dispatch exit so compound
+        // edits emit textChanged() once.
+        m_text_dirty = true;
+        return;
+    }
+    // The mutation reached Scintilla without passing through send() (event
+    // handlers driving m_core directly); emit immediately.
+    emit textChanged();
 }
 
 void ScintillaQuick_item::notifyParent(NotificationData scn)
@@ -2570,6 +2691,9 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
                 reset_tracked_scroll_width();
             }
             request_scene_graph_update(true, true, false);
+            if (added || deleted) {
+                note_text_mutation();
+            }
             break;
         }
 
@@ -2674,18 +2798,28 @@ QString ScintillaQuick_item::getText() const
     const int text_length = static_cast<int>(send(SCI_GETTEXTLENGTH));
     QByteArray buffer(text_length + 1, Qt::Uninitialized);
     send(SCI_GETTEXT, text_length + 1, reinterpret_cast<sptr_t>(buffer.data()));
-    return QString::fromUtf8(buffer.constData());
+    return QString::fromUtf8(buffer.constData(), text_length);
 }
 
 void ScintillaQuick_item::setText(const QString& txt)
 {
     const QByteArray utf8 = txt.toUtf8();
-    send(SCI_SETTEXT, 0, reinterpret_cast<sptr_t>(utf8.constData()));
+    const Edit_dispatch_outcome outcome =
+        send_with_outcome(SCI_SETTEXT, 0, reinterpret_cast<sptr_t>(utf8.constData()));
+    // Run the success side effects only when the local document actually
+    // changed; a rejected edit or a handler that claimed the edit without an
+    // apply callback must not clear undo history or report a change.
+    if (outcome.disposition == ScintillaQuick_edit_disposition::REJECTED ||
+        (outcome.intercepted && !outcome.local_document_changed))
+    {
+        return;
+    }
     send(SCI_EMPTYUNDOBUFFER);
     send(SCI_COLOURISE, 0, -1);
     setFocus(true);
     syncQuickViewProperties();
-    emit textChanged();
+    // `textChanged()` is emitted by the mutation coalescer: the SCI_SETTEXT
+    // above produced SCN_MODIFIED notifications within its dispatch.
 }
 
 void ScintillaQuick_item::setFont(const QFont& newFont)
@@ -2807,6 +2941,7 @@ void ScintillaQuick_item::setReadonly(bool value)
         send(SCI_SETREADONLY, value);
 
         syncQuickViewProperties();
+        updateInputMethod(Qt::ImReadOnly);
         emit readonlyChanged();
     }
 }
@@ -2908,7 +3043,7 @@ void ScintillaQuick_item::reset_tracked_scroll_width()
 // taken from QScintilla
 void ScintillaQuick_item::setStylesFont(const QFont& f, int style)
 {
-    const QByteArray family = f.family().toLatin1();
+    const QByteArray family = f.family().toUtf8();
     qreal point_size = f.pointSizeF();
     if (point_size <= 0.0 && f.pixelSize() > 0) {
         const QScreen* const screen = window() ? window()->screen() : QGuiApplication::primaryScreen();
@@ -2921,8 +3056,7 @@ void ScintillaQuick_item::setStylesFont(const QFont& f, int style)
         send(SCI_STYLESETSIZEFRACTIONAL, style, long(point_size * SC_FONT_SIZE_MULTIPLIER));
     }
 
-    // Pass the Qt weight via the back door.
-    send(SCI_STYLESETWEIGHT, style, -f.weight());
+    send(SCI_STYLESETWEIGHT, style, static_cast<int>(f.weight()));
 
     send(SCI_STYLESETITALIC, style, f.italic());
     send(SCI_STYLESETUNDERLINE, style, f.underline());

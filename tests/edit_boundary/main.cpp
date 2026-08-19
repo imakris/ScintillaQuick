@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,7 @@ class Event_editor final : public ScintillaQuick_item
 public:
     void deliver_drop(QDropEvent* event) { dropEvent(event); }
     void deliver_input_method(QInputMethodEvent* event) { inputMethodEvent(event); }
+    QVariant query_input_method(Qt::InputMethodQuery query) const { return inputMethodQuery(query); }
 };
 
 QString text_of(ScintillaQuick_item& editor)
@@ -109,6 +111,51 @@ void test_handler_dispositions_and_reentrant_apply()
     editor.sends(SCI_INSERTTEXT, 0, "z");
     SQ_EXPECT(text_of(editor) == QStringLiteral("zabc"));
     SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+}
+
+void test_handler_snapshot_and_transaction_cleanup()
+{
+    ScintillaQuick_item self_clearing_editor;
+    self_clearing_editor.setProperty("text", QStringLiteral("a"));
+    auto state = std::make_shared<int>(1001);
+    self_clearing_editor.set_edit_handler(
+        [&self_clearing_editor, state](const ScintillaQuick_edit_transaction&) {
+            self_clearing_editor.set_edit_handler({});
+            SQ_EXPECT(*state == 1001);
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::DECLINED,
+                {}};
+        });
+    state.reset();
+    self_clearing_editor.sends(SCI_INSERTTEXT, 1, "b");
+    SQ_EXPECT(text_of(self_clearing_editor) == QStringLiteral("ab"));
+
+    ScintillaQuick_item transaction_editor;
+    transaction_editor.setProperty("text", QStringLiteral("a"));
+    transaction_editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::DECLINED,
+                {}};
+        });
+    transaction_editor.send(SCI_BEGINUNDOACTION);
+    transaction_editor.set_edit_handler({});
+    transaction_editor.send(SCI_ENDUNDOACTION);
+
+    std::vector<std::uint64_t> transaction_ids;
+    transaction_editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction& transaction) {
+            transaction_ids.push_back(transaction.transaction_id);
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::DECLINED,
+                {}};
+        });
+    transaction_editor.sends(SCI_INSERTTEXT, 1, "b");
+    transaction_editor.sends(SCI_INSERTTEXT, 2, "c");
+    SQ_EXPECT(transaction_ids.size() == 2);
+    if (transaction_ids.size() == 2) {
+        SQ_EXPECT(transaction_ids[0] != transaction_ids[1]);
+    }
 }
 
 void test_direct_message_result_conventions()
@@ -609,7 +656,7 @@ void test_clipboard_and_drop_ingress()
         Qt::LeftButton,
         Qt::NoModifier);
     eol_editor.deliver_drop(&cross_eol_drop);
-    SQ_EXPECT(cross_eol_drop.isAccepted());
+    SQ_EXPECT(!cross_eol_drop.isAccepted());
     SQ_EXPECT(observed_drop.inserted_text == QByteArray("a\nb"));
     SQ_EXPECT(text_of(eol_editor) == QStringLiteral("x"));
 }
@@ -634,6 +681,196 @@ void test_unsupported_multi_selection_fails_closed()
     SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
 }
 
+void test_anchor_queries_track_selection_anchor()
+{
+    Event_editor forward_editor;
+    forward_editor.setProperty("text", QStringLiteral("abcdefgh"));
+    forward_editor.send(SCI_SETSEL, 2, 6); // anchor 2, caret 6
+    SQ_EXPECT(forward_editor.query_input_method(Qt::ImCursorPosition).toInt() == 6);
+    SQ_EXPECT(forward_editor.query_input_method(Qt::ImAnchorPosition).toInt() == 2);
+
+    Event_editor backward_editor;
+    backward_editor.setProperty("text", QStringLiteral("abcdefgh"));
+    backward_editor.send(SCI_SETSEL, 6, 2); // anchor 6, caret 2
+    SQ_EXPECT(backward_editor.query_input_method(Qt::ImCursorPosition).toInt() == 2);
+    SQ_EXPECT(backward_editor.query_input_method(Qt::ImAnchorPosition).toInt() == 6);
+}
+
+void test_supplementary_plane_key_text_inserts()
+{
+    const QString emoji = QString::fromUcs4(U"\U0001F600");
+
+    ScintillaQuick_item native_editor;
+    native_editor.setProperty("text", QStringLiteral("a"));
+    native_editor.send(SCI_SETSEL, 1, 1);
+    QKeyEvent native_event(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier, emoji);
+    QGuiApplication::sendEvent(&native_editor, &native_event);
+    SQ_EXPECT(native_event.isAccepted());
+    SQ_EXPECT(text_of(native_editor) == QStringLiteral("a") + emoji);
+
+    ScintillaQuick_item handled_editor;
+    handled_editor.setProperty("text", QStringLiteral("a"));
+    handled_editor.send(SCI_SETSEL, 1, 1);
+    ScintillaQuick_edit_replacement observed;
+    handled_editor.set_edit_handler(
+        [&](const ScintillaQuick_edit_transaction& transaction) {
+            observed = transaction.replacements.front();
+            return apply_exactly(transaction);
+        });
+    QKeyEvent handled_event(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier, emoji);
+    QGuiApplication::sendEvent(&handled_editor, &handled_event);
+    SQ_EXPECT(handled_event.isAccepted());
+    SQ_EXPECT(observed.inserted_text == emoji.toUtf8());
+    SQ_EXPECT(text_of(handled_editor) == QStringLiteral("a") + emoji);
+}
+
+void test_text_changed_notification_coalescing()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("abc"));
+
+    int text_changed_count = 0;
+    QObject::connect(
+        &editor,
+        &ScintillaQuick_item::textChanged,
+        [&] { ++text_changed_count; });
+
+    // setText produces delete+insert (two SCN_MODIFIED) but must emit once.
+    editor.setProperty("text", QStringLiteral("xyz"));
+    SQ_EXPECT(text_changed_count == 1);
+
+    // A direct mutation through send() emits once.
+    editor.sends(SCI_INSERTTEXT, 3, "!");
+    SQ_EXPECT(text_of(editor) == QStringLiteral("xyz!"));
+    SQ_EXPECT(text_changed_count == 2);
+
+    // Read-only queries must not emit.
+    editor.send(SCI_GETTEXTLENGTH);
+    editor.send(SCI_GETCURRENTPOS);
+    SQ_EXPECT(text_changed_count == 2);
+
+    // A rejected edit must not emit.
+    editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::REJECTED,
+                {}};
+        });
+    editor.sends(SCI_INSERTTEXT, 4, "q");
+    SQ_EXPECT(text_of(editor) == QStringLiteral("xyz!"));
+    SQ_EXPECT(text_changed_count == 2);
+}
+
+void test_rejected_settext_skips_post_actions()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("abc"));
+    editor.sends(SCI_INSERTTEXT, 3, "d");
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+
+    int text_changed_count = 0;
+    QObject::connect(
+        &editor,
+        &ScintillaQuick_item::textChanged,
+        [&] { ++text_changed_count; });
+
+    editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::REJECTED,
+                {}};
+        });
+    editor.setProperty("text", QStringLiteral("xyz"));
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+    SQ_EXPECT(text_changed_count == 0);
+    SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+
+    // The rejected setText must not have emptied the undo history.
+    editor.set_edit_handler({});
+    editor.send(SCI_UNDO);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abc"));
+}
+
+void test_find_replace_edit_boundary_outcomes()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("foo bar foo"));
+    editor.setProperty("findText", QStringLiteral("foo"));
+    editor.setProperty("replacementText", QStringLiteral("baz"));
+    SQ_EXPECT(editor.findNext());
+
+    editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::REJECTED,
+                {}};
+        });
+    SQ_EXPECT(!editor.replaceSelection());
+    SQ_EXPECT(text_of(editor) == QStringLiteral("foo bar foo"));
+    // A rejected replacement must not advance past the current match.
+    SQ_EXPECT(!editor.replaceAndFind());
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONSTART) == 0);
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 3);
+
+    // HANDLED without an apply callback: claimed externally, local document
+    // and target state unchanged.
+    editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::HANDLED,
+                {}};
+        });
+    SQ_EXPECT(editor.replaceSelection());
+    SQ_EXPECT(text_of(editor) == QStringLiteral("foo bar foo"));
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONSTART) == 0);
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 3);
+
+    // HANDLED with an apply callback: local document changes.
+    editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction& transaction) {
+            return apply_exactly(transaction);
+        });
+    SQ_EXPECT(editor.replaceSelection());
+    SQ_EXPECT(text_of(editor) == QStringLiteral("baz bar foo"));
+
+    // replaceAll stops after an externally handled replacement instead of
+    // advancing on stale target state.
+    ScintillaQuick_item external_editor;
+    external_editor.setProperty("text", QStringLiteral("foo foo foo"));
+    external_editor.setProperty("findText", QStringLiteral("foo"));
+    external_editor.setProperty("replacementText", QStringLiteral("baz"));
+    external_editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::HANDLED,
+                {}};
+        });
+    SQ_EXPECT(external_editor.replaceAll() == 1);
+    SQ_EXPECT(text_of(external_editor) == QStringLiteral("foo foo foo"));
+
+    // replaceAll stops on rejection.
+    ScintillaQuick_item rejected_editor;
+    rejected_editor.setProperty("text", QStringLiteral("foo foo foo"));
+    rejected_editor.setProperty("findText", QStringLiteral("foo"));
+    rejected_editor.setProperty("replacementText", QStringLiteral("baz"));
+    rejected_editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::REJECTED,
+                {}};
+        });
+    SQ_EXPECT(rejected_editor.replaceAll() == 0);
+    SQ_EXPECT(text_of(rejected_editor) == QStringLiteral("foo foo foo"));
+
+    // Native replaceAll still replaces every match.
+    ScintillaQuick_item native_editor;
+    native_editor.setProperty("text", QStringLiteral("foo foo foo"));
+    native_editor.setProperty("findText", QStringLiteral("foo"));
+    native_editor.setProperty("replacementText", QStringLiteral("baz"));
+    SQ_EXPECT(native_editor.replaceAll() == 3);
+    SQ_EXPECT(text_of(native_editor) == QStringLiteral("baz baz baz"));
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -642,6 +879,7 @@ int main(int argc, char** argv)
 
     test_handler_absent_preserves_direct_edit();
     test_handler_dispositions_and_reentrant_apply();
+    test_handler_snapshot_and_transaction_cleanup();
     test_direct_message_result_conventions();
     test_handler_evaluation_isolation();
     test_direct_status_reports_handler_rejection();
@@ -655,6 +893,11 @@ int main(int argc, char** argv)
     test_committed_ime_restores_preedit_selection();
     test_clipboard_and_drop_ingress();
     test_unsupported_multi_selection_fails_closed();
+    test_anchor_queries_track_selection_anchor();
+    test_supplementary_plane_key_text_inserts();
+    test_text_changed_notification_coalescing();
+    test_rejected_settext_skips_post_actions();
+    test_find_replace_edit_boundary_outcomes();
 
     if (g_failures != 0) {
         std::fprintf(stderr, "scintillaquick_edit_boundary_test: %d failure(s)\n", g_failures);

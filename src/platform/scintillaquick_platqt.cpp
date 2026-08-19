@@ -188,7 +188,10 @@ public:
         m_font->setStyleStrategy(choose_strategy(fp.extraFontFlag));
         m_font->setFamily(QString::fromUtf8(fp.faceName));
         m_font->setPointSizeF(fp.size);
-        m_font->setBold(static_cast<int>(fp.weight) > 500);
+        const int weight = static_cast<int>(fp.weight);
+        if (weight > 0) {
+            m_font->setWeight(static_cast<QFont::Weight>(std::clamp(weight, 1, 1000)));
+        }
         m_font->setItalic(fp.italic);
     }
 
