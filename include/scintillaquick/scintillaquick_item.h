@@ -15,6 +15,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // Public header only pulls the Scintilla *public* API surface
@@ -38,6 +39,7 @@
 #include <QPoint>
 #include <QPointer>
 #include <QQuickItem>
+#include <QScopeGuard>
 #include <QTimer>
 #include <QVariant>
 
@@ -443,6 +445,10 @@ protected:
     QSGNode* updatePaintNode(QSGNode* old_node, UpdatePaintNodeData* update_paint_node_data) override;
 
 private:
+    // The core observes actual document mutations (InsertText/DeleteText)
+    // through Editor::NotifyModified(), below the public notification
+    // stream, and reports them through record_actual_text_mutation().
+    friend class Scintilla::Internal::ScintillaQuick_core;
 #ifdef SCINTILLAQUICK_ENABLE_TEST_ACCESS
     friend class Scintilla::Internal::ScintillaQuick_validation_access;
 #endif
@@ -491,8 +497,10 @@ private:
     // Structured result of one message passing the edit boundary. Unlike a
     // scalar message return, this records whether the edit handler
     // intercepted the message, the disposition it returned, and whether the
-    // local Scintilla document changed. `send()`/`sends()` retain their
-    // scalar ABI; internal callers that make control-flow decisions use
+    // local Scintilla document actually changed (observed through
+    // Editor::NotifyModified(), not inferred from the message kind or from
+    // handler callbacks). `send()`/`sends()` retain their scalar ABI;
+    // internal callers that make control-flow decisions use
     // `send_with_outcome()` so the result travels per call instead of
     // through item-wide mutable state.
     struct Edit_dispatch_outcome
@@ -519,8 +527,7 @@ private:
     ScintillaQuick_edit_disposition dispatch_edits(
         std::vector<ScintillaQuick_edit_replacement> replacements);
     ScintillaQuick_edit_disposition dispatch_edit_span(
-        std::span<const ScintillaQuick_edit_replacement> replacements,
-        bool* apply_ran = nullptr);
+        std::span<const ScintillaQuick_edit_replacement> replacements);
     enum class Delete_key_replacement_result
     {
         UNSUPPORTED,
@@ -620,15 +627,34 @@ private:
     int m_evaluating_edit_handler = 0;
     int m_applying_handled_edit = 0;
 
-    // Mutation-notification coalescing for the `text` property. SCN_MODIFIED
-    // insert/delete notifications set `m_text_dirty`; the outermost
-    // `send_with_outcome()` exit then emits `textChanged()` once. Mutations
-    // that reach Scintilla without passing through `send()` (event handlers
-    // calling `m_core` directly) emit immediately at notification time.
+    // Mutation observation and property-change batching for the `text` and
+    // `readonly` properties. `ScintillaQuick_core::NotifyModified()` calls
+    // `record_actual_text_mutation()` for every actual InsertText/DeleteText,
+    // before public notification filtering, so `SCI_SETMODEVENTMASK` and
+    // forged or mutated `notify()` data cannot suppress or counterfeit the
+    // property signal. Dirty flags are coalesced by a nestable batch: a batch
+    // is entered by `send_with_outcome()` for messages that can mutate, and
+    // by logical operations (property setters, event dispatch, find/replace)
+    // so the change signals flush once, after the complete operation. A
+    // mutation recorded outside any batch flushes immediately.
     // Declared mutable because `send()` is const for Q_PROPERTY readers.
-    mutable int  m_dispatch_depth = 0;
-    mutable bool m_text_dirty     = false;
-    void note_text_mutation();
+    mutable int           m_property_batch_depth = 0;
+    mutable bool          m_text_dirty           = false;
+    mutable bool          m_readonly_dirty       = false;
+    mutable std::uint64_t m_mutation_generation  = 0;
+    void record_actual_text_mutation();
+    void begin_property_batch() const;
+    void end_property_batch() const;
+    void flush_property_changes() const;
+    // Runs `operation` inside a property batch; the batch always closes
+    // before the operation's caller continues, even on early return.
+    template <typename F>
+    decltype(auto) with_property_batch(F&& operation) const
+    {
+        begin_property_batch();
+        const auto batch_guard = qScopeGuard([this] { end_property_batch(); });
+        return std::forward<F>(operation)();
+    }
 
     static bool IsHangul(const QChar qchar);
     void MoveImeCarets(Scintilla::Position offset);

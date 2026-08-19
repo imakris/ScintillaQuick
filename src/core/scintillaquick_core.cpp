@@ -893,6 +893,22 @@ void ScintillaQuick_core::NotifyParent(NotificationData scn)
     emit notifyParent(scn);
 }
 
+void ScintillaQuick_core::NotifyModified(Document* document, DocModification mh, void* user_data)
+{
+    // Observe actual text mutations below the public notification stream:
+    // SCI_SETMODEVENTMASK can suppress SCN_MODIFIED and notify() slots can
+    // rewrite notification fields, but neither can hide a real document
+    // mutation from this watcher hook. The item only records the mutation
+    // here; it must not emit Qt signals while Scintilla is mid-edit.
+    if (m_owner &&
+        (FlagSet(mh.modificationType, ModificationFlags::InsertText) ||
+         FlagSet(mh.modificationType, ModificationFlags::DeleteText)))
+    {
+        m_owner->record_actual_text_mutation();
+    }
+    Editor::NotifyModified(document, mh, user_data);
+}
+
 void ScintillaQuick_core::NotifyURIDropped(const char* uri)
 {
     NotificationData scn = {};

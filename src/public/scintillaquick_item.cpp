@@ -398,7 +398,7 @@ bool starts_with_printable_character(const QString& text)
         return false;
     }
     const QChar first = text.front();
-    if (first.isHighSurrogate() && text.size() > 1) {
+    if (first.isHighSurrogate() && text.size() > 1 && text[1].isLowSurrogate()) {
         return QChar::isPrint(QChar::surrogateToUcs4(first, text[1]));
     }
     return first.isPrint();
@@ -608,15 +608,19 @@ ScintillaQuick_item::Edit_dispatch_outcome ScintillaQuick_item::send_with_outcom
 {
     ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
 
-    // Coalesced `textChanged()` emission: SCN_MODIFIED insert/delete
-    // notifications that arrive while a send is in flight only set
-    // `m_text_dirty`; the outermost send emits once on exit.
-    ++m_dispatch_depth;
-    const auto dispatch_depth_guard = qScopeGuard([this, self] {
-        --m_dispatch_depth;
-        if (m_dispatch_depth == 0 && m_text_dirty) {
-            m_text_dirty = false;
-            emit self->textChanged();
+    // Coalesced property-change emission: actual text mutations and readonly
+    // transitions observed while a batch is open only set dirty flags; the
+    // outermost batch exit flushes once. Known read-only queries skip the
+    // batch entirely so the hot render/query path stays cheap; a mutation
+    // observed through such a message (a table misclassification) still
+    // flushes immediately from record_actual_text_mutation().
+    const bool needs_batch = !scene_graph_message_is_known_read_only(i_message);
+    if (needs_batch) {
+        begin_property_batch();
+    }
+    const auto batch_guard = qScopeGuard([this, needs_batch] {
+        if (needs_batch) {
+            end_property_batch();
         }
     });
 
@@ -633,17 +637,38 @@ ScintillaQuick_item::Edit_dispatch_outcome ScintillaQuick_item::send_with_outcom
         return outcome;
     }
 
+    // An actual mutation observed through Editor::NotifyModified() proves a
+    // local document change; neither the message kind, the readonly flag,
+    // nor the fact that a handler callback ran is a reliable proxy.
+    const std::uint64_t generation_at_entry = m_mutation_generation;
+
     if (self->m_applying_handled_edit == 0 &&
         self->dispatch_direct_edit_message(i_message, w_param, l_param, outcome))
     {
+        outcome.local_document_changed = m_mutation_generation != generation_at_entry;
         return outcome;
     }
+
+    // Scintilla raises no notification for readonly transitions or document
+    // swaps, so track them at the dispatch boundary to keep the Qt property
+    // contract intact for direct SCI_SETREADONLY / SCI_SETDOCPOINTER calls.
+    const bool track_readonly =
+        i_message == SCI_SETREADONLY || i_message == SCI_SETDOCPOINTER;
+    const bool was_readonly      = track_readonly && m_core->pdoc->IsReadOnly();
+    const Document* doc_at_entry =
+        i_message == SCI_SETDOCPOINTER ? m_core->pdoc : nullptr;
 
     outcome.intercepted  = false;
     outcome.disposition  = ScintillaQuick_edit_disposition::DECLINED;
     outcome.message_result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
-    outcome.local_document_changed =
-        document_edit_message(i_message) && !m_core->pdoc->IsReadOnly();
+    outcome.local_document_changed = m_mutation_generation != generation_at_entry;
+
+    if (track_readonly && m_core->pdoc->IsReadOnly() != was_readonly) {
+        m_readonly_dirty = true;
+    }
+    if (doc_at_entry && m_core->pdoc != doc_at_entry) {
+        m_text_dirty = true;
+    }
     return outcome;
 }
 
@@ -735,12 +760,8 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edits(
 }
 
 ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
-    std::span<const ScintillaQuick_edit_replacement> replacements,
-    bool* apply_ran)
+    std::span<const ScintillaQuick_edit_replacement> replacements)
 {
-    if (apply_ran) {
-        *apply_ran = false;
-    }
     if (!m_edit_handler) {
         return ScintillaQuick_edit_disposition::DECLINED;
     }
@@ -806,9 +827,6 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
     }
 
     if (result.disposition == ScintillaQuick_edit_disposition::HANDLED && result.apply) {
-        if (apply_ran) {
-            *apply_ran = true;
-        }
         ++m_applying_handled_edit;
         try {
             result.apply(*this);
@@ -989,12 +1007,20 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
     sptr_t                 l_param,
     Edit_dispatch_outcome& outcome)
 {
-    // Finish a transaction that began while a handler was installed even if
-    // the handler was removed before SCI_ENDUNDOACTION arrived.
-    if (i_message == SCI_ENDUNDOACTION && m_edit_transaction_depth > 0) {
+    // Undo-group delimiters are tracked centrally, independent of whether an
+    // edit handler is installed at the moment they arrive: a nested group
+    // that begins while the handler is temporarily absent must not make a
+    // still-open outer group lose its transaction identity.
+    if (i_message == SCI_BEGINUNDOACTION) {
+        begin_edit_transaction();
         outcome.intercepted    = true;
         outcome.message_result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
+        return true;
+    }
+    if (i_message == SCI_ENDUNDOACTION) {
         end_edit_transaction();
+        outcome.intercepted    = true;
+        outcome.message_result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
         return true;
     }
 
@@ -1004,11 +1030,6 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
 
     outcome.intercepted = true;
 
-    if (i_message == SCI_BEGINUNDOACTION) {
-        begin_edit_transaction();
-        outcome.message_result = dispatch_scintilla_message_raw(i_message, w_param, l_param);
-        return true;
-    }
     ScintillaQuick_edit_replacement replacement;
     SelectionText cut_text;
     sptr_t handled_result = 0;
@@ -1182,9 +1203,8 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
         return false;
     }
 
-    bool apply_ran = false;
     const ScintillaQuick_edit_disposition disposition =
-        dispatch_edit_span({&replacement, 1}, &apply_ran);
+        dispatch_edit_span({&replacement, 1});
     if (disposition == ScintillaQuick_edit_disposition::DECLINED) {
         return false;
     }
@@ -1199,7 +1219,9 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
 
     // A handler that reported HANDLED without an apply callback claims to
     // have dealt with the edit externally; the local document is unchanged.
-    outcome.local_document_changed = apply_ran;
+    // When an apply callback did run, whether the local document actually
+    // changed is decided by the mutation generation observed across this
+    // dispatch frame in send_with_outcome(), not by the callback having run.
     outcome.message_result = handled_result;
     return true;
 }
@@ -1264,7 +1286,9 @@ void ScintillaQuick_item::cmdContextMenu(int menu_id)
                 break;
         }
     }
-    m_core->Command(menu_id);
+    with_property_batch([&] {
+        m_core->Command(menu_id);
+    });
 }
 
 void ScintillaQuick_item::enableUpdate(bool enable)
@@ -1299,12 +1323,17 @@ bool ScintillaQuick_item::event(QEvent* event)
         return true;
     }
 
-    if (event->type() == QEvent::KeyPress) {
-        // Circumvent the tab focus convention.
-        keyPressEvent(static_cast<QKeyEvent*>(event));
-        return event->isAccepted();
-    }
-    return QQuickItem::event(event);
+    // Events drive m_core directly, bypassing send(); the batch coalesces
+    // property signals across the complete event dispatch (including the
+    // key-press branch below and the handlers QQuickItem::event() invokes).
+    return with_property_batch([&] {
+        if (event->type() == QEvent::KeyPress) {
+            // Circumvent the tab focus convention.
+            keyPressEvent(static_cast<QKeyEvent*>(event));
+            return event->isAccepted();
+        }
+        return QQuickItem::event(event);
+    });
 }
 
 namespace
@@ -1823,6 +1852,11 @@ void ScintillaQuick_item::dragMoveEvent(QDragMoveEvent * event)
 
 void ScintillaQuick_item::dropEvent(QDropEvent * event)
 {
+    // Both the handler path and the native path can mutate the document;
+    // batch the whole event so property signals flush once the drop is
+    // fully processed (dropEvent may also be reached without passing
+    // through event(), e.g. from test harnesses).
+    with_property_batch([&] {
     if (event->mimeData()->hasUrls()) {
         m_core->DropUrls(event->mimeData());
         event->acceptProposedAction();
@@ -1895,16 +1929,29 @@ void ScintillaQuick_item::dropEvent(QDropEvent * event)
                 return;
             }
         }
-        if (m_core->pdoc->IsReadOnly()) {
-            event->ignore();
-            return;
-        }
+        // Native path: let Scintilla process the drop so that a readonly
+        // document still raises SCN_MODIFYATTEMPTRO through
+        // Document::CheckReadOnly(). Accept the drop only when it actually
+        // changed the local document; an internal move dropped back onto its
+        // own selection is a Scintilla-level no-op that must still count as
+        // accepted so the source does not delete the dragged text itself.
+        const SelectionPosition drop_position = m_core->SPositionFromLocation(
+            point, false, false, m_core->UserVirtualSpace());
+        const bool internal_noop_move =
+            move && m_core->PositionInSelection(drop_position.Position());
+        const std::uint64_t mutations_before = m_mutation_generation;
         m_core->Drop(point, event->mimeData(), move);
-        event->acceptProposedAction();
+        if (m_mutation_generation != mutations_before || internal_noop_move) {
+            event->acceptProposedAction();
+        }
+        else {
+            event->ignore();
+        }
     }
     else {
         event->ignore();
     }
+    });
 }
 
 bool ScintillaQuick_item::IsHangul(const QChar qchar)
@@ -1958,6 +2005,18 @@ static int bounded_ime_length(Sci::Position length)
     }
     const Sci::Position max_int = static_cast<Sci::Position>(std::numeric_limits<int>::max());
     return static_cast<int>(std::min(length, max_int));
+}
+
+// Qt input-method positions are UTF-16 code-unit offsets while Scintilla
+// positions are UTF-8 byte offsets. Convert a document byte position into a
+// signed UTF-16 offset relative to `base` (negative when the position lies
+// before the base, e.g. an anchor in a preceding paragraph).
+static int utf16_offset_from(const Document* pdoc, Sci::Position base, Sci::Position position)
+{
+    if (position >= base) {
+        return bounded_ime_length(pdoc->CountUTF16(base, position));
+    }
+    return -bounded_ime_length(pdoc->CountUTF16(position, base));
 }
 
 static std::pair<int, int> clamped_ime_attribute_range(int start, int length, int limit)
@@ -2053,6 +2112,11 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
     // Copy & paste by johnsonj with a lot of helps of Neil
     // Great thanks for my forerunners, jiniya and BLUEnLIVE
 
+    // IME composition mutates through m_core directly; batch the whole
+    // event so property signals flush once composition is fully applied.
+    begin_property_batch();
+    const auto batch_guard = qScopeGuard([this] { end_property_batch(); });
+
     if (m_core->pdoc->IsReadOnly() || m_core->SelectionContainsProtected()) {
         m_core->ShowCaretAtCurrentPosition();
         cursorChangedUpdateMarker();
@@ -2073,15 +2137,22 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
     for (int i = 0; i < event->attributes().size(); ++i) {
         const QInputMethodEvent::Attribute& a = event->attributes().at(i);
         if (a.type == QInputMethodEvent::Selection) {
+            // Qt reports the attribute range in UTF-16 code units relative
+            // to the surrounding text (the caret paragraph); Scintilla
+            // positions are UTF-8 byte offsets, so convert through the
+            // document's UTF-16 helpers rather than adding bytes.
             const Sci::Position cur_pos = m_core->CurrentPosition();
-            const int para_start        = m_core->pdoc->ParaUp(cur_pos);
-            const int para_end          = m_core->pdoc->ParaDown(cur_pos);
-            const int para_length       = bounded_ime_length(para_end - para_start);
+            const Sci::Position para_start = m_core->pdoc->ParaUp(cur_pos);
+            const Sci::Position para_end   = m_core->pdoc->ParaDown(cur_pos);
+            const int para_length =
+                bounded_ime_length(m_core->pdoc->CountUTF16(para_start, para_end));
             const auto [selection_start, selection_length] =
                 clamped_ime_attribute_range(a.start, a.length, para_length);
 
-            SelectionPosition new_start(para_start + selection_start);
-            SelectionPosition new_end(para_start + selection_start + selection_length);
+            SelectionPosition new_start(
+                m_core->pdoc->GetRelativePositionUTF16(para_start, selection_start));
+            SelectionPosition new_end(
+                m_core->pdoc->GetRelativePositionUTF16(para_start, selection_start + selection_length));
             if (new_start > new_end) {
                 m_core->SetSelection(new_end, new_start);
             }
@@ -2242,9 +2313,9 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery property, QV
         if (!pt.isNull()) {
             Point scintilla_point   = PointFromQPointF(pt);
             Sci::Position point_pos = m_core->PositionFromLocation(scintilla_point);
-            int pos                 = send(SCI_GETCURRENTPOS);
-            int para_start          = m_core->pdoc->ParaUp(pos);
-            return QVariant((int)point_pos - para_start);
+            const Sci::Position pos        = send(SCI_GETCURRENTPOS);
+            const Sci::Position para_start = m_core->pdoc->ParaUp(pos);
+            return QVariant(utf16_offset_from(m_core->pdoc, para_start, point_pos));
         }
         return inputMethodQuery(property);
     }
@@ -2288,11 +2359,11 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
         case Qt::ImAnchorPosition: {
             const SelectionPosition anchor = m_core->sel.RangeMain().anchor;
 
-            int para_start = m_core->pdoc->ParaUp(pos);
-            return (int)anchor.Position() - para_start;
+            const Sci::Position para_start = m_core->pdoc->ParaUp(pos);
+            return utf16_offset_from(m_core->pdoc, para_start, anchor.Position());
         }
         case Qt::ImAbsolutePosition: {
-            return QVariant((int)pos);
+            return QVariant(bounded_ime_length(m_core->pdoc->CountUTF16(0, pos)));
         }
         case Qt::ImTextAfterCursor: {
             // from Qt::ImSurroundingText:
@@ -2345,7 +2416,7 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
 
         case Qt::ImCursorPosition: {
             const Scintilla::Position para_start = m_core->pdoc->ParaUp(pos);
-            return QVariant(static_cast<int>(pos - para_start));
+            return QVariant(utf16_offset_from(m_core->pdoc, para_start, pos));
         }
 
         case Qt::ImSurroundingText: {
@@ -2356,12 +2427,15 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
         }
 
         case Qt::ImCurrentSelection: {
-            const qsizetype selection_length =
-                static_cast<qsizetype>(send(SCI_GETSELTEXT));
-            QVarLengthArray<char, 1024> buffer(selection_length + 1);
-            sends(SCI_GETSELTEXT, 0, buffer.data());
-
-            return m_core->StringFromDocument(buffer.constData());
+            // Read the main selection straight from the document with an
+            // explicit byte length: SCI_GETSELTEXT routes through
+            // SelectionText, which replaces embedded NUL bytes with spaces
+            // for clipboard safety, and a NUL-terminated conversion would
+            // truncate at the first NUL.
+            const SelectionRange& range = m_core->sel.RangeMain();
+            const std::string text =
+                m_core->RangeText(range.Start().Position(), range.End().Position());
+            return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
         }
 
         default:
@@ -2585,17 +2659,61 @@ void ScintillaQuick_item::replace_notification_text(const QByteArray& text)
     *m_delivered_notification_text = text;
 }
 
-void ScintillaQuick_item::note_text_mutation()
+void ScintillaQuick_item::record_actual_text_mutation()
 {
-    if (m_dispatch_depth > 0) {
-        // Inside a send(): defer to the outermost dispatch exit so compound
-        // edits emit textChanged() once.
-        m_text_dirty = true;
+    // Called from ScintillaQuick_core::NotifyModified() for an observed
+    // InsertText/DeleteText, before any public notification filtering.
+    ++m_mutation_generation;
+    m_last_find_start = -1;
+    m_last_find_end   = -1;
+    m_last_find_text.clear();
+    m_text_dirty = true;
+    if (m_property_batch_depth == 0) {
+        // The mutation reached Scintilla outside any send()/operation batch
+        // (a code path that drives m_core directly without going through
+        // event()); flush immediately rather than losing the signal.
+        flush_property_changes();
+    }
+}
+
+void ScintillaQuick_item::begin_property_batch() const
+{
+    ++m_property_batch_depth;
+}
+
+void ScintillaQuick_item::end_property_batch() const
+{
+    if (--m_property_batch_depth == 0) {
+        flush_property_changes();
+    }
+}
+
+void ScintillaQuick_item::flush_property_changes() const
+{
+    // Snapshot and clear all state before emitting anything: a slot may
+    // re-enter the editor or delete it, and nothing below may depend on
+    // member state surviving an emission.
+    const bool text_changed     = std::exchange(m_text_dirty, false);
+    const bool readonly_changed = std::exchange(m_readonly_dirty, false);
+    if (!text_changed && !readonly_changed) {
         return;
     }
-    // The mutation reached Scintilla without passing through send() (event
-    // handlers driving m_core directly); emit immediately.
-    emit textChanged();
+
+    ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
+
+    // Refresh the input method before the notification so that observers of
+    // readonlyChanged() already see the final state.
+    if (readonly_changed) {
+        self->updateInputMethod(Qt::ImReadOnly);
+    }
+
+    const QPointer<ScintillaQuick_item> alive(self);
+    if (text_changed) {
+        emit self->textChanged();
+    }
+    if (alive && readonly_changed) {
+        emit self->readonlyChanged();
+    }
 }
 
 void ScintillaQuick_item::notifyParent(NotificationData scn)
@@ -2668,12 +2786,6 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
             const bool added = FlagSet(scn.modificationType, ModificationFlags::InsertText);
             const bool deleted = FlagSet(scn.modificationType, ModificationFlags::DeleteText);
 
-            if (added || deleted) {
-                m_last_find_start = -1;
-                m_last_find_end = -1;
-                m_last_find_text.clear();
-            }
-
             const Scintilla::Position length = send(SCI_GETTEXTLENGTH);
             bool first_line_added = (added && length == 1) || (deleted && length == 0);
 
@@ -2691,9 +2803,10 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
                 reset_tracked_scroll_width();
             }
             request_scene_graph_update(true, true, false);
-            if (added || deleted) {
-                note_text_mutation();
-            }
+            // `textChanged()` is not derived from this public notification:
+            // SCI_SETMODEVENTMASK can suppress it and notify() slots can
+            // rewrite it. Actual mutations are observed through
+            // ScintillaQuick_core::NotifyModified() instead.
             break;
         }
 
@@ -2803,23 +2916,28 @@ QString ScintillaQuick_item::getText() const
 
 void ScintillaQuick_item::setText(const QString& txt)
 {
-    const QByteArray utf8 = txt.toUtf8();
-    const Edit_dispatch_outcome outcome =
-        send_with_outcome(SCI_SETTEXT, 0, reinterpret_cast<sptr_t>(utf8.constData()));
-    // Run the success side effects only when the local document actually
-    // changed; a rejected edit or a handler that claimed the edit without an
-    // apply callback must not clear undo history or report a change.
-    if (outcome.disposition == ScintillaQuick_edit_disposition::REJECTED ||
-        (outcome.intercepted && !outcome.local_document_changed))
-    {
-        return;
-    }
-    send(SCI_EMPTYUNDOBUFFER);
-    send(SCI_COLOURISE, 0, -1);
-    setFocus(true);
-    syncQuickViewProperties();
-    // `textChanged()` is emitted by the mutation coalescer: the SCI_SETTEXT
-    // above produced SCN_MODIFIED notifications within its dispatch.
+    // The batch keeps textChanged() coalesced until the complete setter has
+    // finished, so observers never see the intermediate state between
+    // SCI_SETTEXT and the undo/colourise/focus/property post-actions.
+    with_property_batch([&] {
+        const QByteArray utf8 = txt.toUtf8();
+        const Edit_dispatch_outcome outcome =
+            send_with_outcome(SCI_SETTEXT, 0, reinterpret_cast<sptr_t>(utf8.constData()));
+        // Run the success side effects only when the local document actually
+        // changed; a rejected edit, a handler that claimed the edit without
+        // an apply callback, and a native no-op (for example against a
+        // readonly document) must not clear undo history or report a change.
+        if (outcome.disposition == ScintillaQuick_edit_disposition::REJECTED ||
+            !outcome.local_document_changed)
+        {
+            return;
+        }
+        send(SCI_EMPTYUNDOBUFFER);
+        send(SCI_COLOURISE, 0, -1);
+        setFocus(true);
+        syncQuickViewProperties();
+    });
+    // `textChanged()` flushes when the batch above closes.
 }
 
 void ScintillaQuick_item::setFont(const QFont& newFont)
@@ -2938,11 +3056,13 @@ bool ScintillaQuick_item::getReadonly() const
 void ScintillaQuick_item::setReadonly(bool value)
 {
     if (value != getReadonly()) {
-        send(SCI_SETREADONLY, value);
-
-        syncQuickViewProperties();
-        updateInputMethod(Qt::ImReadOnly);
-        emit readonlyChanged();
+        // The batch flushes readonlyChanged() only after the setter has
+        // finished; flush_property_changes() refreshes the input method
+        // before emitting.
+        with_property_batch([&] {
+            send(SCI_SETREADONLY, value);
+            syncQuickViewProperties();
+        });
     }
 }
 

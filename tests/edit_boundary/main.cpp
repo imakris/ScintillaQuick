@@ -871,6 +871,303 @@ void test_find_replace_edit_boundary_outcomes()
     SQ_EXPECT(text_of(native_editor) == QStringLiteral("baz baz baz"));
 }
 
+void test_readonly_notification_covers_direct_messages()
+{
+    ScintillaQuick_item editor;
+
+    int readonly_changed_count = 0;
+    QObject::connect(
+        &editor,
+        &ScintillaQuick_item::readonlyChanged,
+        [&] { ++readonly_changed_count; });
+
+    // A direct message bypassing the property setter must still notify.
+    editor.send(SCI_SETREADONLY, 1);
+    SQ_EXPECT(readonly_changed_count == 1);
+    SQ_EXPECT(editor.property("readonly").toBool());
+
+    // Re-applying the same value must not notify.
+    editor.send(SCI_SETREADONLY, 1);
+    SQ_EXPECT(readonly_changed_count == 1);
+
+    // The property setter notifies exactly once.
+    editor.setProperty("readonly", false);
+    SQ_EXPECT(readonly_changed_count == 2);
+    SQ_EXPECT(!editor.property("readonly").toBool());
+}
+
+void test_transaction_tracking_survives_unhandled_nested_undo_groups()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("a"));
+
+    std::vector<std::uint64_t> transaction_ids;
+    ScintillaQuick_edit_handler handler =
+        [&](const ScintillaQuick_edit_transaction& transaction) {
+            transaction_ids.push_back(transaction.transaction_id);
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::DECLINED,
+                {}};
+        };
+
+    editor.set_edit_handler(handler);
+    editor.send(SCI_BEGINUNDOACTION);
+    editor.sends(SCI_INSERTTEXT, 1, "b");
+
+    // An untracked nested group while the handler is temporarily absent must
+    // not make the still-open outer group lose its transaction identity.
+    editor.set_edit_handler({});
+    editor.send(SCI_BEGINUNDOACTION);
+    editor.send(SCI_ENDUNDOACTION);
+
+    editor.set_edit_handler(handler);
+    editor.sends(SCI_INSERTTEXT, 2, "c");
+    editor.send(SCI_ENDUNDOACTION);
+
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abc"));
+    SQ_EXPECT(transaction_ids.size() == 2);
+    if (transaction_ids.size() == 2) {
+        SQ_EXPECT(transaction_ids[0] == transaction_ids[1]);
+    }
+}
+
+void test_native_readonly_settext_preserves_undo()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("abc"));
+    editor.sends(SCI_INSERTTEXT, 3, "d");
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+    SQ_EXPECT(editor.send(SCI_CANUNDO) != 0);
+
+    editor.setProperty("readonly", true);
+    editor.setProperty("text", QStringLiteral("xyz"));
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+
+    editor.setProperty("readonly", false);
+    SQ_EXPECT(editor.send(SCI_CANUNDO) != 0);
+    editor.send(SCI_UNDO);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abc"));
+}
+
+void test_noop_apply_is_not_reported_as_local_change()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("abc"));
+    editor.sends(SCI_INSERTTEXT, 3, "d");
+    SQ_EXPECT(editor.send(SCI_CANUNDO) != 0);
+
+    editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::HANDLED,
+                [](ScintillaQuick_item&) {
+                    // Deliberately does not mutate the local document.
+                }};
+        });
+    editor.setProperty("text", QStringLiteral("xyz"));
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+
+    editor.set_edit_handler({});
+    SQ_EXPECT(editor.send(SCI_CANUNDO) != 0);
+    editor.send(SCI_UNDO);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("abc"));
+}
+
+void test_text_changed_is_emitted_after_settext_post_actions()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("abc"));
+
+    bool signal_seen = false;
+    bool can_undo_when_signalled = true;
+    QObject::connect(
+        &editor,
+        &ScintillaQuick_item::textChanged,
+        [&] {
+            signal_seen = true;
+            can_undo_when_signalled = editor.send(SCI_CANUNDO) != 0;
+        });
+
+    editor.setProperty("text", QStringLiteral("xyz"));
+    SQ_EXPECT(signal_seen);
+    SQ_EXPECT(!can_undo_when_signalled);
+}
+
+void test_text_changed_uses_actual_mutations_not_public_notifications()
+{
+    ScintillaQuick_item masked_editor;
+    masked_editor.setProperty("text", QStringLiteral("a"));
+    int masked_count = 0;
+    QObject::connect(
+        &masked_editor,
+        &ScintillaQuick_item::textChanged,
+        [&] { ++masked_count; });
+
+    masked_editor.send(SCI_SETMODEVENTMASK, 0);
+    masked_editor.sends(SCI_INSERTTEXT, 1, "b");
+    SQ_EXPECT(text_of(masked_editor) == QStringLiteral("ab"));
+    SQ_EXPECT(masked_count == 1);
+
+    ScintillaQuick_item forged_editor;
+    forged_editor.setProperty("text", QStringLiteral("a"));
+    int forged_count = 0;
+    QObject::connect(
+        &forged_editor,
+        &ScintillaQuick_item::textChanged,
+        [&] { ++forged_count; });
+
+    Scintilla::NotificationData forged = {};
+    forged.nmhdr.code = Scintilla::Notification::Modified;
+    forged.modificationType = Scintilla::ModificationFlags::InsertText;
+    forged_editor.notifyParent(forged);
+    SQ_EXPECT(text_of(forged_editor) == QStringLiteral("a"));
+    SQ_EXPECT(forged_count == 0);
+}
+
+void test_text_changed_is_scoped_to_logical_operations()
+{
+    ScintillaQuick_item key_editor;
+    key_editor.setProperty("text", QStringLiteral("abc"));
+    key_editor.send(SCI_SETSEL, 1, 2);
+    int key_change_count = 0;
+    QObject::connect(
+        &key_editor,
+        &ScintillaQuick_item::textChanged,
+        [&] { ++key_change_count; });
+
+    QKeyEvent key_event(
+        QEvent::KeyPress,
+        Qt::Key_X,
+        Qt::NoModifier,
+        QStringLiteral("x"));
+    QGuiApplication::sendEvent(&key_editor, &key_event);
+    SQ_EXPECT(key_event.isAccepted());
+    SQ_EXPECT(text_of(key_editor) == QStringLiteral("axc"));
+    SQ_EXPECT(key_change_count == 1);
+
+    ScintillaQuick_item replace_all_editor;
+    replace_all_editor.setProperty("text", QStringLiteral("foo foo foo"));
+    replace_all_editor.setProperty("findText", QStringLiteral("foo"));
+    replace_all_editor.setProperty("replacementText", QStringLiteral("bar"));
+    int replace_all_change_count = 0;
+    QObject::connect(
+        &replace_all_editor,
+        &ScintillaQuick_item::textChanged,
+        [&] { ++replace_all_change_count; });
+
+    SQ_EXPECT(replace_all_editor.replaceAll() == 3);
+    SQ_EXPECT(text_of(replace_all_editor) == QStringLiteral("bar bar bar"));
+    SQ_EXPECT(replace_all_change_count == 1);
+}
+
+void test_external_replace_and_find_does_not_use_stale_target()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("foo foo"));
+    editor.setProperty("findText", QStringLiteral("foo"));
+    editor.setProperty("replacementText", QStringLiteral("bar"));
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONSTART) == 0);
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 3);
+
+    editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::HANDLED,
+                {}};
+        });
+    SQ_EXPECT(editor.replaceAndFind());
+    SQ_EXPECT(text_of(editor) == QStringLiteral("foo foo"));
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONSTART) == 0);
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 3);
+}
+
+void test_input_method_offsets_use_utf16_units()
+{
+    Event_editor editor;
+    const QString text = QString::fromUcs4(U"\u00E9\U0001F600x");
+    editor.setProperty("text", text);
+
+    // UTF-8 byte position 6 is UTF-16 position 3 (é = 1 unit, emoji = 2).
+    editor.send(SCI_SETSEL, 6, 6);
+    SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition).toInt() == 3);
+    SQ_EXPECT(editor.query_input_method(Qt::ImAnchorPosition).toInt() == 3);
+
+    editor.send(SCI_SETSEL, 6, 0); // anchor after the emoji, caret at start
+    SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition).toInt() == 0);
+    SQ_EXPECT(editor.query_input_method(Qt::ImAnchorPosition).toInt() == 3);
+}
+
+void test_current_selection_preserves_embedded_nul()
+{
+    Event_editor editor;
+    const char bytes[] = {'a', '\0', 'b'};
+    editor.send(
+        SCI_ADDTEXT,
+        3,
+        reinterpret_cast<Scintilla::sptr_t>(bytes));
+    editor.send(SCI_SETSEL, 0, 3);
+
+    const QString selected = editor.query_input_method(Qt::ImCurrentSelection).toString();
+    const QString expected = QString::fromLatin1(bytes, 3);
+    SQ_EXPECT(selected.size() == 3);
+    SQ_EXPECT(selected == expected);
+}
+
+void test_document_pointer_updates_text_and_readonly_properties()
+{
+    ScintillaQuick_item source;
+    source.setProperty("text", QStringLiteral("shared"));
+    source.setProperty("readonly", true);
+
+    ScintillaQuick_item target;
+    target.setProperty("text", QStringLiteral("private"));
+    int text_changed_count = 0;
+    int readonly_changed_count = 0;
+    QObject::connect(
+        &target,
+        &ScintillaQuick_item::textChanged,
+        [&] { ++text_changed_count; });
+    QObject::connect(
+        &target,
+        &ScintillaQuick_item::readonlyChanged,
+        [&] { ++readonly_changed_count; });
+
+    const Scintilla::sptr_t document = source.send(SCI_GETDOCPOINTER);
+    target.send(SCI_SETDOCPOINTER, 0, document);
+    SQ_EXPECT(text_of(target) == QStringLiteral("shared"));
+    SQ_EXPECT(target.property("readonly").toBool());
+    SQ_EXPECT(text_changed_count == 1);
+    SQ_EXPECT(readonly_changed_count == 1);
+}
+
+void test_readonly_drop_preserves_modify_attempt_notification()
+{
+    Event_editor editor;
+    editor.setProperty("text", QStringLiteral("a"));
+    editor.setProperty("readonly", true);
+
+    int modify_attempt_count = 0;
+    QObject::connect(
+        &editor,
+        &ScintillaQuick_item::modifyAttemptReadOnly,
+        [&] { ++modify_attempt_count; });
+
+    QMimeData mime_data;
+    mime_data.setText(QStringLiteral("b"));
+    QDropEvent drop(
+        QPointF(0.0, 0.0),
+        Qt::CopyAction,
+        &mime_data,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    editor.deliver_drop(&drop);
+
+    SQ_EXPECT(!drop.isAccepted());
+    SQ_EXPECT(text_of(editor) == QStringLiteral("a"));
+    SQ_EXPECT(modify_attempt_count == 1);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -898,6 +1195,18 @@ int main(int argc, char** argv)
     test_text_changed_notification_coalescing();
     test_rejected_settext_skips_post_actions();
     test_find_replace_edit_boundary_outcomes();
+    test_readonly_notification_covers_direct_messages();
+    test_transaction_tracking_survives_unhandled_nested_undo_groups();
+    test_native_readonly_settext_preserves_undo();
+    test_noop_apply_is_not_reported_as_local_change();
+    test_text_changed_is_emitted_after_settext_post_actions();
+    test_text_changed_uses_actual_mutations_not_public_notifications();
+    test_text_changed_is_scoped_to_logical_operations();
+    test_external_replace_and_find_does_not_use_stale_target();
+    test_input_method_offsets_use_utf16_units();
+    test_current_selection_preserves_embedded_nul();
+    test_document_pointer_updates_text_and_readonly_properties();
+    test_readonly_drop_preserves_modify_attempt_notification();
 
     if (g_failures != 0) {
         std::fprintf(stderr, "scintillaquick_edit_boundary_test: %d failure(s)\n", g_failures);

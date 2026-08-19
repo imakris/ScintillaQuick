@@ -1004,23 +1004,37 @@ ScintillaQuick_item::Replace_result ScintillaQuick_item::replace_selection_outco
 
 bool ScintillaQuick_item::replaceSelection()
 {
-    const Replace_result result = replace_selection_outcome();
-    return result == Replace_result::CHANGED || result == Replace_result::HANDLED_EXTERNAL;
+    return with_property_batch([&] {
+        const Replace_result result = replace_selection_outcome();
+        return result == Replace_result::CHANGED || result == Replace_result::HANDLED_EXTERNAL;
+    });
 }
 
 bool ScintillaQuick_item::replaceAndFind()
 {
-    const Replace_result result = replace_selection_outcome();
-    if (result == Replace_result::REJECTED) {
-        // Do not advance past the current match after a rejected replacement.
-        return false;
-    }
-    const bool found = findNext();
-    return result != Replace_result::NOT_A_MATCH || found;
+    return with_property_batch([&] {
+        const Replace_result result = replace_selection_outcome();
+        if (result == Replace_result::REJECTED) {
+            // Do not advance past the current match after a rejected replacement.
+            return false;
+        }
+        if (result == Replace_result::HANDLED_EXTERNAL) {
+            // The handler claims to have dealt with the replacement
+            // externally; the local target/selection state is unchanged and
+            // must not be consumed by a local search.
+            return true;
+        }
+        const bool found = findNext();
+        return result != Replace_result::NOT_A_MATCH || found;
+    });
 }
 
 int ScintillaQuick_item::replaceAll()
 {
+    // The batch coalesces the per-replacement textChanged() notifications
+    // into a single emission once the whole operation (and its undo group)
+    // has completed.
+    return with_property_batch([&] {
     const QByteArray needle = m_find_text.toUtf8();
     if (needle.isEmpty() || send(SCI_GETREADONLY) != 0) {
         return 0;
@@ -1067,4 +1081,5 @@ int ScintillaQuick_item::replaceAll()
     }
     send(SCI_ENDUNDOACTION);
     return replacements;
+    });
 }

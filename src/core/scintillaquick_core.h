@@ -175,6 +175,10 @@ private:
     void NotifyChange() override;
     void NotifyFocus(bool focus) override;
     void NotifyParent(Scintilla::NotificationData scn) override;
+    // Observes actual document mutations below the public notification
+    // stream and reports them to the owning item before the base class
+    // filters or dispatches any public notification.
+    void NotifyModified(Document* document, DocModification mh, void* user_data) override;
     void NotifyURIDropped(const char* uri);
     int timers[static_cast<size_t>(TickReason::dwell) + 1]{};
     bool FineTickerRunning(TickReason reason) override;
