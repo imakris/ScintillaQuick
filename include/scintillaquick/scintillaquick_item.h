@@ -270,6 +270,15 @@ public:
     Q_INVOKABLE void hideFindPanel();
     Q_INVOKABLE bool findNext();
     Q_INVOKABLE bool findPrevious();
+    /**
+     * Selects and centers an exact UTF-8 byte range in a document line.
+     *
+     * @param line_number One-based document line number.
+     * @param byte_column Zero-based UTF-8 byte offset within the line.
+     * @param byte_length Length of the range in UTF-8 bytes.
+     * @return Whether the requested range is valid for the current document.
+     */
+    Q_INVOKABLE bool reveal_match(int line_number, int byte_column, int byte_length);
     Q_INVOKABLE int selectAllFindMatches();
     Q_INVOKABLE bool replaceSelection();
     Q_INVOKABLE bool replaceAndFind();
@@ -664,6 +673,7 @@ private:
     void syncQuickViewProperties();
     void ensureFindPanel();
     void updateFindPanelGeometry();
+    bool handle_find_navigation_key(QKeyEvent* event);
 
     QPointer<Find_panel> m_find_panel;
     bool m_find_panel_visible = false;

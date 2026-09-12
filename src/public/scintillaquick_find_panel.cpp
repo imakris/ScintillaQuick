@@ -92,6 +92,27 @@ bool selection_is_find_match(ScintillaQuick_item& editor, const QByteArray& need
     return match == selection_start && static_cast<Scintilla::Position>(editor.send(SCI_GETTARGETEND)) == selection_end;
 }
 
+void reveal_match_and_center(
+    ScintillaQuick_item& editor,
+    Scintilla::Position match_start,
+    Scintilla::Position match_end)
+{
+    const Scintilla::Position document_line = static_cast<Scintilla::Position>(
+        editor.send(SCI_LINEFROMPOSITION, static_cast<Scintilla::uptr_t>(match_start)));
+    const Scintilla::Position visible_line = static_cast<Scintilla::Position>(
+        editor.send(SCI_VISIBLEFROMDOCLINE, static_cast<Scintilla::uptr_t>(document_line)));
+    const Scintilla::Position lines_on_screen = std::max<Scintilla::Position>(
+        1,
+        static_cast<Scintilla::Position>(editor.send(SCI_LINESONSCREEN)));
+
+    editor.send(SCI_SETSEL, static_cast<Scintilla::uptr_t>(match_start), match_end);
+    editor.send(
+        SCI_SETFIRSTVISIBLELINE,
+        static_cast<Scintilla::uptr_t>(std::max<Scintilla::Position>(
+            0,
+            visible_line - lines_on_screen / 2)));
+}
+
 } // namespace
 
 class ScintillaQuick_item::Find_panel final : public QQuickItem
@@ -314,6 +335,11 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
     }
 
   private:
+    bool handle_find_navigation_key(QKeyEvent* event)
+    {
+        return m_owner->handle_find_navigation_key(event);
+    }
+
     class Find_field final : public ScintillaQuick_item
     {
       public:
@@ -332,6 +358,9 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
       protected:
         void keyPressEvent(QKeyEvent* event) override
         {
+            if (m_panel->handle_find_navigation_key(event)) {
+                return;
+            }
             const bool control = event->modifiers().testFlag(Qt::ControlModifier);
             if (control && event->key() == Qt::Key_F) {
                 m_panel->m_owner->showFind();
@@ -896,8 +925,7 @@ bool ScintillaQuick_item::findNext()
     m_last_find_end = target_end;
     m_last_find_text = m_find_text;
     m_last_find_options = m_find_options;
-    send(SCI_SETSEL, target_start, target_end);
-    send(SCI_SCROLLCARET);
+    reveal_match_and_center(*this, target_start, target_end);
     return true;
 }
 
@@ -942,8 +970,61 @@ bool ScintillaQuick_item::findPrevious()
     m_last_find_end = target_end;
     m_last_find_text = m_find_text;
     m_last_find_options = m_find_options;
-    send(SCI_SETSEL, target_start, target_end);
-    send(SCI_SCROLLCARET);
+    reveal_match_and_center(*this, target_start, target_end);
+    return true;
+}
+
+bool ScintillaQuick_item::reveal_match(int line_number, int byte_column, int byte_length)
+{
+    if (line_number < 1 || byte_column < 0 || byte_length < 0) {
+        return false;
+    }
+
+    const int line_index = line_number - 1;
+    const int line_count = static_cast<int>(send(SCI_GETLINECOUNT));
+    if (line_index >= line_count) {
+        return false;
+    }
+
+    const Scintilla::Position line_start = static_cast<Scintilla::Position>(
+        send(SCI_POSITIONFROMLINE, static_cast<Scintilla::uptr_t>(line_index)));
+    const Scintilla::Position line_end = static_cast<Scintilla::Position>(
+        send(SCI_GETLINEENDPOSITION, static_cast<Scintilla::uptr_t>(line_index)));
+    if (line_start < 0 || line_end < line_start) {
+        return false;
+    }
+
+    const Scintilla::Position line_length = line_end - line_start;
+    const Scintilla::Position match_column = static_cast<Scintilla::Position>(byte_column);
+    if (match_column > line_length) {
+        return false;
+    }
+
+    const Scintilla::Position match_start = line_start + match_column;
+    const Scintilla::Position match_length = static_cast<Scintilla::Position>(byte_length);
+    if (match_length > line_end - match_start) {
+        return false;
+    }
+
+    reveal_match_and_center(*this, match_start, match_start + match_length);
+    return true;
+}
+
+bool ScintillaQuick_item::handle_find_navigation_key(QKeyEvent* event)
+{
+    const Qt::KeyboardModifiers non_navigation_modifiers =
+        Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier;
+    if (event->key() != Qt::Key_F3 || event->modifiers() & non_navigation_modifiers) {
+        return false;
+    }
+
+    if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+        findPrevious();
+    }
+    else {
+        findNext();
+    }
+    event->accept();
     return true;
 }
 

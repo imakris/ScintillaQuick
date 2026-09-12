@@ -1421,6 +1421,9 @@ void ScintillaQuick_item::geometryChange(const QRectF& newGeometry, const QRectF
 
 void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
 {
+    if (handle_find_navigation_key(event)) {
+        return;
+    }
     const bool control_shortcut =
         event->modifiers().testFlag(Qt::ControlModifier) &&
         !event->modifiers().testFlag(Qt::AltModifier);
