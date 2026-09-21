@@ -21,7 +21,7 @@ jobs:
         build-shared: [OFF, ON]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload visual regression artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: visual-regression-artifacts-shared-${{ matrix.build-shared }}
           path: build/tests/visual_regression_artifacts
