@@ -22,16 +22,6 @@ It is intended for applications that want Scintilla behavior inside a real
 
 `ScintillaQuick` is usable today, but it is still an early-stage library.
 
-## CI Status
-
-| Platform | Static | Shared | CI test run | Consumer install smoke | Notes |
-| :-- | :--: | :--: | :--: | :--: | :-- |
-| Linux | 🟢 | 🟢 | 🟢 | 🟢 | GitHub Actions runs dispatch-table, smoke, and frame-validation tests. |
-| macOS | 🟢 | 🟢 | 🟢 | 🟢 | GitHub Actions runs dispatch-table, smoke, and frame-validation tests. |
-| Windows | 🟢 | 🟢 | 🟢 | 🟢 | Shared-build test jobs add `build/Release` to `PATH` so `ScintillaQuick.dll` is found at runtime. |
-
-Current `master` status: all platform GitHub Actions jobs pass on Qt `6.7.2`.
-
 Current repository state:
 
 - Version `0.1.0`

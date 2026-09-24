@@ -100,11 +100,3 @@ so that consumers can find them without crawling history.
   messages routed through `send()` therefore use a single private helper that
   casts `this` when it needs to schedule updates. Do not copy that pattern
   blindly.
-
-- **The scene-graph dispatch table has a re-entry guard.** The
-  fast-path allow-list in `src/core/scintillaquick_dispatch_table.h`
-  is tested by `tests/dispatch_table/main.cpp`. If you add a new
-  Scintilla query call from inside `syncQuickViewProperties()` or
-  one of its helpers, you must also add the message to
-  `scene_graph_message_is_known_read_only()` or the property-sync
-  path will recurse.
