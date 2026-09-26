@@ -28,13 +28,13 @@ public:
 
     static void tick_caret(ScintillaQuick_item& item)
     {
-        QTimerEvent event(item.m_core->timers[static_cast<size_t>(Editor::TickReason::caret)]);
+        QTimerEvent event(item.m_core->timers[static_cast<size_t>(ScintillaQuick_core::TickReason::caret)]);
         item.m_core->timerEvent(&event);
     }
 
     static void drag_selection(ScintillaQuick_item& item, Sci::Position caret, Sci::Position anchor)
     {
-        item.m_core->SetSelection(SelectionPosition(caret), SelectionPosition(anchor));
+        item.send(SCI_SETSEL, static_cast<uptr_t>(anchor), static_cast<sptr_t>(caret));
         item.cursorChangedUpdateMarker();
     }
 
