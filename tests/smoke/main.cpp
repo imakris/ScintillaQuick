@@ -18,6 +18,8 @@
 #include <QEventLoop>
 #include <QDebug>
 #include <QGuiApplication>
+#include <QFontMetricsF>
+#include <QImage>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMetaType>
@@ -1102,6 +1104,30 @@ void expect_utf8_measurement_positions_written(std::string_view text)
     SQ_EXPECT(positions.back() == guard);
 }
 
+void test_surface_measurement_tracks_device_dpi()
+{
+    using namespace Scintilla::Internal;
+    const QByteArray family = scintillaquick::shared::deterministic_test_font_family_utf8();
+    const auto font = Font::Allocate(FontParameters(family.constData(), 11));
+    QFont qt_font(QString::fromUtf8(family));
+    qt_font.setPointSizeF(11);
+    QImage image(1, 1, QImage::Format_ARGB32_Premultiplied);
+    Surface_impl surface;
+    surface.Init(static_cast<SurfaceID>(&image), nullptr);
+    constexpr std::string_view text = "abcdefgh";
+    std::vector<XYPOSITION> positions(text.size());
+
+    // The same device can change resolution. Its address is not a font-metrics key.
+    for (const int dots_per_meter : {3780, 5669, 3780}) {
+        image.setDotsPerMeterX(dots_per_meter);
+        image.setDotsPerMeterY(dots_per_meter);
+        surface.MeasureWidths(font.get(), text, positions.data());
+        const qreal expected = QFontMetricsF(qt_font, &image).horizontalAdvance(
+            QString::fromLatin1(text.data(), text.size()));
+        SQ_EXPECT(std::abs(positions.back() - expected) < 0.01);
+    }
+}
+
 void test_malformed_utf8_measurement_positions()
 {
     const char invalid_leads[] = {
@@ -1440,6 +1466,7 @@ int main(int argc, char** argv)
     test_readonly_property(editor);
     test_ime_attribute_bounds_and_readonly_acceptance(editor);
     test_malformed_utf8_measurement_positions();
+    test_surface_measurement_tracks_device_dpi();
     test_call_tip_owned_destroy_and_external_delete(editor);
     test_autocomplete_list_box_owned_destroy_and_external_delete(editor);
     test_wrap_mode_toggle(editor);

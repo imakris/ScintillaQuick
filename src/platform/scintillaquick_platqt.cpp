@@ -179,7 +179,8 @@ public:
     // called from the GUI thread.
     mutable int m_advance_cache_state = 0;
     mutable double m_fixed_advance = 0.0;
-    mutable const QPaintDevice* m_cached_advance_device = nullptr;
+    mutable qreal m_cached_font_dpi = 0.0;
+    mutable qreal m_cached_device_pixel_ratio = 0.0;
 
     explicit Font_and_character_set(const FontParameters& fp) : m_character_set(fp.characterSet)
     {
@@ -194,6 +195,14 @@ public:
         m_font->setItalic(fp.italic);
     }
 
+    bool matches_advance_metrics(const QPaintDevice* device) const
+    {
+        // Font attributes are immutable for this wrapper's lifetime. A device
+        // address can be reused or retain its identity while its DPI changes.
+        return m_cached_font_dpi == QFontMetricsF(*m_font, device).fontDpi() &&
+            m_cached_device_pixel_ratio == (device ? device->devicePixelRatioF() : 1.0);
+    }
+
     // Attempts to fill `positions` for printable-ASCII `text` using the
     // cached fixed-pitch advance. Returns false if the cache is not yet
     // ready or the font is known not to be fixed-pitch, in which case
@@ -203,7 +212,7 @@ public:
         XYPOSITION*         positions,
         const QPaintDevice* device) const
     {
-        if (m_advance_cache_state != 1 || m_cached_advance_device != device) {
+        if (m_advance_cache_state != 1 || !matches_advance_metrics(device)) {
             return false;
         }
         const double w = m_fixed_advance;
@@ -227,7 +236,7 @@ public:
         if (m_advance_cache_state == 2) {
             return;
         }
-        if (m_advance_cache_state == 1 && m_cached_advance_device == device) {
+        if (m_advance_cache_state == 1 && matches_advance_metrics(device)) {
             return;
         }
         if (text.empty()) {
@@ -259,9 +268,10 @@ public:
         }
 
         if (uniform && first_adv > 0.0 && QFontInfo(*m_font).fixedPitch()) {
-            m_fixed_advance         = first_adv;
-            m_cached_advance_device = device;
-            m_advance_cache_state   = 1;
+            m_fixed_advance             = first_adv;
+            m_cached_font_dpi           = QFontMetricsF(*m_font, device).fontDpi();
+            m_cached_device_pixel_ratio = device ? device->devicePixelRatioF() : 1.0;
+            m_advance_cache_state       = 1;
         }
         else {
             m_advance_cache_state = 2;
