@@ -199,7 +199,7 @@ When adding or changing a classification:
 3. Add dispatch-table tests for both the intended classification and nearby
    messages that must not be fast-pathed.
 4. If the message is used internally by property sync or IME queries, ensure it
-   is read-only-classified to avoid recursive full resync.
+   is read-only-classified to avoid scheduling redundant resynchronization.
 5. Run the dispatch-table test and CI-compatible correctness subset.
 
 ## GUI Notifications And Property Synchronization
@@ -208,6 +208,12 @@ Pending `SCN_UPDATEUI` flags are coalesced by GUI-thread idle work and drained
 before snapshot preparation. Clear delivered flags before notifying observers
 so edits or selection changes made by a synchronous observer remain pending for
 a later delivery.
+
+Mutating Scintilla message bursts coalesce geometry-property notifications at
+GUI-thread polish or queued delivery for editors without a window. Property
+getters still read the current Scintilla state synchronously. Changes made by a
+property observer schedule another notification batch after the active batch
+finishes, including when the observer processes a nested event loop.
 
 `painted()` is emitted on the GUI thread after the prepared snapshot and frame
 are ready for presentation, including a snapshot that only changes caret

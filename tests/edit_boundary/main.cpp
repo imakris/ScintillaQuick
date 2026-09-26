@@ -1235,6 +1235,34 @@ void test_ui_and_capture_notifications()
     SQ_EXPECT(selection_updates == 2);
 }
 
+void test_hidden_property_sync_and_observer_edits()
+{
+    Event_editor editor;
+    editor.setWidth(640);
+    editor.setHeight(240);
+    editor.setProperty("text", QStringLiteral("one"));
+    QGuiApplication::processEvents(QEventLoop::AllEvents);
+    int line_changes = 0;
+    QObject::connect(&editor, &ScintillaQuick_item::totalLinesChanged, [&] {
+        ++line_changes;
+        if (line_changes == 1) {
+            editor.sends(SCI_APPENDTEXT, 6, "\nthree");
+            QGuiApplication::processEvents(QEventLoop::AllEvents);
+        }
+    });
+    editor.sends(SCI_APPENDTEXT, 4, "\ntwo");
+    SQ_EXPECT(editor.property("totalLines").toInt() == 2);
+    SQ_EXPECT(editor.property("logicalHeight").toInt() ==
+        2 * editor.property("charHeight").toInt());
+    QGuiApplication::processEvents(QEventLoop::AllEvents);
+    QGuiApplication::processEvents(QEventLoop::AllEvents);
+    SQ_EXPECT(line_changes == 2);
+    SQ_EXPECT(editor.property("totalLines").toInt() == 3);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("one\ntwo\nthree"));
+    editor.send(SCI_SETSCROLLWIDTH, 1200);
+    SQ_EXPECT(editor.property("logicalWidth").toInt() == 1200);
+}
+
 void test_current_selection_preserves_embedded_nul()
 {
     Event_editor editor;
@@ -1345,6 +1373,7 @@ int main(int argc, char** argv)
     test_ui_and_capture_notifications();
     test_horizontal_scroll_survives_edit_and_margin_update();
     test_input_method_geometry_after_composition();
+    test_hidden_property_sync_and_observer_edits();
     test_current_selection_preserves_embedded_nul();
     test_document_pointer_updates_text_and_readonly_properties();
     test_readonly_drop_preserves_modify_attempt_notification();

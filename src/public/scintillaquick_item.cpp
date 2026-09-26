@@ -515,12 +515,10 @@ void ScintillaQuick_item::apply_scene_graph_update_request(
     if (scroll_width_reset) {
         self->reset_tracked_scroll_width();
     }
-    // Re-entry guard: `syncQuickViewProperties()` issues SCI_* queries through
-    // `send()`. A missed read-only classification should not recurse forever.
-    if (needed && !m_in_sync_quick_view_properties) {
+    if (needed) {
         const bool needs_property_sync = static_content_dirty || needs_style_sync || scrolling;
         if (needs_property_sync) {
-            self->syncQuickViewProperties();
+            self->request_property_sync();
         }
         self->request_scene_graph_update(static_content_dirty, needs_style_sync, scrolling);
     }
@@ -2434,6 +2432,9 @@ void ScintillaQuick_item::touchEvent(QTouchEvent * event)
 
 void ScintillaQuick_item::updatePolish()
 {
+    if (m_properties_sync_pending) {
+        syncQuickViewProperties();
+    }
     if (m_render_data) {
         m_render_data->update_pending = false;
     }
@@ -2904,12 +2905,12 @@ void ScintillaQuick_item::setFont(const QFont& newFont)
 
 int ScintillaQuick_item::getLogicalWidth() const
 {
-    return m_logical_width;
+    return static_cast<int>(send(SCI_GETSCROLLWIDTH));
 }
 
 int ScintillaQuick_item::getLogicalHeight() const
 {
-    return m_logical_height;
+    return getTotalLines() * getCharHeight();
 }
 
 int ScintillaQuick_item::getCharHeight() const
@@ -3016,7 +3017,7 @@ void ScintillaQuick_item::updateQuickView(Update updated)
         FlagSet(updated, Update::VScroll) ||
         FlagSet(updated, Update::HScroll);
     if (needs_property_sync) {
-        syncQuickViewProperties();
+        request_property_sync();
     }
 
     cursorChangedUpdateMarker();
@@ -3026,31 +3027,44 @@ void ScintillaQuick_item::updateQuickView(Update updated)
         FlagSet(updated, Update::VScroll));
 }
 
+void ScintillaQuick_item::request_property_sync()
+{
+    if (m_properties_sync_pending) {
+        return;
+    }
+    m_properties_sync_pending = true;
+    if (m_in_sync_quick_view_properties) {
+        return;
+    }
+    // Hidden editors and shared document buffers may never receive polish.
+    QTimer::singleShot(0, this, [this] {
+        if (m_properties_sync_pending) {
+            syncQuickViewProperties();
+        }
+    });
+}
+
 void ScintillaQuick_item::syncQuickViewProperties()
 {
     if (!m_core) {
         return;
     }
 
-    // Re-entry guard: the SCI_* queries issued below go back through
-    // `send()`, which in turn consults the scene-graph update dispatch.
-    // If any of those queries is not in the read-only allow-list, the
-    // dispatch's conservative default would call back into this
-    // function, causing unbounded recursion and a stack overflow.
-    // Setting the flag here makes the `send()` re-entry guard short-
-    // circuit the nested dispatch.
+    // A property observer may call a setter that requires immediate sync.
+    // Finish the current notification batch, then observe that new state.
     if (m_in_sync_quick_view_properties) {
+        request_property_sync();
         return;
     }
+    m_properties_sync_pending = false;
     m_in_sync_quick_view_properties = true;
-    struct Scope_guard
-    {
-        bool& flag;
-        ~Scope_guard()
-        {
-            flag = false;
+    const auto sync_guard = qScopeGuard([this] {
+        m_in_sync_quick_view_properties = false;
+        if (m_properties_sync_pending) {
+            m_properties_sync_pending = false;
+            request_property_sync();
         }
-    } scope_guard{m_in_sync_quick_view_properties};
+    });
 
     const int char_height          = getCharHeight();
     const int char_width           = getCharWidth();
@@ -3059,9 +3073,10 @@ void ScintillaQuick_item::syncQuickViewProperties()
     const int text_height          = line_count * char_height;
     const int total_columns        = (char_width > 0) ? (text_width / char_width) : 0;
     const int visible_lines        = send(SCI_LINESONSCREEN);
-    const int visible_columns      = (char_width > 0) ? getVisibleColumns() : 0;
+    const int visible_width        = std::max(0, static_cast<int>(m_core->GetTextRectangle().Width()));
+    const int visible_columns      = (char_width > 0) ? visible_width / char_width : 0;
     const int first_visible_line   = send(SCI_GETFIRSTVISIBLELINE);
-    const int first_visible_column = (char_width > 0) ? getFirstVisibleColumn() : 0;
+    const int first_visible_column = (char_width > 0) ? send(SCI_GETXOFFSET) / char_width : 0;
 
     using Item = ScintillaQuick_item;
     auto emit_if_changed = [this](int& cached_value, int current_value, void (Item::*signal)()) {

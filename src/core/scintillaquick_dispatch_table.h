@@ -610,12 +610,6 @@ inline scene_graph_update_request_info_t scene_graph_update_request_classify(uns
 // Known read-only / query-like Scintilla messages that are safe to treat
 // as non-visual. Messages listed with Dispatch_effect::Read_only take
 // the fast path and skip scene-graph resync.
-//
-// CRITICAL invariant: every SCI_* message that ScintillaQuick_item or its
-// helper getters call INTERNALLY via `send()` must appear in the table as
-// read-only if it is a pure query. If it does not, the conservative default
-// in `scene_graph_update_request()` will trigger a full resync, which can
-// re-enter `syncQuickViewProperties()` and recurse.
 inline bool scene_graph_message_is_known_read_only(unsigned int i_message)
 {
     const detail::Message_rule* rule = detail::find_message_rule(i_message);

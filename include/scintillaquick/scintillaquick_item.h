@@ -486,6 +486,7 @@ private:
     void setReadonly(bool value);
 
     void cursorChangedUpdateMarker();
+    void request_property_sync();
     void request_caret_blink_update();
     void updateQuickView(Scintilla::Update updated);
     void build_render_snapshot();
@@ -611,21 +612,8 @@ private:
     // Scintilla and triggers a nested notification cannot steal the outer delivery.
     QByteArray* m_delivered_notification_text = nullptr;
     std::unique_ptr<Render_data> m_render_data;
-    // Re-entry guard for `send()`'s dispatch -> `syncQuickViewProperties()`
-    // path. `syncQuickViewProperties()` itself issues SCI_* queries
-    // through `send()` to read the geometry cache (SCI_TEXTHEIGHT /
-    // SCI_LINESONSCREEN / ...). If a query message is not in the
-    // `scene_graph_message_is_known_read_only()` allow-list, the
-    // dispatch's conservative "unknown -> full resync" default would
-    // call `syncQuickViewProperties()` again, causing unbounded
-    // recursion and a stack overflow. The allow-list in the dispatch
-    // table is the primary defence; this flag is a defence-in-depth so
-    // that a future missed entry degrades into "no resync for that one
-    // nested call" instead of a crash.
-    //
-    // Declared mutable because `send()` is const for Q_PROPERTY readers, even
-    // though mutating Scintilla messages can also flow through it.
-    mutable bool m_in_sync_quick_view_properties = false;
+    bool m_properties_sync_pending = false;
+    bool m_in_sync_quick_view_properties = false;
 
     ScintillaQuick_edit_handler m_edit_handler;
     std::uint64_t m_next_edit_transaction_id = 1;

@@ -228,7 +228,9 @@ void test_sends_syncs_properties(ScintillaQuick_item& editor)
     editor.sends(SCI_APPENDTEXT, 4, "\ntwo");
     SQ_EXPECT(text_length(editor) == 7);
     SQ_EXPECT(editor.property("totalLines").toInt() == 2);
-    SQ_EXPECT(total_lines_changed > 0);
+    SQ_EXPECT(total_lines_changed == 0);
+    pump_events();
+    SQ_EXPECT(total_lines_changed == 1);
     QObject::disconnect(total_lines_connection);
 }
 
@@ -257,7 +259,7 @@ void test_direct_function_syncs_properties(ScintillaQuick_item& editor)
     direct(direct_pointer, SCI_APPENDTEXT, 4, reinterpret_cast<sptr_t>("\ntwo"));
     SQ_EXPECT(text_length(editor) == 7);
     SQ_EXPECT(editor.property("totalLines").toInt() == 2);
-    SQ_EXPECT(total_lines_changed > 0);
+    SQ_EXPECT(total_lines_changed == 0);
 
     int status = -1;
     direct_status(direct_pointer, SCI_APPENDTEXT, 6, reinterpret_cast<sptr_t>("\nthree"), &status);
@@ -267,6 +269,8 @@ void test_direct_function_syncs_properties(ScintillaQuick_item& editor)
 
     direct_status(direct_pointer, SCI_APPENDTEXT, 1, reinterpret_cast<sptr_t>("!"), nullptr);
     SQ_EXPECT(text_length(editor) == 14);
+    pump_events();
+    SQ_EXPECT(total_lines_changed == 1);
 
     int captured_status = -1;
     direct_status(
