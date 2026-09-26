@@ -14,7 +14,7 @@ Use this map before starting a change.
 | `src/public/` | `QQuickItem` boundary: Qt events, QML properties, public signals, message dispatch, scene-graph scheduling, IME. |
 | `src/core/` | Scintilla integration: `WndProc`, direct callbacks, notifications, timers, clipboard/drop helpers, render-frame capture. |
 | `src/platform/` | Qt implementation of Scintilla platform services: surfaces, fonts, menus, list boxes, call tips, platform `Window`. |
-| `src/render/` | `Render_frame` and Qt Quick scene-graph renderer. Renderer code consumes captured data and should not call back into Scintilla. |
+| `src/render/` | `Render_frame` and Qt Quick scene-graph renderer. Renderer code consumes captured values and must not query mutable editor state. |
 | `tests/` | Smoke, dispatch-table, frame-validation, visual-regression, and behavior tests. Add focused tests near the behavior changed. |
 | `benchmarks/` | Performance scenarios. Use before and after changing render scheduling or renderer hot paths. |
 | `docs/` | Public docs and maintainer contracts. Keep implementation contracts current with code changes. |
@@ -68,11 +68,20 @@ without rebuilding the whole static frame when nothing else changed:
 - caret rectangles captured from the last full or overlay frame
 - selection/caret UI changes that Scintilla reports without document/style
   mutation
+- effective backgrounds whose colors or layers depend on selection, current-line
+  highlighting, or body markers
 
 `build_render_snapshot()` may reuse previous static content for overlay-only
 updates. A path that changes visible document text, style, margins, wrapping,
 scroll width, annotations, indicators, markers, whitespace settings, or
 representation settings must mark static content dirty.
+
+Scintilla's caret fine ticker owns the blink phase. Frame capture temporarily
+enables the caret while collecting its geometry, then restores the phase. A
+caret-only tick marks the snapshot dirty and selects or hides the valid cached
+caret primitives using focus, caret activity, phase, and width. It reuses the
+captured viewport without requesting overlay capture. Geometry changes still
+require the usual capture invalidation.
 
 ### Layering
 
@@ -90,12 +99,16 @@ General ordering expectations:
 - text and represented text in captured visual-line order
 - over-text indicators, carets, and focus-sensitive overlays last
 
+Every text-area group belongs below the shared `text_rect` clip. Margin groups
+remain outside it. Preserve that boundary for new primitive families and for
+horizontal scrolling.
+
 Do not reorder renderer node groups for cleanup alone. If ordering changes, run
-frame validation and `scintillaquick_visual_regression_test` locally on Windows
-under the native `windows` platform plugin. That suite is the only visual
-baseline gate that exists. `ci-windows.yml` runs it; the Linux and macOS
-workflows exclude it because the baselines are a Windows native-QPA oracle
-(see `docs/limitations.md`).
+frame validation, renderer conformance on the software and RHI scene graphs,
+and `scintillaquick_visual_regression_test` locally on Windows under the native
+`windows` platform plugin. The stored PNG baselines remain a Windows
+native-QPA oracle; Linux and macOS CI exclude that baseline suite and run
+software renderer conformance (see `docs/limitations.md`).
 
 ### Threading
 
@@ -103,9 +116,16 @@ Scintilla is queried while building `Render_frame`, on the GUI thread. The
 scene-graph renderer consumes `Render_snapshot` and `Render_frame` as captured
 data during `updatePaintNode()`.
 
-Renderer code must not call Scintilla, send Scintilla messages, mutate document
-state, or depend on mutable editor pointers. If a renderer needs more data,
-capture that data into `Render_frame` or `Render_snapshot` first.
+Renderer code must not send Scintilla messages, query or mutate editor/document
+state, or depend on GUI-owned Scintilla pointers. If a renderer needs more
+data, capture it into `Render_frame` or `Render_snapshot` first.
+
+Value-based drawing helpers are permitted: indicator and marker nodes construct
+render-local `Indicator`, `LineMarker`, and `Surface_impl` objects, then draw
+into `QImage` textures using captured primitive fields. Character-marker fonts
+are created on the render thread from captured `QFont` values. The shape cache
+must include all visible shape fields, device-pixel ratio, and raster alignment;
+it must not retain editor objects or GUI-owned Scintilla fonts.
 
 ## Invalidation Contract
 
@@ -117,7 +137,7 @@ measured and understood.
 | --- | --- | --- |
 | `snapshot_dirty` | A polish/update pass must rebuild or refresh the render snapshot before rendering. | Any path schedules visible scene-graph work. |
 | `static_content_dirty` | Captured static visual content cannot be reused without recapture. | Document mutations, style changes, item resize, margin changes, wrapping/layout changes, representation changes, scroll-position changes, annotations, indicators, markers, IME text changes. |
-| `overlay_content_dirty` | Overlay state needs refresh even if static content can be reused. | Caret blink, focus/caret visibility changes, selection/caret rectangle changes, input-method cursor/anchor updates. |
+| `overlay_content_dirty` | Overlay geometry/state needs capture even if static content can be reused. | Focus/caret activity changes, selection/caret rectangle changes, input-method cursor/anchor updates. |
 | `style_sync_needed` | Scintilla styles need syncing into the Qt render snapshot before capture. | Style, font, zoom, element colour, marker/indicator style, or default-style changes. |
 | `scrolling_update` | The change was caused by vertical scrolling. | `SCI_SETFIRSTVISIBLELINE`, public vertical scroll calls, and wheel scrolling routed through vertical scroll. |
 
@@ -127,8 +147,7 @@ Common cases:
   static content dirty, property sync, and scene-graph update.
 - Style/font/zoom change: static content dirty and style sync needed if
   captured geometry or glyph appearance changes.
-- Caret blink only: overlay dirty and snapshot dirty; do not recapture static
-  content.
+- Caret blink only: snapshot dirty; show or hide valid cached caret geometry.
 - Vertical scroll: scrolling update and static dirty; recapture static content.
 - Horizontal scroll: static content dirty; do not use vertical scroll
   translation.
@@ -183,6 +202,17 @@ When adding or changing a classification:
    is read-only-classified to avoid recursive full resync.
 5. Run the dispatch-table test and CI-compatible correctness subset.
 
+## GUI Notifications And Property Synchronization
+
+Pending `SCN_UPDATEUI` flags are coalesced by GUI-thread idle work and drained
+before snapshot preparation. Clear delivered flags before notifying observers
+so edits or selection changes made by a synchronous observer remain pending for
+a later delivery.
+
+`painted()` is emitted on the GUI thread after the prepared snapshot and frame
+are ready for presentation, including a snapshot that only changes caret
+visibility. Its completion point is snapshot preparation.
+
 ## Scene-Graph Rules
 
 `updatePaintNode()` is a renderer boundary, not an editor boundary.
@@ -190,10 +220,12 @@ When adding or changing a classification:
 - It may consume `Render_snapshot` and `Render_frame`.
 - It may create, reuse, detach, and delete `QSGNode` objects according to Qt
   Quick scene-graph rules.
-- It must not call back into Scintilla or query QML-facing properties through
-  `send()`.
+- It must not call the mutable Scintilla editor or query QML-facing properties
+  through `send()`.
 - It must not mutate document, selection, style, IME, or platform-window state.
 - Any data needed for rendering must be captured before the renderer runs.
+- Indicator and marker drawing may use the render-local value objects described
+  in the threading contract above.
 
 Scene-graph changes are performance-sensitive. Before reducing or increasing
 node counts, changing node cache keys, or changing update scheduling, capture a
@@ -284,8 +316,8 @@ Use fresh build directories for validation work.
 | Change area | Required checks |
 | --- | --- |
 | Dispatch table, `send()`, `sends()`, direct callbacks | `scintillaquick_dispatch_table_test`, smoke tests covering property sync and render invalidation, CI-compatible subset. |
-| Render-frame capture or translation | `scintillaquick_frame_validation_test`, relevant smoke tests, local Windows visual-baseline run for visible changes. |
-| Scene-graph renderer, text cache, node pools, update scheduling | Frame validation, local Windows visual-baseline run, benchmark baseline and post-change comparison. |
+| Render-frame capture or translation | `scintillaquick_frame_validation_test`, relevant smoke tests, renderer conformance and local Windows visual-baseline run for visible changes. |
+| Scene-graph renderer, text cache, node pools, update scheduling | Frame validation, renderer conformance, local Windows visual-baseline run, benchmark baseline and post-change comparison. |
 | IME/composition | Focused smoke tests for malformed attributes, commit/cancel, read-only/protected behavior; manual OS IME check when practical. |
 | Platform windows, list boxes, call tips, surfaces, fonts, menus | Lifecycle smoke tests, stale deletion tests where feasible, CI-compatible subset. |
 | Mouse, wheel, keyboard, focus, selection | Smoke tests that assert event acceptance, focus state, selection/caret state, and repaint scheduling. |
@@ -295,6 +327,13 @@ Use fresh build directories for validation work.
 A visual-baseline run means `scintillaquick_visual_regression_test` on Windows
 under the native `windows` platform plugin. Only `ci-windows.yml` runs it; see
 `docs/limitations.md` for why the baselines only reproduce there.
+
+Renderer conformance uses `scintillaquick_renderer_software_1_test` and
+`scintillaquick_renderer_software_1_25_test` on every supported platform, plus
+`scintillaquick_renderer_rhi_1_test` and
+`scintillaquick_renderer_rhi_1_25_test` on Windows. These compare scene-graph
+output with direct drawing of the same captured values through Scintilla's
+shape algorithms and validate the requested backend and device-pixel ratio.
 
 Performance-sensitive changes need before/after measurement on the same machine.
 Run each selected benchmark scenario several times, record distribution rather

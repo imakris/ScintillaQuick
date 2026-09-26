@@ -39,7 +39,6 @@
 #include <QList>
 
 #include <algorithm>
-#include <array>
 #include <exception>
 #include <limits>
 #include <string_view>
@@ -384,11 +383,6 @@ QString text_for_visual_line(const Visual_line_frame& line)
     return text;
 }
 
-QColor color_from_scintilla(sptr_t value)
-{
-    return QColorFromColourRGBA(ColourRGBA::FromIpRGB(value));
-}
-
 // Qt delivers key text as UTF-16. A supplementary-plane code point appears
 // as a surrogate pair whose first QChar is a high surrogate, which isPrint()
 // rejects; judge printability by the first full code point instead.
@@ -404,61 +398,6 @@ bool starts_with_printable_character(const QString& text)
     return first.isPrint();
 }
 
-struct Style_attributes
-{
-    QColor foreground;
-    QColor background;
-    QFont font;
-};
-
-using Style_cache = std::array<std::optional<Style_attributes>, STYLE_MAX + 1>;
-
-QFont font_for_style(const ScintillaQuick_item* item, int style)
-{
-    const sptr_t font_name_length = item->send(SCI_STYLEGETFONT, style);
-    QByteArray font_name(static_cast<qsizetype>(font_name_length) + 1, '\0');
-    item->send(
-        SCI_STYLEGETFONT,
-        static_cast<uptr_t>(style),
-        reinterpret_cast<sptr_t>(font_name.data()));
-
-    QFont font;
-    font.setFamily(QString::fromUtf8(font_name.constData(), static_cast<qsizetype>(font_name_length)));
-
-    const sptr_t size_fractional = item->send(SCI_STYLEGETSIZEFRACTIONAL, style);
-    if (size_fractional > 0) {
-        font.setPointSizeF(static_cast<qreal>(size_fractional) / SC_FONT_SIZE_MULTIPLIER);
-    }
-    else {
-        font.setPointSize(static_cast<int>(item->send(SCI_STYLEGETSIZE, style)));
-    }
-
-    const int weight = static_cast<int>(item->send(SCI_STYLEGETWEIGHT, style));
-    if (weight > 0) {
-        font.setWeight(static_cast<QFont::Weight>(weight));
-    }
-    font.setItalic(item->send(SCI_STYLEGETITALIC, style) != 0);
-    font.setUnderline(item->send(SCI_STYLEGETUNDERLINE, style) != 0);
-    return font;
-}
-
-const Style_attributes& style_attributes_for(
-    const ScintillaQuick_item* item,
-    Style_cache& Style_cache,
-    int style)
-{
-    const int bounded_style = std::clamp(style, 0, STYLE_MAX);
-    std::optional<Style_attributes>& cached_attributes = Style_cache[bounded_style];
-    if (!cached_attributes.has_value()) {
-        Style_attributes attributes;
-        attributes.foreground = color_from_scintilla(item->send(SCI_STYLEGETFORE, bounded_style));
-        attributes.background = color_from_scintilla(item->send(SCI_STYLEGETBACK, bounded_style));
-        attributes.font       = font_for_style(item, bounded_style);
-        cached_attributes     = std::move(attributes);
-    }
-    return *cached_attributes;
-}
-
 int total_margin_width(const ScintillaQuick_item* item)
 {
     int total = 0;
@@ -468,24 +407,28 @@ int total_margin_width(const ScintillaQuick_item* item)
     return total;
 }
 
-QColor margin_background_color_for(
-    const ScintillaQuick_item* item,
-    Style_cache& Style_cache,
-    int margin)
+Gutter_band margin_background_for(const ViewStyle& view_style, int margin, QRectF rect, int pattern_phase)
 {
-    const int margin_type = static_cast<int>(item->send(SCI_GETMARGINTYPEN, margin));
-    const int margin_mask = static_cast<int>(item->send(SCI_GETMARGINMASKN, margin));
-
-    if ((margin_mask & SC_MASK_FOLDERS) != 0) {
-        return QColorFromColourRGBA(Platform::ChromeHighlight());
+    const MarginStyle& margin_style = view_style.ms[margin];
+    Gutter_band band;
+    band.rect = rect;
+    if (margin_style.style != MarginType::Number && margin_style.ShowsFolding()) {
+        const ColourRGBA base = view_style.selbarlight == ColourRGBA(0xff, 0xff, 0xff)
+            ? view_style.selbar : view_style.selbarlight;
+        band.color = QColorFromColourRGBA(view_style.foldmarginColour.value_or(base));
+        band.pattern_color = QColorFromColourRGBA(
+            view_style.foldmarginHighlightColour.value_or(view_style.selbarlight));
+        band.pattern_phase = pattern_phase;
+        return band;
     }
 
-    switch (margin_type) {
-        case SC_MARGIN_BACK:   return style_attributes_for(item, Style_cache, STYLE_DEFAULT).background;
-        case SC_MARGIN_FORE:   return style_attributes_for(item, Style_cache, STYLE_DEFAULT).foreground;
-        case SC_MARGIN_COLOUR: return color_from_scintilla(item->send(SCI_GETMARGINBACKN, margin));
-        default:               return style_attributes_for(item, Style_cache, STYLE_LINENUMBER).background;
+    switch (margin_style.style) {
+        case MarginType::Back:   band.color = QColorFromColourRGBA(view_style.styles[StyleDefault].back); break;
+        case MarginType::Fore:   band.color = QColorFromColourRGBA(view_style.styles[StyleDefault].fore); break;
+        case MarginType::Colour: band.color = QColorFromColourRGBA(margin_style.back); break;
+        default:                band.color = QColorFromColourRGBA(view_style.styles[StyleLineNumber].back); break;
     }
+    return band;
 }
 
 }
@@ -2405,7 +2348,11 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
 
         case Qt::ImFont: {
             const sptr_t style = send(SCI_GETSTYLEAT, pos);
-            return font_for_style(this, static_cast<int>(style));
+            m_core->RefreshStyleData();
+            const Style& caret_style = m_core->vs.styles[style];
+            QFont font = realized_font(caret_style.font.get());
+            font.setUnderline(caret_style.underline);
+            return font;
         }
 
         case Qt::ImCursorPosition: {
@@ -2547,9 +2494,8 @@ void ScintillaQuick_item::build_render_snapshot()
         snapshot = m_render_data->snapshot;
     }
     else {
-        Style_cache cache;
         snapshot.item_size  = QSizeF(width(), height());
-        snapshot.background = style_attributes_for(this, cache, STYLE_DEFAULT).background;
+        snapshot.background = QColorFromColourRGBA(m_core->vs.styles[StyleDefault].back);
         snapshot.gutter_bands.reserve(k_margin_count);
         qreal margin_left = 0.0;
         for (int margin = 0; margin < k_margin_count; ++margin) {
@@ -2558,10 +2504,10 @@ void ScintillaQuick_item::build_render_snapshot()
                 continue;
             }
 
-            snapshot.gutter_bands.push_back({
+            snapshot.gutter_bands.push_back(margin_background_for(
+                m_core->vs, margin,
                 QRectF(margin_left, 0.0, static_cast<qreal>(margin_width), height()),
-                margin_background_color_for(this, cache, margin),
-            });
+                static_cast<int>(m_core->GetVisibleOriginInMain().y) & 1));
             margin_left += margin_width;
         }
     }

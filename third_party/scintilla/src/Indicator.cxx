@@ -209,16 +209,19 @@ void Indicator::Draw(Surface *surface, const PRectangle &rc, const PRectangle &r
 			// Cap width at 4000 to avoid large allocations when mistakes made
 			const int width = std::min(static_cast<int>(rcBox.Width()), 4000);
 			const int height = static_cast<int>(rcBox.Height());
+			if (width <= 0 || height <= 0) {
+				break;
+			}
 			RGBAImage image(width, height, 1.0, nullptr);
 			// Draw horizontal lines top and bottom
 			for (int x=0; x<width; x++) {
-				for (int y = 0; y< height; y += height - 1) {
+				for (const int y : {0, height - 1}) {
 					image.SetPixel(x, y, ColourRGBA(sacDraw.fore, ((x + y) % 2) ? outlineAlpha : fillAlpha));
 				}
 			}
 			// Draw vertical lines left and right
 			for (int y = 1; y<height; y++) {
-				for (int x=0; x<width; x += width-1) {
+				for (const int x : {0, width - 1}) {
 					image.SetPixel(x, y, ColourRGBA(sacDraw.fore, ((x + y) % 2) ? outlineAlpha : fillAlpha));
 				}
 			}

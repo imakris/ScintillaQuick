@@ -108,7 +108,6 @@ static QFont::StyleStrategy choose_strategy(FontQuality eff)
 class Font_and_character_set : public Font
 {
 public:
-    CharacterSet m_character_set = CharacterSet::Ansi;
     std::unique_ptr<QFont> m_font;
 
     // Lazy per-font advance cache used by the ASCII fast path in
@@ -132,7 +131,7 @@ public:
     mutable qreal m_cached_font_dpi = 0.0;
     mutable qreal m_cached_device_pixel_ratio = 0.0;
 
-    explicit Font_and_character_set(const FontParameters& fp) : m_character_set(fp.characterSet)
+    explicit Font_and_character_set(const FontParameters& fp)
     {
         m_font = std::make_unique<QFont>();
         m_font->setStyleStrategy(choose_strategy(fp.extraFontFlag));
@@ -143,6 +142,12 @@ public:
             m_font->setWeight(static_cast<QFont::Weight>(std::clamp(weight, 1, 1000)));
         }
         m_font->setItalic(fp.italic);
+    }
+
+    explicit Font_and_character_set(const QFont& font)
+    :
+        m_font(std::make_unique<QFont>(font))
+    {
     }
 
     bool matches_advance_metrics(const QPaintDevice* device) const
@@ -294,6 +299,18 @@ const QScreen* screen_for_log_pixels() noexcept
 }
 
 } // namespace
+
+const QFont& realized_font(const Font* font)
+{
+    const QFont* qt_font = font_pointer(font);
+    Q_ASSERT(qt_font);
+    return *qt_font;
+}
+
+std::shared_ptr<Font> font_from_qfont(const QFont& font)
+{
+    return std::make_shared<Font_and_character_set>(font);
+}
 
 std::shared_ptr<Font> Font::Allocate(const FontParameters& fp)
 {

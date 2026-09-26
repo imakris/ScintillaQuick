@@ -15,10 +15,10 @@ so that consumers can find them without crawling history.
   Do not depend on RTL or mixed-direction rendering without adding
   your own visual tests.
 
-- **Indent guides and some marker styles.** `ScintillaQuick` renders
-  markers and indent guides through its own scene-graph path rather
-  than through Scintilla's rasterised reference output. The visual
-  shape matches Scintilla closely but is not pixel-identical.
+- **Indent guides.** `ScintillaQuick` draws indent guides as translucent
+  scene-graph dots. Their spacing and opacity differ from Scintilla's
+  rasterised indent-guide output. Indicator and margin-marker shapes use
+  Scintilla's drawing algorithms with captured values.
 
 ## Input method / IME
 
@@ -51,6 +51,15 @@ so that consumers can find them without crawling history.
   `offscreen`. Gating another platform needs per-platform baselines that
   a human has inspected; regenerating them from a run only records
   whatever that renderer happened to produce.
+
+- **Renderer conformance has a separate reference.**
+  `scintillaquick_renderer_conformance_test` compares scene-graph output with
+  direct drawing through Scintilla's indicator and marker algorithms, including
+  clipping, fill/outline alpha, and whole-line indicator geometry. CTest runs
+  the software scene graph at device-pixel ratios 1 and 1.25 on all supported
+  platforms and also runs Direct3D 11 through RHI on Windows at both ratios.
+  These checks validate the selected backend and scale; they do not extend the
+  stored text-image baselines to other renderers or platforms.
 
 - **The benchmark target is opt-in.**
   Build it with `-DSCINTILLAQUICK_BUILD_BENCHMARKS=ON`. Treat benchmark

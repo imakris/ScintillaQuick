@@ -471,6 +471,8 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 						capturedMarker.top = static_cast<float>(rcMarker.top);
 						capturedMarker.right = static_cast<float>(rcMarker.right);
 						capturedMarker.bottom = static_cast<float>(rcMarker.bottom);
+						capturedMarker.stroke_width = vs.markers[markBit].strokeWidth;
+						capturedMarker.margin_style = static_cast<int>(marginStyle.style);
 						capturedMarker.marker_number = markBit;
 						capturedMarker.marker_type = static_cast<int>(vs.markers[markBit].markType);
 						capturedMarker.fore_rgba = static_cast<std::uint32_t>(vs.markers[markBit].fore.AsInteger());
@@ -498,6 +500,8 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 						capturedMarker.top = static_cast<float>(rcMarker.top);
 						capturedMarker.right = static_cast<float>(rcMarker.right);
 						capturedMarker.bottom = static_cast<float>(rcMarker.bottom);
+						capturedMarker.stroke_width = vs.markers[markBit].strokeWidth;
+						capturedMarker.margin_style = static_cast<int>(marginStyle.style);
 						capturedMarker.marker_number = markBit;
 						capturedMarker.marker_type = static_cast<int>(vs.markers[markBit].markType);
 						capturedMarker.fore_rgba = static_cast<std::uint32_t>(vs.markers[markBit].fore.AsInteger());

@@ -474,8 +474,8 @@ bool check_runs_x_ordered(const Render_frame& frame, const char* id)
     bool ok = true;
     for (const auto& vl : frame.visual_lines) {
         for (size_t i = 0; i + 1 < vl.text_runs.size(); ++i) {
-            if (vl.text_runs[i].direction == Text_direction::left_to_right &&
-                vl.text_runs[i + 1].direction == Text_direction::left_to_right)
+            if (vl.text_runs[i].direction == Capture_text_direction::left_to_right &&
+                vl.text_runs[i + 1].direction == Capture_text_direction::left_to_right)
             {
                 ok &= check(vl.text_runs[i + 1].position.x() >= vl.text_runs[i].position.x() - 0.1, id,
                     "LTR text runs not in left-to-right X order");
@@ -642,6 +642,30 @@ static bool test_plain_ascii_long_wrap()
     ok &= check_visual_lines_no_vertical_overlap(frame, id);
     ok &= check_runs_positive_width(frame, id);
     ok &= check_sublines_ordered_by_y(frame, id);
+    return ok;
+}
+
+static bool test_realized_font_is_shared_with_capture_and_ime()
+{
+    const char* id = "realized_font_is_shared_with_capture_and_ime";
+    Fixture_editor fixture;
+    fixture.set_text("styled font");
+    fixture.editor.send(SCI_STYLESETSIZEFRACTIONAL, 0, 1200);
+    fixture.editor.send(SCI_STYLESETUNDERLINE, 0, 1);
+    fixture.editor.send(SCI_SETZOOM, 4);
+    fixture.editor.send(SCI_SETFONTQUALITY, SC_EFF_QUALITY_NON_ANTIALIASED);
+    const auto frame = fixture.capture();
+    const auto* run = first_non_empty_run(find_visual_line(frame, 0));
+    bool ok = check(run != nullptr, id, "styled text is captured");
+    if (run) {
+        const QFont input_font = ScintillaQuick_validation_access::input_method_font(fixture.editor);
+        ok &= check(run->font.pointSizeF() == input_font.pointSizeF(), id,
+            "IME uses the same zoomed font size as rendering");
+        ok &= check((run->font.styleStrategy() & QFont::NoAntialias) != 0, id,
+            "capture uses the requested measurement font quality");
+        ok &= check(input_font.underline() && !run->font.underline(), id,
+            "IME receives underline while capture leaves it to the decoration primitive");
+    }
     return ok;
 }
 
@@ -2251,10 +2275,10 @@ static bool test_whitespace_visible()
         ok &= check(ws.rect.width()  > 0, id, "whitespace mark rect width must be > 0");
         ok &= check(ws.rect.height() > 0, id, "whitespace mark rect height must be > 0");
         ok &= check(ws.color.isValid() && ws.color.alpha() > 0, id, "whitespace mark color must be valid and visible");
-        if (ws.kind == Whitespace_mark_kind_t::space_dot) {
+        if (ws.kind == Whitespace_mark_kind::space_dot) {
             has_dot = true;
         }
-        if (ws.kind == Whitespace_mark_kind_t::tab_arrow) {
+        if (ws.kind == Whitespace_mark_kind::tab_arrow) {
             has_tab = true;
         }
     }
@@ -2391,7 +2415,7 @@ static bool test_style_underline()
     if (!frame.decoration_underlines.empty()) {
         const Decoration_underline_primitive& ul = frame.decoration_underlines[0];
         ok &= check(ul.rect.width() > 0, id, "underline rect width must be > 0");
-        ok &= check(ul.kind == Decoration_kind_t::style_underline, id, "underline kind must be style_underline");
+        ok &= check(ul.kind == Decoration_kind::style_underline, id, "underline kind must be style_underline");
         ok &= check(ul.color.isValid(), id, "underline color must be valid");
     }
 
@@ -2579,7 +2603,7 @@ static bool test_ltr_direction_field()
         const Visual_line_frame& line = frame.visual_lines[0];
         ok &= check(!line.text_runs.empty(), id, "text must produce text runs");
         for (const Text_run& run : line.text_runs) {
-            ok &= check(run.direction == Text_direction::left_to_right, id,
+            ok &= check(run.direction == Capture_text_direction::left_to_right, id,
                 "Latin text runs must have left_to_right direction");
         }
     }
@@ -2951,6 +2975,7 @@ int main(int argc, char** argv)
                                                     test_scrolled_full_capture_matches_direct_secondary_geometry},
         {"edit_savepoint_one_line_scroll_matches_fresh_body_text",
                                                     test_edit_savepoint_one_line_scroll_matches_fresh_body_text},
+        {"realized_font_is_shared_with_capture_and_ime", test_realized_font_is_shared_with_capture_and_ime},
         {"mixed_styles_wrap",                        test_mixed_styles_wrap},
         {"tab_layout_default",                       test_tab_layout_default},
         {"tab_layout_nondefault",                    test_tab_layout_nondefault},

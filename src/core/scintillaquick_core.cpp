@@ -54,30 +54,6 @@ QColor qcolor_from_rgba(T rgba)
     return QColorFromColourRGBA(ColourRGBA(static_cast<int>(rgba)));
 }
 
-Text_direction direction_from_capture(Capture_text_direction direction)
-{
-    switch (direction) {
-        case Capture_text_direction::left_to_right: return Text_direction::left_to_right;
-        case Capture_text_direction::right_to_left: return Text_direction::right_to_left;
-        case Capture_text_direction::mixed:         return Text_direction::mixed;
-        default:                                    return Text_direction::left_to_right;
-    }
-}
-
-Whitespace_mark_kind_t whitespace_kind_from_capture(Whitespace_mark_kind kind)
-{
-    return kind == Whitespace_mark_kind::tab_arrow
-        ? Whitespace_mark_kind_t::tab_arrow
-        : Whitespace_mark_kind_t::space_dot;
-}
-
-Decoration_kind_t decoration_kind_from_capture(Decoration_kind kind)
-{
-    return kind == Decoration_kind::hotspot
-        ? Decoration_kind_t::hotspot
-        : Decoration_kind_t::style_underline;
-}
-
 // Sole consumer of Scintilla's capture callbacks. Builds a Render_frame
 // directly with Qt types and per-style attributes resolved from the core's
 // view-style cache, avoiding an intermediate Captured_frame translation pass.
@@ -137,16 +113,27 @@ public:
         text_run.blob_inner          = qcolor_from_rgba(run.blob_inner_rgba);
         text_run.font                = attributes.font;
         text_run.style_id            = run.style_id;
-        text_run.direction           = direction_from_capture(run.direction);
+        text_run.direction           = run.direction;
         text_run.is_represented_text = run.is_represented_text;
         text_run.represented_as_blob = run.represented_as_blob;
 
         m_current_visual_line->text_runs.push_back(std::move(text_run));
     }
 
+    void add_background_rect(const Captured_background_rect& rect) override
+    {
+        Background_primitive primitive;
+        primitive.marker_underline = rect.marker_underline;
+        primitive.rect = rect_from_capture(rect.left, rect.top, rect.right, rect.bottom);
+        primitive.color = qcolor_from_rgba(rect.rgba);
+        primitive.layer = (Layer)rect.layer;
+        m_frame.background_primitives.push_back(std::move(primitive));
+    }
+
     void add_selection_rect(const Captured_selection_rect& rect) override
     {
         Selection_primitive selection;
+        selection.layer = (Layer)rect.layer;
         selection.rect    = rect_from_capture(rect.left, rect.top, rect.right, rect.bottom);
         selection.color   = qcolor_from_rgba(rect.rgba);
         selection.is_main = rect.is_main;
@@ -190,6 +177,7 @@ public:
             highlight.left, highlight.top, highlight.right, highlight.bottom);
         primitive.color  = qcolor_from_rgba(highlight.rgba);
         primitive.framed = highlight.framed;
+        primitive.layer = (Layer)highlight.layer;
         m_frame.current_line_primitives.push_back(std::move(primitive));
     }
 
@@ -205,6 +193,9 @@ public:
         primitive.background_selected = qcolor_from_rgba(marker.back_rgba_selected);
         primitive.document_line       = marker.document_line;
         primitive.fold_part           = marker.fold_part;
+        primitive.stroke_width        = marker.stroke_width;
+        primitive.margin_style        = marker.margin_style;
+        primitive.font                = attributes_for(STYLE_LINENUMBER).font;
         m_frame.marker_primitives.push_back(std::move(primitive));
     }
 
@@ -290,7 +281,7 @@ public:
         primitive.rect  = rect_from_capture(mark.left, mark.top, mark.right, mark.bottom);
         primitive.mid_y = mark.mid_y;
         primitive.color = qcolor_from_rgba(mark.rgba);
-        primitive.kind  = whitespace_kind_from_capture(mark.kind);
+        primitive.kind  = mark.kind;
         m_frame.whitespace_marks.push_back(std::move(primitive));
     }
 
@@ -299,7 +290,7 @@ public:
         Decoration_underline_primitive primitive;
         primitive.rect  = rect_from_capture(underline.left, underline.top, underline.right, underline.bottom);
         primitive.color = qcolor_from_rgba(underline.rgba);
-        primitive.kind  = decoration_kind_from_capture(underline.kind);
+        primitive.kind  = underline.kind;
         m_frame.decoration_underlines.push_back(std::move(primitive));
     }
 
@@ -403,28 +394,11 @@ ScintillaQuick_core::Style_attributes ScintillaQuick_core::style_attributes_for(
     Style_attributes attributes;
     const int bounded_style      = std::clamp(style, 0, STYLE_MAX);
     const Style& scintilla_style = vs.styles[static_cast<size_t>(bounded_style)];
-    const Style& default_style   = vs.styles[StyleDefault];
 
     attributes.foreground = QColorFromColourRGBA(scintilla_style.fore);
     attributes.background = QColorFromColourRGBA(scintilla_style.back);
 
-    const char* font_name =
-        scintilla_style.fontName ? scintilla_style.fontName : default_style.fontName;
-    if (font_name) {
-        attributes.font.setFamily(QString::fromUtf8(font_name));
-    }
-    const int size_zoomed =
-        scintilla_style.sizeZoomed > 0 ? scintilla_style.sizeZoomed : default_style.sizeZoomed;
-    if (size_zoomed > 0) {
-        attributes.font.setPointSizeF(static_cast<qreal>(size_zoomed) / SC_FONT_SIZE_MULTIPLIER);
-    }
-    const int weight = static_cast<int>(scintilla_style.weight) > 0
-        ? static_cast<int>(scintilla_style.weight)
-        : static_cast<int>(default_style.weight);
-    if (weight > 0) {
-        attributes.font.setWeight(static_cast<QFont::Weight>(weight));
-    }
-    attributes.font.setItalic(scintilla_style.italic);
+    attributes.font = realized_font(scintilla_style.font.get());
     // Underlines are rendered from Scintilla's captured decoration primitives.
     attributes.font.setUnderline(false);
 

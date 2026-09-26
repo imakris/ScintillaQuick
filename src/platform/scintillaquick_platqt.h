@@ -31,6 +31,7 @@
 #include <QPainter>
 #include <QHash>
 
+class QFont;
 class QQuickItem;
 
 namespace Scintilla::Internal
@@ -154,6 +155,10 @@ void register_owned_window(
     QQuickItem* item,
     Platform_owned_window_kind kind) noexcept;
 QQuickItem* resolve_window_item(WindowID wid) noexcept;
+
+/** The supplied Scintilla font must already be realized by the Qt platform. */
+const QFont& realized_font(const Font* font);
+std::shared_ptr<Font> font_from_qfont(const QFont& font);
 
 inline Point PointFromQPoint(QPoint qp)
 {

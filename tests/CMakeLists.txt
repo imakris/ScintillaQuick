@@ -214,6 +214,31 @@ scintillaquick_register_validation_test(
     scintillaquick_frame_validation_test
     ";QT_FONT_DPI=96;QT_SCALE_FACTOR=1;QT_ENABLE_HIGHDPI_SCALING=0")
 
+# Compare scene-graph output with Scintilla's drawing contract, independently
+# of the human-reviewed visual baselines. Native Windows also exercises RHI.
+scintillaquick_add_private_quick_test_target(
+    scintillaquick_renderer_conformance_test
+    renderer_conformance/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/platform
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/render)
+
+set(scintillaquick_conformance_backends software)
+if(WIN32)
+    list(APPEND scintillaquick_conformance_backends rhi)
+endif()
+foreach(backend IN LISTS scintillaquick_conformance_backends)
+    foreach(dpr IN ITEMS 1 1.25)
+        string(REPLACE "." "_" dpr_name "${dpr}")
+        set(test_name scintillaquick_renderer_${backend}_${dpr_name}_test)
+        add_test(NAME ${test_name}
+            COMMAND scintillaquick_renderer_conformance_test ${backend} ${dpr})
+        set_tests_properties(${test_name} PROPERTIES TIMEOUT 60)
+        scintillaquick_set_test_environment(${test_name}
+            scintillaquick_renderer_conformance_test
+            ";QT_FONT_DPI=96;QSG_RHI_PREFER_SOFTWARE_RENDERER=1")
+    endforeach()
+endforeach()
+
 # --- Visual regression tests ---
 
 set(VR_BASELINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/frame_visual_regression/baselines")

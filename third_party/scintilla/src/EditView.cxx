@@ -1063,6 +1063,22 @@ std::optional<ColourRGBA> SelectionForeground(const EditModel &model, const View
 
 }
 
+static void CaptureBackground(Render_collector *collector, PRectangle rect, ColourRGBA colour,
+	Layer layer = Layer::Base, bool markerUnderline = false) {
+	if (!collector || rect.Empty()) {
+		return;
+	}
+	Captured_background_rect captured;
+	captured.marker_underline = markerUnderline;
+	captured.left = static_cast<float>(rect.left);
+	captured.top = static_cast<float>(rect.top);
+	captured.right = static_cast<float>(rect.right);
+	captured.bottom = static_cast<float>(rect.bottom);
+	captured.rgba = colour.AsInteger();
+	captured.layer = static_cast<int>(layer);
+	collector->add_background_rect(captured);
+}
+
 static ColourRGBA TextBackground(const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
 	std::optional<ColourRGBA> background, InSelection inSelection, bool inHotspot, int styleMain, Sci::Position i) {
 	if (inSelection && (vsDraw.selection.layer == Layer::Base)) {
@@ -1187,6 +1203,7 @@ void EditView::DrawEOL(Surface *surface, const EditModel &model, const ViewStyle
 	auto addSelectionRect = [&](const PRectangle &rcSelection, ColourRGBA fillColour, bool isMain) {
 		if (collector) {
 			Captured_selection_rect capturedSelection;
+			capturedSelection.layer = static_cast<int>(vsDraw.selection.layer);
 			capturedSelection.left = static_cast<float>(rcSelection.left);
 			capturedSelection.top = static_cast<float>(rcSelection.top);
 			capturedSelection.right = static_cast<float>(rcSelection.right);
@@ -1202,6 +1219,7 @@ void EditView::DrawEOL(Surface *surface, const EditModel &model, const ViewStyle
 		rcSegment.left = xEol + xStart;
 		rcSegment.right = xEol + xStart + virtualSpace;
 		const ColourRGBA backgroundFill = background.value_or(vsDraw.styles[ll->styles[ll->numCharsInLine]].back);
+		CaptureBackground(collector, rcSegment, backgroundFill);
 		surface->FillRectangleAligned(rcSegment, backgroundFill);
 		if (vsDraw.selection.visible && (vsDraw.selection.layer == Layer::Base)) {
 			const SelectionSegment virtualSpaceRange(SelectionPosition(model.pdoc->LineEnd(line)),
@@ -1270,9 +1288,11 @@ void EditView::DrawEOL(Surface *surface, const EditModel &model, const ViewStyle
 					addSelectionRect(rcSegment, selectionBack.Opaque(), selectionIsMain);
 					surface->FillRectangleAligned(rcSegment, Fill(selectionBack.Opaque()));
 				} else {
+					CaptureBackground(collector, rcSegment, textBack);
 					surface->FillRectangleAligned(rcSegment, Fill(textBack));
 				}
 			} else {
+				CaptureBackground(collector, rcSegment, textBack);
 				surface->FillRectangleAligned(rcSegment, Fill(textBack));
 			}
 			const bool drawEOLSelection = eolInSelection && (line < model.pdoc->LinesTotal() - 1);
@@ -1305,12 +1325,16 @@ void EditView::DrawEOL(Surface *surface, const EditModel &model, const ViewStyle
 		surface->FillRectangleAligned(rcSegment, Fill(selectionBack.Opaque()));
 	} else {
 		if (background) {
+			CaptureBackground(collector, rcSegment, *background);
 			surface->FillRectangleAligned(rcSegment, Fill(*background));
 		} else if (line < model.pdoc->LinesTotal() - 1) {
+			CaptureBackground(collector, rcSegment, vsDraw.styles[ll->styles[ll->numCharsInLine]].back);
 			surface->FillRectangleAligned(rcSegment, Fill(vsDraw.styles[ll->styles[ll->numCharsInLine]].back));
 		} else if (vsDraw.styles[ll->styles[ll->numCharsInLine]].eolFilled) {
+			CaptureBackground(collector, rcSegment, vsDraw.styles[ll->styles[ll->numCharsInLine]].back);
 			surface->FillRectangleAligned(rcSegment, Fill(vsDraw.styles[ll->styles[ll->numCharsInLine]].back));
 		} else {
+			CaptureBackground(collector, rcSegment, vsDraw.styles[StyleDefault].back);
 			surface->FillRectangleAligned(rcSegment, Fill(vsDraw.styles[StyleDefault].back));
 		}
 		if (eolInSelection && (line < model.pdoc->LinesTotal() - 1) && (vsDraw.selection.layer != Layer::Base)) {
@@ -1328,7 +1352,7 @@ void EditView::DrawEOL(Surface *surface, const EditModel &model, const ViewStyle
 	const bool fillRemainder = (!lastSubLine || (!model.GetFoldDisplayText(line) && !drawEOLAnnotationStyledText));
 	if (fillRemainder) {
 		// Fill the remainder of the line
-		FillLineRemainder(surface, model, vsDraw, ll, line, rcSegment, subLine);
+		FillLineRemainder(surface, model, vsDraw, ll, line, rcSegment, subLine, collector);
 	}
 
 	bool drawWrapMarkEnd = false;
@@ -1413,27 +1437,11 @@ static void DrawIndicator(int indicNum, Sci::Position startPos, Sci::Position en
 			if (state == Indicator::State::hover) {
 				sacDraw = indicator.sacHover;
 			}
-			// Capture the indicator bounding rect for all styles.
-			// For Plain style, use the precise underline rect.
-			// For all others, use the full indicator area.
-			PRectangle rcCapture;
-			if (sacDraw.style == IndicatorStyle::Plain) {
-				const int pixelDivisions = surface->PixelDivisions();
-				const PRectangle rcAligned(PixelAlignOutside(rc, pixelDivisions));
-				const XYPOSITION ymid = PixelAlign(rc.Centre().y, pixelDivisions);
-				rcCapture = PRectangle(
-					rcAligned.left,
-					ymid,
-					rcAligned.right,
-					ymid + std::round(indicator.strokeWidth));
-			} else {
-				rcCapture = rc;
-			}
 			Captured_indicator capturedInd;
-			capturedInd.left = static_cast<float>(rcCapture.left);
-			capturedInd.top = static_cast<float>(rcCapture.top);
-			capturedInd.right = static_cast<float>(rcCapture.right);
-			capturedInd.bottom = static_cast<float>(rcCapture.bottom);
+			capturedInd.left = static_cast<float>(rc.left);
+			capturedInd.top = static_cast<float>(rc.top);
+			capturedInd.right = static_cast<float>(rc.right);
+			capturedInd.bottom = static_cast<float>(rc.bottom);
 			capturedInd.line_top = static_cast<float>(rcLine.top);
 			capturedInd.line_bottom = static_cast<float>(rcLine.bottom);
 			capturedInd.character_left = static_cast<float>(rcFirstCharacter.left);
@@ -1612,7 +1620,7 @@ void EditView::DrawFoldDisplayText(Surface *surface, const EditModel &model, con
 		if (rcRemainder.left < rcLine.left)
 			rcRemainder.left = rcLine.left;
 		rcRemainder.right = rcLine.right;
-		FillLineRemainder(surface, model, vsDraw, ll, line, rcRemainder, subLine);
+		FillLineRemainder(surface, model, vsDraw, ll, line, rcRemainder, subLine, collector);
 	}
 
 	if (FlagSet(phase, DrawPhase::text)) {
@@ -1756,7 +1764,7 @@ void EditView::DrawEOLAnnotationText(Surface *surface, const EditModel &model, c
 		// background colour.
 		PRectangle rcRemainder = rcSegment;
 		rcRemainder.right = rcLine.right;
-		FillLineRemainder(surface, model, vsDraw, ll, line, rcRemainder, subLine);
+		FillLineRemainder(surface, model, vsDraw, ll, line, rcRemainder, subLine, collector);
 	}
 
 	PRectangle rcText = rcSegment;
@@ -2201,9 +2209,11 @@ void EditView::DrawBackground(Surface *surface, const EditModel &model, const Vi
 					// Blob display
 					inIndentation = false;
 				}
+				CaptureBackground(collector, rcSegment, textBack);
 				surface->FillRectangleAligned(rcSegment, Fill(textBack));
 			} else {
 				// Normal text display
+				CaptureBackground(collector, rcSegment, textBack);
 				surface->FillRectangleAligned(rcSegment, Fill(textBack));
 				if (vsDraw.viewWhitespace != WhiteSpace::Invisible) {
 					for (int cpos = 0; cpos <= i - ts.start; cpos++) {
@@ -2214,6 +2224,7 @@ void EditView::DrawBackground(Surface *surface, const EditModel &model, const Vi
 									rcSegment.top,
 									ll->positions[cpos + ts.start + 1] + xStart - static_cast<XYPOSITION>(subLineStart),
 									rcSegment.bottom);
+								CaptureBackground(collector, rcSpace, vsDraw.ElementColour(Element::WhiteSpaceBack)->Opaque());
 								surface->FillRectangleAligned(rcSpace,
 									vsDraw.ElementColour(Element::WhiteSpaceBack)->Opaque());
 							}
@@ -2263,21 +2274,7 @@ static void DrawMarkUnderline(Surface *surface, const EditModel &model, const Vi
 			(vsDraw.markers[markBit].layer == Layer::Base)) {
 			PRectangle rcUnderline = rcLine;
 			rcUnderline.top = rcUnderline.bottom - 2;
-			if (collector) {
-				Captured_marker_symbol capturedMarker;
-				capturedMarker.left = static_cast<float>(rcUnderline.left);
-				capturedMarker.top = static_cast<float>(rcUnderline.top);
-				capturedMarker.right = static_cast<float>(rcUnderline.right);
-				capturedMarker.bottom = static_cast<float>(rcUnderline.bottom);
-				capturedMarker.marker_number = markBit;
-				capturedMarker.marker_type = static_cast<int>(MarkerSymbol::Underline);
-				capturedMarker.fore_rgba = static_cast<std::uint32_t>(vsDraw.markers[markBit].fore.AsInteger());
-				capturedMarker.back_rgba = static_cast<std::uint32_t>(vsDraw.markers[markBit].back.AsInteger());
-				capturedMarker.document_line = static_cast<int>(line);
-				if (collector->wants_static_content()) {
-					collector->add_marker_symbol(capturedMarker);
-				}
-			}
+			CaptureBackground(collector, rcUnderline, vsDraw.markers[markBit].back, Layer::Base, true);
 			surface->FillRectangleAligned(rcUnderline, Fill(vsDraw.markers[markBit].back));
 		}
 		marks >>= 1;
@@ -2319,6 +2316,7 @@ static void DrawTranslucentSelection(Surface *surface, const EditModel &model, c
 							const PRectangle rcSelection(rcLeft, rcLine.top, rcRight, rcLine.bottom);
 							if (collector) {
 								Captured_selection_rect capturedSelection;
+								capturedSelection.layer = static_cast<int>(layer);
 								capturedSelection.left = static_cast<float>(rcSelection.left);
 								capturedSelection.top = static_cast<float>(rcSelection.top);
 								capturedSelection.right = static_cast<float>(rcSelection.right);
@@ -2339,6 +2337,7 @@ static void DrawTranslucentSelection(Surface *surface, const EditModel &model, c
 						rcSegment.right = xStartVirtual + portion.end.VirtualSpace() * spaceWidth;
 						if (collector) {
 							Captured_selection_rect capturedSelection;
+							capturedSelection.layer = static_cast<int>(layer);
 							capturedSelection.left = static_cast<float>(rcSegment.left);
 							capturedSelection.top = static_cast<float>(rcSegment.top);
 							capturedSelection.right = static_cast<float>(rcSegment.right);
@@ -2364,6 +2363,7 @@ static void DrawTranslucentSelection(Surface *surface, const EditModel &model, c
 					if (rcSegment.right > rcLine.left) {
 						if (collector) {
 							Captured_selection_rect capturedSelection;
+							capturedSelection.layer = static_cast<int>(layer);
 							capturedSelection.left = static_cast<float>(rcSegment.left);
 							capturedSelection.top = static_cast<float>(rcSegment.top);
 							capturedSelection.right = static_cast<float>(rcSegment.right);
@@ -2400,40 +2400,12 @@ static void DrawTranslucentLineState(Surface *surface, const EditModel &model, c
 	for (int markBit = 0; (markBit < 32) && marksDrawnInText; markBit++) {
 		if ((marksDrawnInText & 1) && (vsDraw.markers[markBit].layer == layer)) {
 			if (vsDraw.markers[markBit].markType == MarkerSymbol::Background) {
-				if (collector) {
-					Captured_marker_symbol capturedMarker;
-					capturedMarker.left = static_cast<float>(rcLine.left);
-					capturedMarker.top = static_cast<float>(rcLine.top);
-					capturedMarker.right = static_cast<float>(rcLine.right);
-					capturedMarker.bottom = static_cast<float>(rcLine.bottom);
-					capturedMarker.marker_number = markBit;
-					capturedMarker.marker_type = static_cast<int>(MarkerSymbol::Background);
-					capturedMarker.fore_rgba = static_cast<std::uint32_t>(vsDraw.markers[markBit].fore.AsInteger());
-					capturedMarker.back_rgba = static_cast<std::uint32_t>(vsDraw.markers[markBit].back.AsInteger());
-					capturedMarker.document_line = static_cast<int>(line);
-					if (collector->wants_static_content()) {
-						collector->add_marker_symbol(capturedMarker);
-					}
-				}
+				CaptureBackground(collector, rcLine, vsDraw.markers[markBit].BackWithAlpha(), layer);
 				surface->FillRectangleAligned(rcLine, vsDraw.markers[markBit].BackWithAlpha());
 			} else if (vsDraw.markers[markBit].markType == MarkerSymbol::Underline) {
 				PRectangle rcUnderline = rcLine;
 				rcUnderline.top = rcUnderline.bottom - 2;
-				if (collector) {
-					Captured_marker_symbol capturedMarker;
-					capturedMarker.left = static_cast<float>(rcUnderline.left);
-					capturedMarker.top = static_cast<float>(rcUnderline.top);
-					capturedMarker.right = static_cast<float>(rcUnderline.right);
-					capturedMarker.bottom = static_cast<float>(rcUnderline.bottom);
-					capturedMarker.marker_number = markBit;
-					capturedMarker.marker_type = static_cast<int>(MarkerSymbol::Underline);
-					capturedMarker.fore_rgba = static_cast<std::uint32_t>(vsDraw.markers[markBit].fore.AsInteger());
-					capturedMarker.back_rgba = static_cast<std::uint32_t>(vsDraw.markers[markBit].back.AsInteger());
-					capturedMarker.document_line = static_cast<int>(line);
-					if (collector->wants_static_content()) {
-						collector->add_marker_symbol(capturedMarker);
-					}
-				}
+				CaptureBackground(collector, rcUnderline, vsDraw.markers[markBit].BackWithAlpha(), layer);
 				surface->FillRectangleAligned(rcUnderline, vsDraw.markers[markBit].BackWithAlpha());
 			}
 		}
@@ -2442,21 +2414,7 @@ static void DrawTranslucentLineState(Surface *surface, const EditModel &model, c
 	int marksDrawnInLine = marksOfLine & vsDraw.maskInLine;
 	for (int markBit = 0; (markBit < 32) && marksDrawnInLine; markBit++) {
 		if ((marksDrawnInLine & 1) && (vsDraw.markers[markBit].layer == layer)) {
-			if (collector) {
-				Captured_marker_symbol capturedMarker;
-				capturedMarker.left = static_cast<float>(rcLine.left);
-				capturedMarker.top = static_cast<float>(rcLine.top);
-				capturedMarker.right = static_cast<float>(rcLine.right);
-				capturedMarker.bottom = static_cast<float>(rcLine.bottom);
-				capturedMarker.marker_number = markBit;
-				capturedMarker.marker_type = static_cast<int>(vsDraw.markers[markBit].markType);
-				capturedMarker.fore_rgba = static_cast<std::uint32_t>(vsDraw.markers[markBit].fore.AsInteger());
-				capturedMarker.back_rgba = static_cast<std::uint32_t>(vsDraw.markers[markBit].back.AsInteger());
-				capturedMarker.document_line = static_cast<int>(line);
-				if (collector->wants_static_content()) {
-					collector->add_marker_symbol(capturedMarker);
-				}
-			}
+			CaptureBackground(collector, rcLine, vsDraw.markers[markBit].BackWithAlpha(), layer);
 			surface->FillRectangleAligned(rcLine, vsDraw.markers[markBit].BackWithAlpha());
 		}
 		marksDrawnInLine >>= 1;
@@ -2477,6 +2435,7 @@ static void CaptureCurrentLineHighlight(const ViewStyle &vsDraw, PRectangle rcLi
 	capturedHighlight.bottom = static_cast<float>(rcLine.bottom);
 	capturedHighlight.rgba = static_cast<std::uint32_t>(caretLineBack.AsInteger());
 	capturedHighlight.framed = framed;
+	capturedHighlight.layer = static_cast<int>(vsDraw.caretLine.layer);
 	collector->add_current_line_highlight(capturedHighlight);
 }
 
@@ -2561,6 +2520,9 @@ void EditView::DrawForeground(Surface *surface, const EditModel &model, const Vi
 				textFore = ts.representation->colour;
 			}
 			ColourRGBA textBack = TextBackground(model, vsDraw, ll, background, inSelection, inHotspot, styleMain, i);
+			if (phasesDraw == PhasesDraw::One) {
+				CaptureBackground(collector, rcSegment, textBack);
+			}
 			if (collector) {
 				if ((inSelection != InSelection::inNone)
 					&& phasesDraw == PhasesDraw::One && vsDraw.selection.layer == Layer::Base) {
@@ -2739,6 +2701,7 @@ void EditView::DrawForeground(Surface *surface, const EditModel &model, const Vi
 											rcSegment.top,
 											ll->positions[cpos + ts.start + 1] + xStart - static_cast<XYPOSITION>(subLineStart),
 											rcSegment.bottom);
+										CaptureBackground(collector, rcSpace, textBack);
 										surface->FillRectangleAligned(rcSpace, Fill(textBack));
 									}
 									const int halfDotWidth = vsDraw.whitespaceSize / 2;
@@ -3254,7 +3217,7 @@ void EditView::PaintText(Surface *surfaceWindow, const EditModel &model, PRectan
 }
 
 void EditView::FillLineRemainder(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
-	Sci::Line line, PRectangle rcArea, int subLine) const {
+	Sci::Line line, PRectangle rcArea, int subLine, Render_collector *collector) const {
 		InSelection eolInSelection = InSelection::inNone;
 	if (vsDraw.selection.visible && (subLine == (ll->lines - 1))) {
 		eolInSelection = model.LineEndInSelection(line);
@@ -3263,16 +3226,21 @@ void EditView::FillLineRemainder(Surface *surface, const EditModel &model, const
 	const std::optional<ColourRGBA> background = vsDraw.Background(model.GetMark(line), model.caret.active, ll->containsCaret);
 
 	if (eolInSelection && vsDraw.selection.eolFilled && (line < model.pdoc->LinesTotal() - 1) && (vsDraw.selection.layer == Layer::Base)) {
+		CaptureBackground(collector, rcArea, SelectionBackground(model, vsDraw, eolInSelection).Opaque());
 		surface->FillRectangleAligned(rcArea, Fill(SelectionBackground(model, vsDraw, eolInSelection).Opaque()));
 	} else {
 		if (background) {
+			CaptureBackground(collector, rcArea, *background);
 			surface->FillRectangleAligned(rcArea, Fill(*background));
 		} else if (vsDraw.styles[ll->styles[ll->numCharsInLine]].eolFilled) {
+			CaptureBackground(collector, rcArea, vsDraw.styles[ll->styles[ll->numCharsInLine]].back);
 			surface->FillRectangleAligned(rcArea, Fill(vsDraw.styles[ll->styles[ll->numCharsInLine]].back));
 		} else {
+			CaptureBackground(collector, rcArea, vsDraw.styles[StyleDefault].back);
 			surface->FillRectangleAligned(rcArea, Fill(vsDraw.styles[StyleDefault].back));
 		}
 		if (eolInSelection && vsDraw.selection.eolFilled && (line < model.pdoc->LinesTotal() - 1) && (vsDraw.selection.layer != Layer::Base)) {
+			CaptureBackground(collector, rcArea, SelectionBackground(model, vsDraw, eolInSelection), vsDraw.selection.layer);
 			surface->FillRectangleAligned(rcArea, SelectionBackground(model, vsDraw, eolInSelection));
 		}
 	}

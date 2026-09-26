@@ -58,7 +58,18 @@ struct Captured_text_run {
 	bool represented_as_blob = false;
 };
 
+struct Captured_background_rect {
+	bool marker_underline = false;
+	float left = 0.0f;
+	float top = 0.0f;
+	float right = 0.0f;
+	float bottom = 0.0f;
+	std::uint32_t rgba = 0;
+	int layer = 0;
+};
+
 struct Captured_selection_rect {
+	int layer = 0;
 	float left = 0.0f;
 	float top = 0.0f;
 	float right = 0.0f;
@@ -104,6 +115,7 @@ struct Captured_current_line_highlight {
 	float bottom = 0.0f;
 	std::uint32_t rgba = 0;
 	bool framed = false;
+	int layer = 0;
 };
 
 // Fold-part semantics from LineMarker::FoldPart, encoded as int.
@@ -120,6 +132,8 @@ struct Captured_marker_symbol {
 	std::uint32_t back_rgba_selected = 0;
 	int document_line = 0;
 	int fold_part = 0;
+	float stroke_width = 1.0f;
+	int margin_style = 0;
 };
 
 struct Captured_margin_text {
@@ -225,6 +239,7 @@ public:
 
 	virtual void begin_visual_line(const Captured_visual_line &line) = 0;
 	virtual void add_text_run(const Captured_text_run &run) = 0;
+	virtual void add_background_rect(const Captured_background_rect &rect) = 0;
 	virtual void add_selection_rect(const Captured_selection_rect &rect) = 0;
 	virtual void add_caret_rect(const Captured_caret_rect &rect) = 0;
 	virtual void add_indicator_primitive(const Captured_indicator &indicator) = 0;

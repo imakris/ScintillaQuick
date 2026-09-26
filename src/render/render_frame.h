@@ -12,27 +12,11 @@
 #include <QRectF>
 #include <QString>
 
+#include "RenderCapture.h"
+#include "ScintillaTypes.h"
+
 namespace Scintilla::Internal
 {
-
-enum class Text_direction
-{
-    left_to_right,
-    right_to_left,
-    mixed,
-};
-
-enum class Whitespace_mark_kind_t
-{
-    space_dot,
-    tab_arrow,
-};
-
-enum class Decoration_kind_t
-{
-    hotspot,
-    style_underline,
-};
 
 struct Visual_line_key
 {
@@ -64,7 +48,7 @@ struct Text_run
     QColor blob_inner;
     QFont font;
     int style_id             = 0;
-    Text_direction direction = Text_direction::left_to_right;
+    Capture_text_direction direction = Capture_text_direction::left_to_right;
     bool is_represented_text = false;
     bool represented_as_blob = false;
 };
@@ -79,11 +63,20 @@ struct Visual_line_frame
     std::vector<Text_run> text_runs;
 };
 
+struct Background_primitive
+{
+    bool marker_underline = false;
+    QRectF rect;
+    QColor color;
+    Layer layer = Layer::Base;
+};
+
 struct Selection_primitive
 {
     QRectF rect;
     QColor color;
     bool is_main = false;
+    Layer layer = Layer::Base;
 };
 
 struct Caret_primitive
@@ -106,6 +99,8 @@ struct Indicator_primitive
     int indicator_style  = 0;
     bool under_text      = false;
     bool is_main         = false;
+
+    friend bool operator==(const Indicator_primitive&, const Indicator_primitive&) = default;
 };
 
 struct Current_line_primitive
@@ -113,6 +108,7 @@ struct Current_line_primitive
     QRectF rect;
     QColor color;
     bool framed = false;
+    Layer layer = Layer::Base;
 };
 
 struct Marker_primitive
@@ -125,6 +121,11 @@ struct Marker_primitive
     QColor background_selected;
     int document_line = 0;
     int fold_part     = 0;
+    qreal stroke_width = 1.0;
+    int margin_style = 0;
+    QFont font;
+
+    friend bool operator==(const Marker_primitive&, const Marker_primitive&) = default;
 };
 
 struct Margin_text_primitive
@@ -188,14 +189,14 @@ struct Whitespace_mark_primitive
     QRectF rect;
     qreal mid_y  = 0.0;
     QColor color;
-    Whitespace_mark_kind_t kind = Whitespace_mark_kind_t::space_dot;
+    Whitespace_mark_kind kind = Whitespace_mark_kind::space_dot;
 };
 
 struct Decoration_underline_primitive
 {
     QRectF rect;
     QColor color;
-    Decoration_kind_t kind = Decoration_kind_t::style_underline;
+    Decoration_kind kind = Decoration_kind::style_underline;
 };
 
 struct Indent_guide_primitive
@@ -212,6 +213,7 @@ struct Render_frame
     QRectF text_rect;
     QRectF margin_rect;
     std::vector<Visual_line_frame> visual_lines;
+    std::vector<Background_primitive> background_primitives;
     std::vector<Selection_primitive> selection_primitives;
     std::vector<Caret_primitive> caret_primitives;
     std::vector<Indicator_primitive> indicator_primitives;

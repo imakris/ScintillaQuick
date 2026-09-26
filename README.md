@@ -172,6 +172,10 @@ CTest currently registers:
 - `scintillaquick_dispatch_table_test`
 - `scintillaquick_embedded_benchmark` when `SCINTILLAQUICK_BUILD_BENCHMARKS=ON`
 - `scintillaquick_frame_validation_test`
+- `scintillaquick_renderer_software_1_test` and
+  `scintillaquick_renderer_software_1_25_test`
+- `scintillaquick_renderer_rhi_1_test` and
+  `scintillaquick_renderer_rhi_1_25_test` on Windows
 - `scintillaquick_visual_regression_test`
 
 Run them with:
@@ -182,8 +186,9 @@ ctest --test-dir build --output-on-failure
 
 Notes:
 
-- Visual-regression coverage uses Qt's software scene graph for deterministic
-  output.
+- Stored visual baselines use Qt's software scene graph. Renderer conformance
+  also checks the RHI scene graph on Windows; both backend checks run at
+  device-pixel ratios 1 and 1.25 against Scintilla's drawing algorithms.
 - On Windows, the visual tests use the normal `windows` Qt platform plugin, so
   they require a desktop session rather than a truly headless environment.
 

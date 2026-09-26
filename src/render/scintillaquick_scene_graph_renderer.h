@@ -20,6 +20,10 @@ struct Gutter_band
 {
     QRectF rect;
     QColor color;
+    QColor pattern_color;
+    int pattern_phase = 0;
+
+    friend bool operator==(const Gutter_band&, const Gutter_band&) = default;
 };
 
 struct Render_snapshot

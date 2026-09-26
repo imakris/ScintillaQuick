@@ -79,6 +79,20 @@ It is responsible for:
 - indicators, whitespace marks, annotations, and other captured primitives
 - node reuse and pixel-aligned overlay geometry
 
+The GUI thread captures editor state into immutable frame values. The renderer
+uses those values without querying the editor. Text-area groups share one clip
+at the captured text rectangle; margin groups remain outside that clip.
+Effective backgrounds, current-line highlights, and body markers retain their
+captured colors, alpha, and drawing layers as selection and caret state change.
+
+Indicator and margin-marker shapes use Scintilla's `Indicator::Draw` and
+`LineMarker::Draw` algorithms with render-local drawing objects. They rasterize
+into bounded `QImage` textures displayed by `QSGImageNode` on both the software
+and RHI scene graphs. Shape values, device-pixel ratio, and raster alignment
+determine when a texture needs rebuilding. Character markers construct their
+render-local font from the captured `QFont`; no GUI-owned Scintilla font or
+editor pointer enters this path.
+
 ### Vendored Scintilla
 
 The vendored Scintilla tree under
@@ -98,9 +112,13 @@ The visible path is:
 2. `ScintillaQuick_core::WndProc` applies the change to Scintilla's model.
 3. `ScintillaQuick_item` decides whether the change needs property resync,
    snapshot invalidation, or a scene-graph update.
-4. On the next frame, `build_render_snapshot()` asks the core for a fresh
-   `Render_frame`.
-5. The scene-graph renderer updates the `QSGNode` tree in `updatePaintNode()`.
+4. GUI-thread polish drains pending UI work and prepares the captured frame
+   in `build_render_snapshot()`. A caret-only update can reuse cached geometry.
+5. `painted()` reports that the snapshot is ready for presentation. The
+   scene-graph renderer consumes it in `updatePaintNode()`.
+
+Scintilla's caret ticker owns blink timing and updates snapshot visibility
+from cached caret geometry.
 
 This avoids the old captured-widget pattern:
 

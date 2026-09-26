@@ -47,6 +47,11 @@ public:
         return item.m_core->current_render_frame();
     }
 
+    static QFont input_method_font(const ScintillaQuick_item& item)
+    {
+        return item.inputMethodQuery(Qt::ImFont).value<QFont>();
+    }
+
     static Render_frame capture_cached_frame(ScintillaQuick_item& item)
     {
         if (!item.m_render_data) {
