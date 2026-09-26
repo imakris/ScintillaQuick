@@ -6,6 +6,7 @@
 #include <QColor>
 #include <QRectF>
 #include <QSizeF>
+#include <cstdint>
 #include <vector>
 
 class QQuickWindow;
@@ -31,6 +32,9 @@ struct Render_snapshot
     QSizeF item_size;
     QColor background;
     std::vector<Gutter_band> gutter_bands;
+    // Zero denotes an unversioned caller; positive revisions identify static
+    // snapshots and remain unchanged for selection/caret-only updates.
+    std::uint64_t static_revision = 0;
 };
 
 class Scene_graph_renderer

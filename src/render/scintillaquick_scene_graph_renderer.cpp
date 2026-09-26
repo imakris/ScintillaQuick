@@ -164,7 +164,7 @@ QRectF aligned_fill_rect(const QRectF& rect, QQuickWindow* window)
         QPointF(edge(logical.right), edge(logical.bottom)));
 }
 
-void append_horizontal_pixel_rects(
+void append_horizontal_rect(
     std::vector<Colored_rect>&  rects,
     const QRectF&               rect,
     const QColor&               color,
@@ -180,17 +180,10 @@ void append_horizontal_pixel_rects(
     }
 
     const int width_pixels = std::max(1, static_cast<int>(std::ceil(snapped.width() * dpr)));
-    rects.reserve(rects.size() + static_cast<size_t>(width_pixels));
-    for (int pixel = 0; pixel < width_pixels; ++pixel) {
-        rects.push_back({
-            QRectF(
-                snapped.left() + static_cast<qreal>(pixel) * physical_pixel,
-                snapped.top(),
-                physical_pixel,
-                physical_pixel),
-            color,
-        });
-    }
+    rects.push_back({
+        QRectF(snapped.left(), snapped.top(), width_pixels * physical_pixel, physical_pixel),
+        color,
+    });
 }
 
 void append_outline_pixel_rects(
@@ -425,6 +418,26 @@ Marker_primitive shape_cache_key(Marker_primitive primitive)
     return primitive;
 }
 
+Indent_guide_primitive shape_cache_key(Indent_guide_primitive primitive)
+{
+    return primitive;
+}
+
+void draw_shape(Surface_impl& surface, const Indent_guide_primitive& primitive)
+{
+    QPainter* painter = surface.GetPainter();
+    const qreal dpr = std::max<qreal>(1.0, painter->device()->devicePixelRatioF());
+    const qreal pixel = 1.0 / dpr;
+    const auto snap = [dpr](qreal value) { return std::round(value * dpr) / dpr; };
+    QColor color = primitive.color.isValid() ? primitive.color
+        : primitive.highlight ? QColor(192, 192, 192) : QColor(128, 128, 128);
+    const int target_alpha = primitive.highlight ? 80 : 42;
+    color.setAlpha(std::min(color.alpha() > 0 ? color.alpha() : 255, target_alpha));
+    for (qreal y = snap(primitive.top + pixel); y < primitive.bottom; y += 4 * pixel) {
+        painter->fillRect(QRectF(snap(primitive.x), snap(y), pixel, pixel), color);
+    }
+}
+
 Gutter_band shape_cache_key(Gutter_band primitive)
 {
     return primitive;
@@ -644,7 +657,7 @@ public:
     ~Scene_graph_frame_text_node() override
     {
         // The active `m_text_node` is owned by the scene graph parent chain
-        // (m_clip_node -> m_transform_node -> m_text_node) and will be
+        // (optional clip -> transform -> text node) and will be
         // cleaned up automatically when `this` is destroyed. The backup
         // slot's `text_node`, however, is deliberately detached from the
         // transform node while inactive; nothing in the scene graph owns it,
@@ -663,7 +676,7 @@ public:
             return;
         }
 
-        ensure_nodes(window);
+        ensure_nodes(window, false);
 
         const bool same_key = m_has_cached_key &&
             m_cached_key.document_line == visual_line.key.document_line &&
@@ -743,7 +756,6 @@ public:
                 m_text_node->setRenderType(map_render_type());
                 m_text_node->setColor(Qt::white);
                 m_text_node->setViewport(viewport);
-                update_clip_node(m_clip_node, viewport);
                 set_translation(restore_delta);
                 m_cached_key      = visual_line.key;
                 m_has_cached_key  = true;
@@ -768,7 +780,6 @@ public:
             m_text_node->setColor(Qt::white);
             m_text_node->setViewport(viewport);
             m_text_node->clear();
-            update_clip_node(m_clip_node, viewport);
             set_translation(QPointF(0.0, 0.0));
         }
 
@@ -897,15 +908,15 @@ public:
         m_cached_viewport = viewport;
     }
 
-    void ensure_nodes(QQuickWindow* window)
+    void ensure_nodes(QQuickWindow* window, bool clipped = true)
     {
-        if (!m_clip_node) {
+        if (clipped && !m_clip_node) {
             m_clip_node = new QSGClipNode();
             appendChildNode(m_clip_node);
         }
         if (!m_transform_node) {
             m_transform_node = new QSGTransformNode();
-            m_clip_node->appendChildNode(m_transform_node);
+            (m_clip_node ? static_cast<QSGNode*>(m_clip_node) : this)->appendChildNode(m_transform_node);
         }
         if (!m_text_node) {
             m_text_node = window->createTextNode();
@@ -1397,6 +1408,91 @@ public:
     {
         update_clip_node(m_text_clip_node, frame.text_rect);
 
+        // Current-line highlight from frame (authoritative capture)
+        for (size_t layer = 0; layer < m_current_line_groups.size(); ++layer) {
+            std::vector<Colored_rect> current_lines;
+            for (const Current_line_primitive& primitive : frame.current_line_primitives) {
+                if ((size_t)primitive.layer != layer) {
+                    continue;
+                }
+                if (primitive.framed) {
+                    append_outline_pixel_rects(current_lines, primitive.rect, primitive.color, window);
+                }
+                else if (primitive.layer != Layer::Base) {
+                    // Base fills are captured after TextBackground resolves
+                    // style overrides, including brace-highlight backgrounds.
+                    current_lines.push_back({primitive.rect, primitive.color});
+                }
+            }
+            sync_rectangle_nodes(window, m_current_line_groups[layer], m_current_line_nodes[layer],
+                (qsizetype)current_lines.size(), [&](QSGRectangleNode* node, size_t i) {
+                    node->setRect(current_lines[i].rect);
+                    node->setColor(current_lines[i].color);
+                });
+
+            std::vector<const Background_primitive*> backgrounds;
+            for (const Background_primitive& primitive : frame.background_primitives) {
+                if ((size_t)primitive.layer == layer && !primitive.marker_underline) {
+                    backgrounds.push_back(&primitive);
+                }
+            }
+            sync_rectangle_nodes(window, m_line_background_groups[layer], m_line_background_nodes[layer],
+                (qsizetype)backgrounds.size(), [&](QSGRectangleNode* node, size_t i) {
+                    node->setRect(aligned_fill_rect(backgrounds[i]->rect, window));
+                    node->setColor(backgrounds[i]->color);
+                });
+        }
+
+        std::vector<const Background_primitive*> base_underlines;
+        for (const Background_primitive& primitive : frame.background_primitives) {
+            if (primitive.marker_underline) {
+                base_underlines.push_back(&primitive);
+            }
+        }
+        sync_rectangle_nodes(window, m_base_underline_group, m_base_underline_nodes,
+            (qsizetype)base_underlines.size(), [&](QSGRectangleNode* node, size_t i) {
+                node->setRect(aligned_fill_rect(base_underlines[i]->rect, window));
+                node->setColor(base_underlines[i]->color);
+            });
+
+        // Selection participates in the same Base / UnderText / OverText order
+        // as Scintilla's drawing phases. Base background captures include the
+        // resolved selection fill and later marker underlines.
+        for (size_t layer = 0; layer < m_selection_groups.size(); ++layer) {
+            std::vector<const Selection_primitive*> selections;
+            for (const Selection_primitive& primitive : frame.selection_primitives) {
+                if ((size_t)primitive.layer == layer) {
+                    selections.push_back(&primitive);
+                }
+            }
+            sync_rectangle_nodes(window, m_selection_groups[layer], m_selection_nodes[layer],
+                (qsizetype)selections.size(), [&](QSGRectangleNode* node, size_t i) {
+                    node->setRect(selections[i]->rect);
+                    node->setColor(selections[i]->color);
+                });
+        }
+
+        // Caret rectangles from frame
+        sync_rectangle_nodes(
+            window,
+            m_overlay_group,
+            m_caret_nodes,
+            static_cast<qsizetype>(frame.caret_primitives.size()),
+            [&](QSGRectangleNode* node, size_t i) {
+                node->setRect(aligned_fill_rect(frame.caret_primitives[i].rect, window));
+                node->setColor(frame.caret_primitives[i].color);
+            });
+
+        const qreal static_dpr = window->effectiveDevicePixelRatio();
+        if (snapshot.static_revision != 0 && snapshot.static_revision == m_static_revision &&
+            frame.text_rect == m_static_text_rect && static_dpr == m_static_dpr)
+        {
+            return;
+        }
+        m_static_revision = snapshot.static_revision;
+        m_static_text_rect = frame.text_rect;
+        m_static_dpr = static_dpr;
+
         std::vector<Colored_rect> representation_blob_fill_rects;
         std::vector<Margin_text_primitive> representation_texts;
         for (const Visual_line_frame& visual_line : frame.visual_lines) {
@@ -1470,70 +1566,6 @@ public:
                 node->update(window, band, band.rect.intersected(
                     QRectF(QPointF(0.0, 0.0), snapshot.item_size)));
             });
-
-        // Current-line highlight from frame (authoritative capture)
-        for (size_t layer = 0; layer < m_current_line_groups.size(); ++layer) {
-            std::vector<Colored_rect> current_lines;
-            for (const Current_line_primitive& primitive : frame.current_line_primitives) {
-                if ((size_t)primitive.layer != layer) {
-                    continue;
-                }
-                if (primitive.framed) {
-                    append_outline_pixel_rects(current_lines, primitive.rect, primitive.color, window);
-                }
-                else if (primitive.layer != Layer::Base) {
-                    // Base fills are captured after TextBackground resolves
-                    // style overrides, including brace-highlight backgrounds.
-                    current_lines.push_back({primitive.rect, primitive.color});
-                }
-            }
-            sync_rectangle_nodes(window, m_current_line_groups[layer], m_current_line_nodes[layer],
-                (qsizetype)current_lines.size(), [&](QSGRectangleNode* node, size_t i) {
-                    node->setRect(current_lines[i].rect);
-                    node->setColor(current_lines[i].color);
-                });
-
-            std::vector<const Background_primitive*> backgrounds;
-            for (const Background_primitive& primitive : frame.background_primitives) {
-                if ((size_t)primitive.layer == layer && !primitive.marker_underline) {
-                    backgrounds.push_back(&primitive);
-                }
-            }
-            sync_rectangle_nodes(window, m_line_background_groups[layer], m_line_background_nodes[layer],
-                (qsizetype)backgrounds.size(), [&](QSGRectangleNode* node, size_t i) {
-                    node->setRect(aligned_fill_rect(backgrounds[i]->rect, window));
-                    node->setColor(backgrounds[i]->color);
-                });
-        }
-
-        std::vector<const Background_primitive*> base_underlines;
-        for (const Background_primitive& primitive : frame.background_primitives) {
-            if (primitive.marker_underline) {
-                base_underlines.push_back(&primitive);
-            }
-        }
-        sync_rectangle_nodes(window, m_base_underline_group, m_base_underline_nodes,
-            (qsizetype)base_underlines.size(), [&](QSGRectangleNode* node, size_t i) {
-                node->setRect(aligned_fill_rect(base_underlines[i]->rect, window));
-                node->setColor(base_underlines[i]->color);
-            });
-
-        // Selection participates in the same Base / UnderText / OverText order
-        // as Scintilla's drawing phases. Base background captures include the
-        // resolved selection fill and later marker underlines.
-        for (size_t layer = 0; layer < m_selection_groups.size(); ++layer) {
-            std::vector<const Selection_primitive*> selections;
-            for (const Selection_primitive& primitive : frame.selection_primitives) {
-                if ((size_t)primitive.layer == layer) {
-                    selections.push_back(&primitive);
-                }
-            }
-            sync_rectangle_nodes(window, m_selection_groups[layer], m_selection_nodes[layer],
-                (qsizetype)selections.size(), [&](QSGRectangleNode* node, size_t i) {
-                    node->setRect(selections[i]->rect);
-                    node->setColor(selections[i]->color);
-                });
-        }
 
         {
             // Body text from frame visual lines (key-based reuse)
@@ -1758,7 +1790,7 @@ public:
         // Decoration underlines (hotspot + style underlines as rectangles)
         std::vector<Colored_rect> decoration_underline_rects;
         for (const Decoration_underline_primitive& underline : frame.decoration_underlines) {
-            append_horizontal_pixel_rects(decoration_underline_rects, underline.rect, underline.color, window);
+            append_horizontal_rect(decoration_underline_rects, underline.rect, underline.color, window);
         }
 
         sync_rectangle_nodes(
@@ -1771,68 +1803,22 @@ public:
                 node->setColor(decoration_underline_rects[i].color);
             });
 
-        // Indent guides as subtle semi-transparent dots, closer to Notepad++.
-        struct Indent_guide_dot
-        {
-            QRectF rect;
-            QColor color;
-        };
-        std::vector<Indent_guide_dot> indent_guide_dots;
-        const qreal dpr            = std::max<qreal>(1.0, window->effectiveDevicePixelRatio());
-        const qreal physical_pixel = 1.0 / dpr;
-        const qreal dot_size       = physical_pixel;
-        const qreal dot_step       = physical_pixel * 4.0;
-        const auto snap_to_device_pixel = [dpr](qreal value) {
-            return std::round(value * dpr) / dpr;
-        };
-        for (const Indent_guide_primitive& guide : frame.indent_guides) {
-            const QColor base_color = guide.highlight
-                ? QColor(192, 192, 192)
-                : QColor(128, 128, 128);
-            QColor color = guide.color.isValid()
-                ? guide.color
-                : base_color;
-            const int target_alpha = guide.highlight ? 80 : 42;
-            color.setAlpha(std::min(color.alpha() > 0 ? color.alpha() : 255, target_alpha));
-
-            const qreal dot_x = snap_to_device_pixel(guide.x);
-            for (qreal y = snap_to_device_pixel(guide.top + physical_pixel); y < guide.bottom; y += dot_step) {
-                indent_guide_dots.push_back({
-                    QRectF(dot_x, snap_to_device_pixel(y), dot_size, dot_size),
-                    color,
-                });
-            }
-        }
-
-        sync_rectangle_nodes(
-            window,
-            m_indent_guide_group,
-            m_indent_guide_nodes,
-            static_cast<qsizetype>(indent_guide_dots.size()),
-            [&](QSGRectangleNode* node, size_t i) {
-                node->setRect(indent_guide_dots[i].rect);
-                node->setColor(indent_guide_dots[i].color);
+        sync_frame_text_nodes(window, m_indent_guide_group, m_indent_guide_nodes,
+            (qsizetype)frame.indent_guides.size(),
+            [&](Scene_graph_shape_node<Indent_guide_primitive>* node, size_t i) {
+                const Indent_guide_primitive& guide = frame.indent_guides[i];
+                const qreal pixel = physical_pixel_size(window);
+                const QRectF bounds(guide.x - pixel, guide.top,
+                    3 * pixel, guide.bottom - guide.top + pixel);
+                node->update(window, guide, bounds.intersected(frame.text_rect));
             });
 
-        // Caret rectangles from frame
-        sync_rectangle_nodes(
-            window,
-            m_overlay_group,
-            m_caret_nodes,
-            static_cast<qsizetype>(frame.caret_primitives.size()),
-            [&](QSGRectangleNode* node, size_t i) {
-                node->setRect(aligned_fill_rect(frame.caret_primitives[i].rect, window));
-                node->setColor(frame.caret_primitives[i].color);
-            });
-
-        // Software node additions inherit cached state from their immediate
-        // parent; plain grouping nodes do not retain it. Refresh the complete
-        // subtree from this identity transform after attaching descendants, so
-        // both margin and body nodes inherit the item's transform and opacity.
-        markDirty(QSGNode::DirtyMatrix);
     }
 
 private:
+    std::uint64_t m_static_revision = 0;
+    QRectF m_static_text_rect;
+    qreal m_static_dpr = 0.0;
     QSGNode* m_background_group      = nullptr;
     std::array<QSGNode*, 3> m_current_line_groups{};
     std::array<QSGNode*, 3> m_line_background_groups{};
@@ -1881,7 +1867,7 @@ private:
     std::vector<QSGRectangleNode*>            m_whitespace_dot_nodes;
     std::vector<QSGRectangleNode*>            m_whitespace_tab_nodes;
     std::vector<QSGRectangleNode*>            m_decoration_underline_nodes;
-    std::vector<QSGRectangleNode*>            m_indent_guide_nodes;
+    std::vector<Scene_graph_shape_node<Indent_guide_primitive>*> m_indent_guide_nodes;
 };
 
 } // namespace
@@ -1904,6 +1890,11 @@ QSGNode* Scene_graph_renderer::update(
     }
 
     root->update_from_frame(window, snapshot, frame);
+    // Software node additions inherit cached state from their immediate
+    // parent; plain grouping nodes do not retain it. Refresh the complete
+    // subtree from the identity transform after attaching descendants, so
+    // both margin and body nodes inherit the item's transform and opacity.
+    root->markDirty(QSGNode::DirtyMatrix);
     return root;
 }
 

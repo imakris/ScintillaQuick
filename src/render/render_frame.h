@@ -206,6 +206,8 @@ struct Indent_guide_primitive
     qreal bottom = 0.0;
     QColor color;
     bool highlight = false;
+
+    friend bool operator==(const Indent_guide_primitive&, const Indent_guide_primitive&) = default;
 };
 
 struct Render_frame

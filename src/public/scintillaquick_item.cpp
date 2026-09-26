@@ -2495,6 +2495,7 @@ void ScintillaQuick_item::build_render_snapshot()
         snapshot = m_render_data->snapshot;
     }
     else {
+        snapshot.static_revision = m_render_data->snapshot.static_revision + 1;
         snapshot.item_size  = QSizeF(width(), height());
         snapshot.background = QColorFromColourRGBA(m_core->vs.styles[StyleDefault].back);
         snapshot.gutter_bands.reserve(k_margin_count);

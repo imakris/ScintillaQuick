@@ -34,6 +34,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -63,9 +64,10 @@ public:
         m_snapshot.background = Qt::white;
     }
 
-    void set_frame(sci::Render_frame frame)
+    void set_frame(sci::Render_frame frame, std::uint64_t static_revision)
     {
         m_frame = std::move(frame);
+        m_snapshot.static_revision = static_revision;
         ++m_generation;
         update();
     }
@@ -127,9 +129,10 @@ public:
     bool run(
         const char* name,
         sci::Render_frame frame,
-        const std::function<void(sci::Surface_impl&, QPainter&)>& draw_reference)
+        const std::function<void(sci::Surface_impl&, QPainter&)>& draw_reference,
+        std::uint64_t static_revision = 0)
     {
-        m_item.set_frame(std::move(frame));
+        m_item.set_frame(std::move(frame), static_revision);
         QElapsedTimer timer;
         timer.start();
         while ((!m_window.isExposed() || !m_item.frame_rendered()) && timer.elapsed() < 3000) {
@@ -364,6 +367,37 @@ bool check_caret_clip(Conformance_runner& runner)
             surface.FillRectangleAligned(sci::PRectFromQRectF(caret.rect), scintilla_color(caret.color));
         }
     });
+}
+
+int check_cached_overlay_updates(Conformance_runner& runner)
+{
+    constexpr std::array names = {
+        "cached_overlay_initial", "cached_overlay_add", "cached_overlay_move", "cached_overlay_clear"};
+    int failures = 0;
+    for (int phase = 0; phase < 4; ++phase) {
+        sci::Render_frame frame = empty_frame();
+        frame.decoration_underlines.push_back({QRectF(80.0, 96.0, 120.0, 1.0), Qt::blue});
+        const bool visible = phase == 1 || phase == 2;
+        const QRectF background(72.0, 24.0, 96.0, 24.0);
+        const QRectF selection(88.0 + phase * 8.0, 32.0, 32.0, 8.0);
+        const QRectF caret(136.0 + phase * 8.0, 32.0, 2.0, 16.0);
+        if (visible) {
+            frame.background_primitives.push_back({false, background, Qt::yellow});
+            frame.selection_primitives.push_back({selection, Qt::green, true, Scintilla::Layer::OverText});
+            frame.caret_primitives.push_back({caret, Qt::black, true});
+        }
+        failures += !runner.run(names[phase], std::move(frame),
+            [visible, background, selection, caret](sci::Surface_impl& surface, QPainter& painter) {
+                const qreal pixel = 1.0 / painter.device()->devicePixelRatioF();
+                painter.fillRect(QRectF(80.0, 96.0, 120.0, pixel), Qt::blue);
+                if (visible) {
+                    surface.FillRectangleAligned(sci::PRectFromQRectF(background), scintilla_color(Qt::yellow));
+                    painter.fillRect(selection, Qt::green);
+                    surface.FillRectangleAligned(sci::PRectFromQRectF(caret), scintilla_color(Qt::black));
+                }
+            }, 1);
+    }
+    return failures;
 }
 
 class Editor_item final : public ScintillaQuick_item
@@ -777,6 +811,7 @@ int main(int argc, char* argv[])
         failures += !check_indicator(transformed, "transformed_plain_indicator", IndicatorStyle::Plain);
         failures += !check_marker(transformed, "transformed_character_marker",
             static_cast<MarkerSymbol>(static_cast<int>(MarkerSymbol::Character) + 'A'));
+        failures += check_cached_overlay_updates(transformed);
     }
     failures += check_background_capture(backend, dpr);
     failures += !check_folding_margin(backend, dpr);

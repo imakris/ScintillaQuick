@@ -76,6 +76,13 @@ updates. A path that changes visible document text, style, margins, wrapping,
 scroll width, annotations, indicators, markers, whitespace settings, or
 representation settings must mark static content dirty.
 
+Each static recapture advances the snapshot's static revision. The renderer may
+reuse static nodes only when that nonzero revision, the text clip, and the
+device-pixel ratio are unchanged. Overlay updates retain the revision while
+refreshing backgrounds, current-line highlights, selections, and carets. A zero
+revision requires a full update. Newly attached nodes must inherit the item's
+transform and opacity even when the static nodes are reused.
+
 Scintilla's caret fine ticker owns the blink phase. Frame capture temporarily
 enables the caret while collecting its geometry, then restores the phase. A
 caret-only tick marks the snapshot dirty and selects or hides the valid cached
