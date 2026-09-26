@@ -33,6 +33,10 @@ public:
     void deliver_drop(QDropEvent* event) { dropEvent(event); }
     void deliver_input_method(QInputMethodEvent* event) { inputMethodEvent(event); }
     QVariant query_input_method(Qt::InputMethodQuery query) const { return inputMethodQuery(query); }
+    QVariant query_input_method(Qt::InputMethodQuery query, QVariant argument) const
+    {
+        return inputMethodQuery(query, argument);
+    }
 };
 
 QString text_of(ScintillaQuick_item& editor)
@@ -1098,6 +1102,32 @@ void test_input_method_offsets_use_utf16_units()
     SQ_EXPECT(editor.query_input_method(Qt::ImAnchorPosition).toInt() == 3);
 }
 
+void test_input_method_geometry_after_composition()
+{
+    for (const bool commit : {false, true}) {
+        Event_editor editor;
+        editor.setWidth(640);
+        editor.setHeight(240);
+        editor.send(SCI_SETMARGINWIDTHN, 0, 60);
+        editor.setProperty("text", QStringLiteral("initial text"));
+        editor.send(SCI_SETSEL, 2, 2);
+        QInputMethodEvent preedit(QStringLiteral("candidate"), {});
+        editor.deliver_input_method(&preedit);
+        QInputMethodEvent finish;
+        if (commit) {
+            finish.setCommitString(QStringLiteral("done"));
+        }
+        editor.deliver_input_method(&finish);
+        editor.send(SCI_SETSEL, 1, 1);
+        const QRectF cursor = editor.query_input_method(Qt::ImCursorRectangle).toRectF();
+        const QRectF anchor = editor.query_input_method(Qt::ImAnchorRectangle).toRectF();
+        SQ_EXPECT(cursor.topLeft() == anchor.topLeft());
+        SQ_EXPECT(editor.query_input_method(Qt::ImCursorRectangle, {}).toRectF() == cursor);
+        SQ_EXPECT(editor.query_input_method(Qt::ImAnchorRectangle, {}).toRectF() == anchor);
+        SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition, anchor.center()).toInt() == 1);
+    }
+}
+
 void test_current_selection_preserves_embedded_nul()
 {
     Event_editor editor;
@@ -1204,6 +1234,7 @@ int main(int argc, char** argv)
     test_text_changed_is_scoped_to_logical_operations();
     test_external_replace_and_find_does_not_use_stale_target();
     test_input_method_offsets_use_utf16_units();
+    test_input_method_geometry_after_composition();
     test_current_selection_preserves_embedded_nul();
     test_document_pointer_updates_text_and_readonly_properties();
     test_readonly_drop_preserves_modify_attempt_notification();

@@ -2208,9 +2208,10 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
                 insert_with_scintilla =
                     disposition == ScintillaQuick_edit_disposition::DECLINED;
             }
-            m_handler_ime_active = false;
-            m_preedit_pos = -1;
         }
+
+        m_handler_ime_active = false;
+        m_preedit_pos = -1;
 
         if (insert_with_scintilla) {
             for (int i = 0; i < commit_str_len;) {
@@ -2292,8 +2293,7 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         m_preedit_pos = m_core->CurrentPosition();
         m_core->EnsureCaretVisible();
     }
-    else
-    if (m_handler_ime_active) {
+    else {
         m_handler_ime_active = false;
         m_preedit_pos = -1;
     }
@@ -2306,12 +2306,7 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
 
 QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const
 {
-    // see: QQuickTextEdit::inputMethodQuery(...)
-    const PRectangle text_rect = m_core ? m_core->GetTextRectangle() : PRectangle();
-    const QPointF text_offset(text_rect.left, text_rect.top);
-
     if (property == Qt::ImCursorPosition && !argument.isNull()) {
-        argument = QVariant(argument.toPointF() - text_offset);
         const QPointF pt = argument.toPointF();
         if (!pt.isNull()) {
             Point scintilla_point   = PointFromQPointF(pt);
@@ -2323,12 +2318,7 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery property, QV
         return inputMethodQuery(property);
     }
 
-    auto v = inputMethodQuery(property);
-    if (property == Qt::ImCursorRectangle || property == Qt::ImAnchorRectangle) {
-        v = QVariant(v.toRectF().translated(text_offset));
-    }
-
-    return v;
+    return inputMethodQuery(property);
 }
 
 QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
