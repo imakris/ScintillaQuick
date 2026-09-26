@@ -295,5 +295,5 @@ install(
         ${CMAKE_CURRENT_BINARY_DIR}/ScintillaQuickConfig.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/ScintillaQuickConfigVersion.cmake
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ScintillaQuickLexilla.cmake
-        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LexillaConfig.cmake
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LexillaConfig.cmake.in
     DESTINATION ${scintillaquick_package_install_dir})

@@ -64,6 +64,8 @@ function(scintillaquick_add_lexilla)
     install(EXPORT ScintillaQuickLexillaTargets
         FILE LexillaTargets.cmake NAMESPACE Lexilla::
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Lexilla")
-    install(FILES "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/LexillaConfig.cmake"
+    configure_file("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/LexillaConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/lexilla-package/LexillaConfig.cmake" COPYONLY)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/lexilla-package/LexillaConfig.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Lexilla")
 endfunction()
