@@ -541,16 +541,6 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
     connect(m_core, SIGNAL(cursorPositionChanged()), this,
         SIGNAL(cursorPositionChanged())); // needed to update markers on android platform
 
-    m_caret_blink_timer.setSingleShot(false);
-    QObject::connect(&m_caret_blink_timer, &QTimer::timeout, this, [this]() {
-        m_caret_blink_visible = !m_caret_blink_visible;
-        if (m_render_data && m_updates_enabled) {
-            m_render_data->snapshot_dirty = true;
-            polish();
-            update();
-        }
-    });
-
     send(SCI_SETLAYOUTCACHE, SC_CACHE_PAGE);
     send(SCI_SETSCROLLWIDTHTRACKING, 1);
 }
@@ -1401,7 +1391,6 @@ void ScintillaQuick_item::focusInEvent(QFocusEvent * event)
     m_core->SetFocusState(true);
 
     QQuickItem::focusInEvent(event);
-    syncCaretBlinkTimer(true);
     request_scene_graph_update(false, false, false);
 }
 
@@ -1410,7 +1399,6 @@ void ScintillaQuick_item::focusOutEvent(QFocusEvent * event)
     m_core->SetFocusState(false);
 
     QQuickItem::focusOutEvent(event);
-    syncCaretBlinkTimer(false);
     request_scene_graph_update(false, false, false);
 }
 
@@ -2530,7 +2518,7 @@ void ScintillaQuick_item::build_render_snapshot()
         m_render_data->caret_capture_valid)
     {
         const int caret_width = static_cast<int>(send(SCI_GETCARETWIDTH));
-        if (hasActiveFocus() && m_core && m_core->caret.active && m_caret_blink_visible && caret_width > 0) {
+        if (hasActiveFocus() && m_core && m_core->caret.active && m_core->caret.on && caret_width > 0) {
             m_render_data->frame.caret_primitives = m_render_data->captured_caret_primitives;
         }
         else {
@@ -2608,7 +2596,7 @@ void ScintillaQuick_item::build_render_snapshot()
     m_render_data->caret_capture_valid = true;
 
     const int caret_width = static_cast<int>(send(SCI_GETCARETWIDTH));
-    if (!(hasActiveFocus() && m_core && m_core->caret.active && m_caret_blink_visible && caret_width > 0)) {
+    if (!(hasActiveFocus() && m_core && m_core->caret.active && m_core->caret.on && caret_width > 0)) {
         frame.caret_primitives.clear();
     }
 
@@ -3200,37 +3188,20 @@ void ScintillaQuick_item::setStylesFont(const QFont& f, int style)
 
 void ScintillaQuick_item::cursorChangedUpdateMarker()
 {
-    syncCaretBlinkTimer(true);
     emit qGuiApp->inputMethod()->cursorRectangleChanged(); // IMPORTANT: this moves the handle !!! see:
                                                            // QQuickTextControl::updateCursorRectangle()
     emit qGuiApp->inputMethod()->anchorRectangleChanged();
     emit cursorPositionChanged();
 }
 
-void ScintillaQuick_item::syncCaretBlinkTimer(bool resetPhase)
+void ScintillaQuick_item::request_caret_blink_update()
 {
-    const bool caret_should_blink = m_core && hasActiveFocus() && m_core->caret.active;
-    const int caret_period        = m_core ? static_cast<int>(send(SCI_GETCARETPERIOD)) : 0;
-
-    if (!caret_should_blink || caret_period <= 0) {
-        m_caret_blink_timer.stop();
-        m_caret_blink_visible = true;
+    if (!m_render_data || !m_updates_enabled) {
         return;
     }
-
-    if (resetPhase) {
-        m_caret_blink_visible = true;
-        m_caret_blink_timer.start(caret_period);
-        return;
-    }
-
-    if (m_caret_blink_timer.interval() != caret_period) {
-        m_caret_blink_timer.setInterval(caret_period);
-    }
-
-    if (!m_caret_blink_timer.isActive()) {
-        m_caret_blink_timer.start();
-    }
+    m_render_data->snapshot_dirty = true;
+    polish();
+    update();
 }
 
 void register_scintilla_type()

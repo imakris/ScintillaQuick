@@ -837,6 +837,42 @@ static bool test_caret_left_scrolls_to_long_previous_line()
     return ok;
 }
 
+static bool test_caret_blink_uses_one_phase()
+{
+    const char* id = "caret_blink_uses_one_phase";
+    QQuickWindow window;
+    Fixture_editor fixture;
+    window.resize(640, 160);
+    fixture.editor.setParentItem(window.contentItem());
+    fixture.editor.setHeight(160);
+    window.show();
+    if (!wait_for_ready(window, fixture, id)) {
+        return false;
+    }
+    fixture.set_text("sample caret line");
+    fixture.editor.send(SCI_SETCARETPERIOD, 10000);
+    fixture.editor.send(SCI_GOTOPOS, 1);
+    const auto initial = fixture.capture_cached();
+    bool ok = check(!initial.caret_primitives.empty(), id, "caret starts visible");
+    ScintillaQuick_validation_access::tick_caret(fixture.editor);
+    ScintillaQuick_validation_access::drag_selection(fixture.editor, 5, 1);
+    const auto hidden = fixture.capture_cached();
+    ok &= check(hidden.caret_primitives.empty(), id, "dragging preserves the native off phase");
+    ScintillaQuick_validation_access::tick_caret(fixture.editor);
+    const auto visible = fixture.capture_cached();
+    ok &= check(!visible.caret_primitives.empty(), id, "the next native tick shows the moved caret");
+    if (!visible.caret_primitives.empty()) {
+        const int expected_x = static_cast<int>(fixture.editor.send(SCI_POINTXFROMPOSITION, 0, 5));
+        ok &= check(std::abs(visible.caret_primitives.front().rect.x() - expected_x) <= 1, id,
+            "caret geometry captured while hidden follows the selection");
+    }
+    ok &= check_visible_body_lines_match(initial, hidden, id);
+    ok &= check_visible_body_lines_match(hidden, visible, id);
+    fixture.editor.setParentItem(nullptr);
+    window.close();
+    return ok;
+}
+
 static bool test_cached_overlay_only_selection_refreshes_overlay()
 {
     const char* id = "cached_overlay_only_selection_refreshes_overlay";
@@ -2863,6 +2899,7 @@ int main(int argc, char** argv)
         {"caret_left_scrolls_to_long_previous_line", test_caret_left_scrolls_to_long_previous_line},
         {"cached_overlay_only_selection_refreshes_overlay",
                                                     test_cached_overlay_only_selection_refreshes_overlay},
+        {"caret_blink_uses_one_phase",                test_caret_blink_uses_one_phase},
         {"scrolled_full_capture_matches_direct_secondary_geometry",
                                                     test_scrolled_full_capture_matches_direct_secondary_geometry},
         {"edit_savepoint_one_line_scroll_matches_fresh_body_text",

@@ -493,7 +493,13 @@ Render_frame ScintillaQuick_core::current_render_frame(
     const auto restore_buffered_draw =
         qScopeGuard([&] { view.bufferedDraw = buffered_draw_before_capture; });
 
-    view.PaintText(surface, *this, capture_rect, client_rect, vs, &collector);
+    {
+        // Cache caret geometry independently of the current blink phase.
+        const bool caret_on_before_capture = caret.on;
+        caret.on = true;
+        const auto restore_caret_phase = qScopeGuard([&] { caret.on = caret_on_before_capture; });
+        view.PaintText(surface, *this, capture_rect, client_rect, vs, &collector);
+    }
 
     PRectangle margin_rect = capture_rect;
     margin_rect.Move(0.0, -GetVisibleOriginInMain().y);
@@ -1446,6 +1452,13 @@ void ScintillaQuick_core::timerEvent(QTimerEvent* event)
     }
     for (size_t tr = static_cast<size_t>(TickReason::caret); tr <= static_cast<size_t>(TickReason::dwell); tr++) {
         if (timers[tr] == event->timerId()) {
+            if (static_cast<TickReason>(tr) == TickReason::caret) {
+                caret.on = !caret.on;
+                if (caret.active) {
+                    m_owner->request_caret_blink_update();
+                }
+                return;
+            }
             const Sci::Line previous_top_line = topLine;
             const int previous_x_offset       = xOffset;
             TickFor(static_cast<TickReason>(tr));

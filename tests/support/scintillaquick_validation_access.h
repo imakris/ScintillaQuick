@@ -8,6 +8,7 @@
 #include <scintillaquick/scintillaquick_item.h>
 #include "scintillaquick_core.h"
 #include "render_frame.h"
+#include <QTimerEvent>
 
 #undef SCINTILLAQUICK_ENABLE_TEST_ACCESS
 
@@ -23,6 +24,18 @@ public:
     {
         item.m_core->dropWentOutside = outside;
         item.m_core->complete_drag(action);
+    }
+
+    static void tick_caret(ScintillaQuick_item& item)
+    {
+        QTimerEvent event(item.m_core->timers[static_cast<size_t>(Editor::TickReason::caret)]);
+        item.m_core->timerEvent(&event);
+    }
+
+    static void drag_selection(ScintillaQuick_item& item, Sci::Position caret, Sci::Position anchor)
+    {
+        item.m_core->SetSelection(SelectionPosition(caret), SelectionPosition(anchor));
+        item.cursorChangedUpdateMarker();
     }
 
     static Render_frame capture_frame(ScintillaQuick_item& item)

@@ -40,7 +40,6 @@
 #include <QPointer>
 #include <QQuickItem>
 #include <QScopeGuard>
-#include <QTimer>
 #include <QVariant>
 
 class QDragEnterEvent;
@@ -487,7 +486,7 @@ private:
     void setReadonly(bool value);
 
     void cursorChangedUpdateMarker();
-    void syncCaretBlinkTimer(bool resetPhase = false);
+    void request_caret_blink_update();
     void updateQuickView(Scintilla::Update updated);
     void build_render_snapshot();
     std::vector<Scintilla::Internal::Displayed_row_for_test> displayed_rows_for_test() const;
@@ -612,8 +611,6 @@ private:
     // Scintilla and triggers a nested notification cannot steal the outer delivery.
     QByteArray* m_delivered_notification_text = nullptr;
     std::unique_ptr<Render_data> m_render_data;
-    QTimer m_caret_blink_timer;
-    bool m_caret_blink_visible = true;
     // Re-entry guard for `send()`'s dispatch -> `syncQuickViewProperties()`
     // path. `syncQuickViewProperties()` itself issues SCI_* queries
     // through `send()` to read the geometry cache (SCI_TEXTHEIGHT /
