@@ -1,40 +1,50 @@
-ScintillaQuick vendored Scintilla snapshot
-==========================================
+ScintillaQuick vendored Scintilla fork
+====================================
 
-This directory contains a vendored copy of the Scintilla editing
-component (https://www.scintilla.org/) imported for ScintillaQuick's
-build. Only the subset of files that ScintillaQuick actually compiles
-is committed here — Scintilla's lexers, documentation, test suite,
-and build scripts are intentionally not part of the snapshot.
+This directory contains Scintilla source and interface files with maintained
+ScintillaQuick patches. It omits upstream platform implementations, lexers,
+documentation, tests, and build scripts. LOCAL_CHANGES.md records the local
+delta and the additional headers retained from an older upstream release.
 
 Upstream project: https://www.scintilla.org/
-Upstream VCS:     https://sourceforge.net/projects/scintilla/ (Mercurial)
-                  https://github.com/ScintillaOrg/lexilla (mirror; lexers)
-License:          See ./LICENSE
+Upstream VCS:     https://sourceforge.net/p/scintilla/code/ (Mercurial)
+Upstream license: ./LICENSE (upstream License.txt, unchanged)
+Local capture interface license: ../../LICENSE (BSD 2-Clause)
 
-Compatibility targets (library API used by ScintillaQuick):
-  - ScintillaBase / Editor / EditView / MarginView / EditModel
-  - Document / CellBuffer / ContractionState / PerLine / RunStyles
-  - PositionCache / Style / ViewStyle / Selection / KeyMap
-  - AutoComplete / CallTip / Indicator / LineMarker
-  - CaseConvert / CaseFolder / CharacterCategoryMap / CharacterType
-    / UniConversion / UniqueString / DBCS
-  - Geometry / Platform / RESearch / ChangeHistory / Decoration / XPM
+Recovered comparison anchors (verified 2026-09-26)
+------------------------------------------------
 
-When updating this vendored snapshot:
+Main source and interface files:
+  Release:       Scintilla 5.3.2
+  Archive:       https://www.scintilla.org/scintilla532.zip
+  SHA-256:       a618548d29e2cc0c2ae50cadc038b0346305597b38ce1b4eb458671c953fb4ae
+  Mercurial node: 91b4ae661b0933968d5fabc76ec46ca77137d380
+  Archive tag:   rel-5-3-2 (latesttagdistance: 1)
 
-  1. Record the new upstream tag or commit here along with the date
-     of the import and the name of the person doing the update.
-  2. Re-run the full test suite (ctest) on all supported platforms
-     before committing the update.
-  3. If Scintilla adds new SCI_* messages in the import, run the
-     dispatch-table test (scintillaquick_dispatch_table_test) and
-     classify any new messages that show up in the sweep.
-  4. Update this file with the new version record.
+Additional headers (SciLexer.h, FontQuality.h, IntegerRectangle.h):
+  Release:       Scintilla 4.4.6
+  Archive:       https://www.scintilla.org/scintilla446.zip
+  SHA-256:       aa5c65aebbe83184d7b243d29656f17a6f176cfc3898db85b02a5f4f138f9552
+  Mercurial node: 1fd979759d49a05ab9514f267469694112d35547
+  Archive tag:   rel-4-4-6 (latesttagdistance: 1)
 
-Version history
----------------
+These are content comparison anchors, recovered from official release
+archives; they do not identify an independently recorded original import
+revision. The Mercurial nodes and tag distances come from each archive's
+.hg_archival.txt. File comparisons ignore only CRLF versus LF line endings.
 
-- TBD: initial import. The exact upstream tag/commit for the current
-  snapshot was not recorded by the original import. The next update
-  should record the diff anchor so future pins are reproducible.
+The repository's initial import is commit
+621c4dd7797a3e0ae18838b6a9cf3e056feb9dbd, authored by Ioannis Makris on
+2026-04-16. It already contained the local patches and RenderCapture.h.
+
+Updating the fork
+-----------------
+
+1. Compare against these archives and the LOCAL_CHANGES.md ledger before
+   replacing source files. Preserve or deliberately retire each local hook.
+2. Record the new upstream archive/revision, checksum, import date, and
+   importer here. Update the ledger in the same change as any local patch.
+3. Run the full test suite (ctest) on all supported platforms, including the
+   native Windows visual regression gate for capture or rendering changes.
+4. Run scintillaquick_dispatch_table_test and classify newly imported SCI_*
+   messages. Check the installed public-header list when interfaces change.

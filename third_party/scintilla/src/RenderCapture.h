@@ -1,9 +1,9 @@
-// Scintilla source code edit control
+// ScintillaQuick capture interface for the vendored Scintilla renderer
 /** @file RenderCapture.h
- ** Phase 1 capture types and collector interface.
+ ** Capture types and collector interface.
  **/
-// Copyright 2026 by Neil Hodgson <neilh@scintilla.org>
-// The License.txt file describes the conditions under which this software may be distributed.
+// Copyright (c) 2026, Ioannis Makris
+// Licensed under the BSD 2-Clause License; see ../../../LICENSE.
 
 #ifndef RENDERCAPTURE_H
 #define RENDERCAPTURE_H

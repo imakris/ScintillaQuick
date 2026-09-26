@@ -18,12 +18,14 @@ Use this map before starting a change.
 | `tests/` | Smoke, dispatch-table, frame-validation, visual-regression, and behavior tests. Add focused tests near the behavior changed. |
 | `benchmarks/` | Performance scenarios. Use before and after changing render scheduling or renderer hot paths. |
 | `docs/` | Public docs and maintainer contracts. Keep implementation contracts current with code changes. |
-| `third_party/scintilla/` | Vendored upstream Scintilla. Treat as a dependency boundary. Do not make local behavior changes there unless the task is explicitly to update or patch Scintilla. |
+| `third_party/scintilla/` | Maintained Scintilla fork with render-capture and Qt Quick surface hooks. Keep local patches recorded in its `LOCAL_CHANGES.md` and upstream provenance in `VERSION`. |
 
-ScintillaQuick-specific code lives in the top-level build files, `include`,
-`src`, `tests`, `benchmarks`, `examples`, `docs`, and `cmake`. When reviewing or
-editing normal ScintillaQuick work, inspect vendored Scintilla as reference
-only.
+Most ScintillaQuick code lives in the top-level build files, `include`, `src`,
+`tests`, `benchmarks`, `examples`, `docs`, and `cmake`. Integration hooks also
+live in the vendored fork; consult its
+[patch ledger](../third_party/scintilla/LOCAL_CHANGES.md) before changing them.
+Preserve upstream copyright notices when updating derived files and use the
+project attribution for local additions such as `RenderCapture.h`.
 
 ## Render Frame Contract
 

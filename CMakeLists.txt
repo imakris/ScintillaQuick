@@ -241,10 +241,16 @@ install(
         PATTERN "*.h")
 
 install(
-    DIRECTORY third_party/scintilla/include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/scintillaquick/third_party/scintilla/include
-    FILES_MATCHING
-        PATTERN "*.h")
+    FILES
+        third_party/scintilla/include/Scintilla.h
+        third_party/scintilla/include/ScintillaTypes.h
+        third_party/scintilla/include/ScintillaMessages.h
+        third_party/scintilla/include/ScintillaStructures.h
+        third_party/scintilla/include/Sci_Position.h
+        third_party/scintilla/include/ILexer.h
+        third_party/scintilla/include/ILoader.h
+        third_party/scintilla/include/SciLexer.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/scintillaquick/third_party/scintilla/include)
 
 # Note: third_party/scintilla/src/ headers are deliberately NOT installed.
 # They are Scintilla's internal implementation and should not be visible to

@@ -195,10 +195,10 @@ Notes:
 - [`docs/`](docs): public project documentation
 - [`third_party/`](third_party): vendored dependencies
 
-ScintillaQuick-specific work should normally stay outside
-[`third_party/scintilla/`](third_party/scintilla). That tree is vendored
-upstream Scintilla code and should be changed only when intentionally updating
-or patching the dependency.
+[`third_party/scintilla/`](third_party/scintilla) is a maintained Scintilla fork
+with capture and Qt Quick surface hooks. Its [provenance record](third_party/scintilla/VERSION)
+and [patch ledger](third_party/scintilla/LOCAL_CHANGES.md) describe the upstream
+sources and local integration changes to preserve when updating the dependency.
 
 ## Documentation
 

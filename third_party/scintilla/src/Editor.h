@@ -698,7 +698,6 @@ private:
 public:
     AutoSurface(const Editor *ed, Scintilla::Internal::PainterID pid = nullptr, int _technology = -1) :
         surf(ed->CreateMeasurementSurface(pid, _technology))  {
-        surf->Init(false, pid);
     }
     AutoSurface(SurfaceID sid, Editor *ed, std::optional<Scintilla::Technology> technology = {}) :
 		surf(ed->CreateDrawingSurface(sid, technology)) {
