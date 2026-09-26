@@ -30,6 +30,7 @@ int g_failures = 0;
 class Event_editor final : public ScintillaQuick_item
 {
 public:
+    void capture() { updatePolish(); }
     void deliver_drop(QDropEvent* event) { dropEvent(event); }
     void deliver_input_method(QInputMethodEvent* event) { inputMethodEvent(event); }
     QVariant query_input_method(Qt::InputMethodQuery query) const { return inputMethodQuery(query); }
@@ -1169,6 +1170,29 @@ void test_input_method_geometry_after_composition()
     }
 }
 
+void test_horizontal_scroll_survives_edit_and_margin_update()
+{
+    Event_editor editor;
+    editor.setWidth(640);
+    editor.setHeight(240);
+    editor.setProperty("text", QString(400, QLatin1Char('x')));
+    editor.capture();
+    editor.send(SCI_SETSEL, 100, 100);
+    const int caret_x = static_cast<int>(editor.send(SCI_POINTXFROMPOSITION, 0, 100));
+    const int offset = caret_x - 250;
+    SQ_EXPECT(offset > 0);
+    editor.send(SCI_SETXOFFSET, offset);
+    editor.send(SCI_DELETEBACK);
+    SQ_EXPECT(editor.send(SCI_GETXOFFSET) == offset);
+    editor.capture();
+    SQ_EXPECT(editor.send(SCI_GETXOFFSET) == offset);
+    const auto margin_width = editor.send(SCI_GETMARGINWIDTHN, 0);
+    editor.send(SCI_SETMARGINWIDTHN, 0, margin_width);
+    SQ_EXPECT(editor.send(SCI_GETXOFFSET) == offset);
+    editor.capture();
+    SQ_EXPECT(editor.send(SCI_GETXOFFSET) == offset);
+}
+
 void test_current_selection_preserves_embedded_nul()
 {
     Event_editor editor;
@@ -1276,6 +1300,7 @@ int main(int argc, char** argv)
     test_external_replace_and_find_does_not_use_stale_target();
     test_handled_target_replacement_restores_target();
     test_input_method_offsets_use_utf16_units();
+    test_horizontal_scroll_survives_edit_and_margin_update();
     test_input_method_geometry_after_composition();
     test_current_selection_preserves_embedded_nul();
     test_document_pointer_updates_text_and_readonly_properties();

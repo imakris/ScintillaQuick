@@ -503,9 +503,20 @@ Render_frame ScintillaQuick_core::current_render_frame(
         marginView.PaintMargin(surface, topLine, capture_rect, margin_rect, *this, vs, &collector);
     }
 
-    if (horizontalScrollBarVisible && trackLineWidth && (view.lineWidthMaxSeen > scrollWidth)) {
-        scrollWidth = view.lineWidthMaxSeen;
+    if (horizontalScrollBarVisible && trackLineWidth &&
+        (m_tracked_scroll_width_dirty || view.lineWidthMaxSeen > scrollWidth))
+    {
+        const bool width_was_invalidated = m_tracked_scroll_width_dirty;
+        m_tracked_scroll_width_dirty = false;
+        scrollWidth = std::max(
+            std::max(1, static_cast<int>(GetTextRectangle().Width())),
+            view.lineWidthMaxSeen);
         SetScrollBars();
+        if (width_was_invalidated && xOffset > m_h_max) {
+            xOffset = m_h_max;
+            SetHorizontalScrollPos();
+            return current_render_frame(true, false, scrolling);
+        }
     }
 
     return frame;
@@ -748,14 +759,12 @@ void ScintillaQuick_core::SetHorizontalScrollPos()
     emit horizontalScrolled(xOffset);
 }
 
-void ScintillaQuick_core::reset_tracked_scroll_width_to_viewport()
+void ScintillaQuick_core::invalidate_tracked_scroll_width()
 {
-    const int viewport_width = std::max(1, static_cast<int>(GetTextRectangle().Width()));
-    WndProc(Message::SetScrollWidth, static_cast<uptr_t>(viewport_width), 0);
-    if (xOffset > m_h_max) {
-        xOffset = m_h_max;
-        SetHorizontalScrollPos();
-    }
+    // Keep the current range and offset usable during an edit. Capture will
+    // measure the new extent before publishing a smaller scrollbar range.
+    view.lineWidthMaxSeen = 0;
+    m_tracked_scroll_width_dirty = true;
 }
 
 bool ScintillaQuick_core::ModifyScrollBars(Sci::Line nMax, Sci::Line nPage)

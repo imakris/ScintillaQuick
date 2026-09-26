@@ -2615,7 +2615,7 @@ void ScintillaQuick_item::build_render_snapshot()
     m_render_data->scrolling_update                    = false;
     m_render_data->overlay_content_dirty               = false;
     m_render_data->previous_first_visible_line = current_first_visible_line;
-    m_render_data->previous_x_offset           = current_x_offset;
+    m_render_data->previous_x_offset           = m_core ? m_core->xOffset : current_x_offset;
 
     if (m_core) {
         const int current_scroll_width = static_cast<int>(send(SCI_GETSCROLLWIDTH));
@@ -3160,7 +3160,7 @@ void ScintillaQuick_item::reset_tracked_scroll_width()
         return;
     }
 
-    m_core->reset_tracked_scroll_width_to_viewport();
+    m_core->invalidate_tracked_scroll_width();
 }
 
 // taken from QScintilla
