@@ -1203,6 +1203,7 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
         return false;
     }
 
+    const std::uint64_t generation_before_apply = m_mutation_generation;
     const ScintillaQuick_edit_disposition disposition =
         dispatch_edit_span({&replacement, 1});
     if (disposition == ScintillaQuick_edit_disposition::DECLINED) {
@@ -1215,6 +1216,15 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
     }
     if (disposition == ScintillaQuick_edit_disposition::HANDLED && copy_cut_text) {
         m_core->CopyToClipboard(cut_text);
+    }
+    if ((i_message == SCI_REPLACETARGET || i_message == SCI_REPLACETARGETRE) &&
+        m_mutation_generation != generation_before_apply)
+    {
+        // The target postcondition belongs to the message, independently of
+        // which editing messages the model used to apply its replacement.
+        m_core->targetRange = SelectionSegment(
+            SelectionPosition(replacement.position),
+            SelectionPosition(replacement.position + replacement.inserted_text.size()));
     }
 
     // A handler that reported HANDLED without an apply callback claims to

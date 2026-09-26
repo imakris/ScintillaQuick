@@ -190,6 +190,7 @@ private:
     void SetMouseCapture(bool on) override;
     bool HaveMouseCapture() override;
     void StartDrag() override;
+    void complete_drag(Qt::DropAction drop_action);
     Scintilla::CharacterSet CharacterSetOfDocument() const;
     QString StringFromDocument(const char* s) const;
     QByteArray BytesForDocument(const QString& text) const;

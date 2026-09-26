@@ -687,6 +687,39 @@ static bool test_cached_frame_wrap_toggle_rebuilds()
     return ok;
 }
 
+static bool test_drag_source_deletion_uses_edit_handler()
+{
+    const char* id = "drag_source_deletion_uses_edit_handler";
+    bool ok = true;
+    for (const auto disposition : {ScintillaQuick_edit_disposition::DECLINED,
+             ScintillaQuick_edit_disposition::HANDLED, ScintillaQuick_edit_disposition::REJECTED})
+    {
+        ScintillaQuick_item editor;
+        editor.setProperty("text", QStringLiteral("selected text"));
+        editor.send(SCI_SETSEL, 0, 8);
+        int calls = 0;
+        editor.set_edit_handler([&](const ScintillaQuick_edit_transaction& transaction) {
+            ++calls;
+            ok &= check(transaction.replacements.size() == 1, id, "one drag deletion");
+            const auto replacement = transaction.replacements.front();
+            ok &= check(replacement.position == 0 && replacement.deleted_length == 8 &&
+                    replacement.inserted_text.isEmpty(), id, "delete the dragged selection");
+            return ScintillaQuick_edit_result{disposition, {}};
+        });
+        ScintillaQuick_validation_access::complete_drag(editor, Qt::CopyAction, true);
+        ScintillaQuick_validation_access::complete_drag(editor, Qt::IgnoreAction, true);
+        ScintillaQuick_validation_access::complete_drag(editor, Qt::MoveAction, false);
+        ok &= check(calls == 0, id, "copy, cancellation and internal drop do not delete the source");
+        ScintillaQuick_validation_access::complete_drag(editor, Qt::MoveAction, true);
+        ok &= check(calls == 1, id, "external move evaluates the source edit handler");
+        const QString expected = disposition == ScintillaQuick_edit_disposition::DECLINED
+            ? QStringLiteral(" text") : QStringLiteral("selected text");
+        ok &= check(editor.property("text").toString() == expected, id,
+            "handler disposition controls source deletion");
+    }
+    return ok;
+}
+
 static bool test_horizontal_scroll_resets_on_doc_switch()
 {
     const char* id = "horizontal_scroll_resets_on_doc_switch";
@@ -2742,6 +2775,7 @@ int main(int argc, char** argv)
         {"plain_ascii_long_wrap",                    test_plain_ascii_long_wrap},
         {"cached_frame_wrap_toggle_rebuilds",        test_cached_frame_wrap_toggle_rebuilds},
         {"horizontal_scroll_resets_on_doc_switch",   test_horizontal_scroll_resets_on_doc_switch},
+        {"drag_source_deletion_uses_edit_handler",    test_drag_source_deletion_uses_edit_handler},
         {"caret_left_scrolls_to_long_previous_line", test_caret_left_scrolls_to_long_previous_line},
         {"cached_overlay_only_selection_refreshes_overlay",
                                                     test_cached_overlay_only_selection_refreshes_overlay},

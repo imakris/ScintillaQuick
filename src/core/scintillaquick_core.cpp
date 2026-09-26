@@ -1092,13 +1092,17 @@ void ScintillaQuick_core::StartDrag()
             dragon->deleteLater();
         }
 
-        if ((drop_action == Qt::MoveAction) && dropWentOutside) {
-            // Remove dragged out text
-            ClearSelection();
-        }
+        complete_drag(drop_action);
     }
     inDragDrop = DragDrop::none;
     SetDragPosition(SelectionPosition(Sci::invalidPosition));
+}
+
+void ScintillaQuick_core::complete_drag(Qt::DropAction drop_action)
+{
+    if (drop_action == Qt::MoveAction && dropWentOutside) {
+        m_owner->send(SCI_CLEAR);
+    }
 }
 
 class Call_tip_item : public QQuickItem

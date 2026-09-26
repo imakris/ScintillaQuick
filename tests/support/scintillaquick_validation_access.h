@@ -17,6 +17,12 @@ namespace Scintilla::Internal
 class ScintillaQuick_validation_access
 {
 public:
+    static void complete_drag(ScintillaQuick_item& item, Qt::DropAction action, bool outside)
+    {
+        item.m_core->dropWentOutside = outside;
+        item.m_core->complete_drag(action);
+    }
+
     static Render_frame capture_frame(ScintillaQuick_item& item)
     {
         if (!item.m_core) {

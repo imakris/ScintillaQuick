@@ -1086,6 +1086,47 @@ void test_external_replace_and_find_does_not_use_stale_target()
     SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 3);
 }
 
+void test_handled_target_replacement_restores_target()
+{
+    // SCI_REPLACETARGET defines the target as the inserted text even when
+    // the owning model applies its edit through other Scintilla messages.
+    for (const QByteArray replacement : {QByteArray("f"), QByteArray("bar\nfoo")}) {
+        ScintillaQuick_item editor;
+        editor.setProperty("text", QStringLiteral("foo foo"));
+        editor.setProperty("findText", QStringLiteral("foo"));
+        editor.setProperty("replacementText", QString::fromUtf8(replacement));
+        int calls = 0;
+        const auto handler = [&](const ScintillaQuick_edit_transaction& transaction) {
+            ++calls;
+            // Bound a broken Replace All loop so the regression fails
+            // instead of exhausting memory on repeated inserted matches.
+            if (calls > 2) {
+                return ScintillaQuick_edit_result{
+                    ScintillaQuick_edit_disposition::REJECTED, {}};
+            }
+            const auto edit = transaction.replacements.front();
+            return ScintillaQuick_edit_result{
+                ScintillaQuick_edit_disposition::HANDLED,
+                [edit](ScintillaQuick_item& target) {
+                    target.send(SCI_DELETERANGE, edit.position, edit.deleted_length);
+                    target.sends(SCI_INSERTTEXT, edit.position, edit.inserted_text.constData());
+                }};
+        };
+        editor.set_edit_handler(handler);
+        editor.send(SCI_SETTARGETRANGE, 0, 3);
+        editor.sends(SCI_REPLACETARGET, replacement.size(), replacement.constData());
+        SQ_EXPECT(editor.send(SCI_GETTARGETSTART) == 0);
+        SQ_EXPECT(editor.send(SCI_GETTARGETEND) == replacement.size());
+        editor.set_edit_handler({});
+        editor.setProperty("text", QStringLiteral("foo foo"));
+        calls = 0;
+        editor.set_edit_handler(handler);
+        SQ_EXPECT(editor.replaceAll() == 2);
+        SQ_EXPECT(calls == 2);
+        SQ_EXPECT(text_of(editor).toUtf8() == replacement + " " + replacement);
+    }
+}
+
 void test_input_method_offsets_use_utf16_units()
 {
     Event_editor editor;
@@ -1233,6 +1274,7 @@ int main(int argc, char** argv)
     test_text_changed_uses_actual_mutations_not_public_notifications();
     test_text_changed_is_scoped_to_logical_operations();
     test_external_replace_and_find_does_not_use_stale_target();
+    test_handled_target_replacement_restores_target();
     test_input_method_offsets_use_utf16_units();
     test_input_method_geometry_after_composition();
     test_current_selection_preserves_embedded_nul();
