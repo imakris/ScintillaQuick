@@ -933,96 +933,6 @@ std::vector<QPointF> make_triangle_points(const QPointF& a, const QPointF& b, co
     return {a, b, c};
 }
 
-void append_rect_triangles(std::vector<QPointF>& points, const QRectF& rect)
-{
-    if (!rect.isValid() || rect.isEmpty()) {
-        return;
-    }
-
-    const QPointF top_left(    rect.left(),  rect.top());
-    const QPointF top_right(   rect.right(), rect.top());
-    const QPointF bottom_right(rect.right(), rect.bottom());
-    const QPointF bottom_left( rect.left(),  rect.bottom());
-    points.insert(points.end(), {
-        top_left,  bottom_left, top_right,
-        top_right, bottom_left, bottom_right
-    });
-}
-
-std::vector<QPointF> make_squiggle_points(const QRectF& rect, bool low)
-{
-    std::vector<QPointF> points;
-    const qreal baseline  = low ? (rect.top() + rect.height() * 0.7) : (rect.top() + rect.height() * 0.5);
-    const qreal amplitude = std::max<qreal>(1.0, rect.height() * (low ? 0.16 : 0.24));
-    const qreal step      = std::max<qreal>(2.0, rect.width() / 8.0);
-    bool up               = true;
-    for (qreal x = rect.left(); x <= rect.right(); x += step) {
-        const qreal y = baseline + (up ? -amplitude : amplitude);
-        points.emplace_back(x, y);
-        up = !up;
-    }
-    if (points.empty() || points.back().x() < rect.right()) {
-        points.emplace_back(rect.right(), baseline + (up ? -amplitude : amplitude));
-    }
-    return points;
-}
-
-std::vector<QPointF> make_indicator_squiggle_triangles(
-    const QRectF& rect,
-    bool low, QQuickWindow* window)
-{
-    const qreal dpr = window
-        ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio())
-        : 1.0;
-    const qreal physical_pixel = physical_pixel_size(window);
-    const QRectF aligned(
-         std::floor(rect.left()  * dpr) / dpr,
-         std::floor(rect.top()   * dpr) / dpr,
-        (std::ceil(rect.right()  * dpr) / dpr) - (std::floor(rect.left() * dpr) / dpr),
-        (std::ceil(rect.bottom() * dpr) / dpr) - (std::floor(rect.top()  * dpr) / dpr));
-
-    if (!aligned.isValid() || aligned.isEmpty()) {
-        return {};
-    }
-
-    const int width_pixels = std::max(1, static_cast<int>(std::ceil(aligned.width() * dpr)));
-    const int row_limit    = std::max(1, static_cast<int>(std::ceil(aligned.height() * dpr)));
-    std::vector<QPointF> triangles;
-    triangles.reserve(static_cast<size_t>(width_pixels) * 6);
-
-    for (int pixel = 0; pixel < width_pixels; ++pixel) {
-        int row = 0;
-        if (low) {
-            row = (pixel % 4 >= 2) ? 1 : 0;
-        }
-        else {
-            switch (pixel % 4) {
-                case 0:
-                    row = 0;
-                    break;
-                case 1:
-                case 3:
-                    row = 1;
-                    break;
-                default:
-                    row = 2;
-                    break;
-            }
-        }
-        row = std::min(row, row_limit - 1);
-
-        append_rect_triangles(
-            triangles,
-            QRectF(
-                aligned.left() + static_cast<qreal>(pixel) * physical_pixel,
-                aligned.top()  + static_cast<qreal>(row)   * physical_pixel,
-                physical_pixel,
-                physical_pixel));
-    }
-
-    return triangles;
-}
-
 void append_indicator_squiggle_rects(
     std::vector<Colored_rect>& rects, const Indicator_primitive& primitive, QQuickWindow* window)
 {
@@ -1069,38 +979,6 @@ void append_indicator_squiggle_rects(
             color,
         });
     }
-}
-
-std::vector<QPointF> make_indicator_box_triangles(const QRectF& rect, QQuickWindow* window)
-{
-    const qreal dpr = window
-        ? std::max<qreal>(1.0, window->effectiveDevicePixelRatio())
-        : 1.0;
-    const qreal pixel = physical_pixel_size(window);
-    const QRectF aligned(
-         std::floor(rect.left()  * dpr) / dpr,
-         std::floor(rect.top()   * dpr) / dpr,
-        (std::ceil(rect.right()  * dpr) / dpr) - (std::floor(rect.left() * dpr) / dpr),
-        (std::ceil(rect.bottom() * dpr) / dpr) - (std::floor(rect.top()  * dpr) / dpr));
-
-    if (!aligned.isValid() || aligned.isEmpty()) {
-        return {};
-    }
-
-    QRectF box = aligned;
-    box.setTop(box.top() + pixel);
-    box.setBottom(snap_to_device_pixel(rect.center().y(), dpr) + pixel);
-    if (!box.isValid() || box.isEmpty()) {
-        return {};
-    }
-
-    std::vector<QPointF> triangles;
-    triangles.reserve(24);
-    append_rect_triangles(triangles, QRectF(box.left(),          box.top(),            box.width(), pixel));
-    append_rect_triangles(triangles, QRectF(box.left(),          box.bottom() - pixel, box.width(), pixel));
-    append_rect_triangles(triangles, QRectF(box.left(),          box.top(),            pixel,       box.height()));
-    append_rect_triangles(triangles, QRectF(box.right() - pixel, box.top(),            pixel,       box.height()));
-    return triangles;
 }
 
 void append_indicator_box_rects(
@@ -2060,52 +1938,19 @@ template <typename NodeT> void reorder_child_nodes(QSGNode* parent, const std::v
     }
 }
 
-// Fold display / EOL annotation / regular annotation primitives all flow
-// through Scene_graph_frame_text_node::update_from_margin_text, which takes
-// a Margin_text_primitive. The renderer used to open-code an 8-field copy
-// at each of the three call sites; these overloads collapse that to one
-// line per site while keeping each primitive's layout self-contained in
-// render_frame.h.
-Margin_text_primitive to_margin_text(const Fold_display_text_primitive& fold)
+template <typename Primitive>
+Margin_text_primitive to_margin_text(const Primitive& primitive)
 {
-    Margin_text_primitive m;
-    m.text          = fold.text;
-    m.position      = fold.position;
-    m.baseline_y    = fold.baseline_y;
-    m.foreground    = fold.foreground;
-    m.font          = fold.font;
-    m.clip_rect     = fold.rect;
-    m.document_line = fold.document_line;
-    m.style_id      = fold.style_id;
-    return m;
-}
-
-Margin_text_primitive to_margin_text(const Eol_annotation_primitive& eol)
-{
-    Margin_text_primitive m;
-    m.text          = eol.text;
-    m.position      = eol.position;
-    m.baseline_y    = eol.baseline_y;
-    m.foreground    = eol.foreground;
-    m.font          = eol.font;
-    m.clip_rect     = eol.rect;
-    m.document_line = eol.document_line;
-    m.style_id      = eol.style_id;
-    return m;
-}
-
-Margin_text_primitive to_margin_text(const Annotation_primitive& annot)
-{
-    Margin_text_primitive m;
-    m.text          = annot.text;
-    m.position      = annot.position;
-    m.baseline_y    = annot.baseline_y;
-    m.foreground    = annot.foreground;
-    m.font          = annot.font;
-    m.clip_rect     = annot.rect;
-    m.document_line = annot.document_line;
-    m.style_id      = annot.style_id;
-    return m;
+    Margin_text_primitive margin;
+    margin.text          = primitive.text;
+    margin.position      = primitive.position;
+    margin.baseline_y    = primitive.baseline_y;
+    margin.foreground    = primitive.foreground;
+    margin.font          = primitive.font;
+    margin.clip_rect     = primitive.rect;
+    margin.document_line = primitive.document_line;
+    margin.style_id      = primitive.style_id;
+    return margin;
 }
 
 uint64_t pack_visual_line_key(const Visual_line_key& key)
@@ -2114,18 +1959,20 @@ uint64_t pack_visual_line_key(const Visual_line_key& key)
            static_cast<uint64_t>(static_cast<uint32_t>(key.subline_index));
 }
 
-void sync_text_nodes_by_key(
+template <typename Item, typename Key_fn, typename Update_fn>
+void sync_keyed_text_nodes(
     QQuickWindow*                              window,
     QSGNode*                                   parent,
     std::vector<Scene_graph_frame_text_node*>& nodes,
-    const std::vector<Visual_line_frame>&      visual_lines,
-    const QRectF&                              viewport)
+    const std::vector<Item>&                  items,
+    Key_fn&&                                  key_of,
+    Update_fn&&                               update)
 {
     if (!window || !parent) {
         return;
     }
 
-    const size_t new_count = visual_lines.size();
+    const size_t new_count = items.size();
 
     std::unordered_map<uint64_t, size_t> key_to_old_index;
     key_to_old_index.reserve(nodes.size());
@@ -2139,7 +1986,7 @@ void sync_text_nodes_by_key(
     std::vector<bool> old_used(nodes.size(), false);
 
     for (size_t i = 0; i < new_count; ++i) {
-        const uint64_t key = pack_visual_line_key(visual_lines[i].key);
+        const uint64_t key = pack_visual_line_key(key_of(items[i]));
         auto it = key_to_old_index.find(key);
         if (it != key_to_old_index.end() && !old_used[it->second]) {
             new_nodes[i] = nodes[it->second];
@@ -2183,82 +2030,7 @@ void sync_text_nodes_by_key(
     }
 
     for (size_t i = 0; i < new_count; ++i) {
-        nodes[i]->update_from_visual_line(window, visual_lines[i], viewport);
-    }
-}
-
-void sync_margin_text_nodes_by_key(
-    QQuickWindow*                              window,
-    QSGNode*                                   parent,
-    std::vector<Scene_graph_frame_text_node*>& nodes,
-    const std::vector<Margin_text_primitive>&  margins,
-    const QRectF&                              viewport)
-{
-    if (!window || !parent) {
-        return;
-    }
-
-    const size_t new_count = margins.size();
-
-    std::unordered_map<uint64_t, size_t> key_to_old_index;
-    key_to_old_index.reserve(nodes.size());
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        if (nodes[i]->has_valid_key()) {
-            key_to_old_index[pack_visual_line_key(nodes[i]->cached_key())] = i;
-        }
-    }
-
-    std::vector<Scene_graph_frame_text_node*> new_nodes(new_count, nullptr);
-    std::vector<bool> old_used(nodes.size(), false);
-
-    for (size_t i = 0; i < new_count; ++i) {
-        const Visual_line_key margin_key{margins[i].document_line, margins[i].subline_index};
-        const uint64_t key = pack_visual_line_key(margin_key);
-        auto it = key_to_old_index.find(key);
-        if (it != key_to_old_index.end() && !old_used[it->second]) {
-            new_nodes[i] = nodes[it->second];
-            old_used[it->second] = true;
-        }
-    }
-
-    size_t unused_cursor = 0;
-    for (size_t i = 0; i < new_count; ++i) {
-        if (new_nodes[i]) {
-            continue;
-        }
-        while (unused_cursor < nodes.size() && old_used[unused_cursor]) {
-            ++unused_cursor;
-        }
-        if (unused_cursor < nodes.size()) {
-            new_nodes[i] = nodes[unused_cursor];
-            old_used[unused_cursor] = true;
-            new_nodes[i]->clear_cached_key();
-        }
-        else {
-            auto* node = new Scene_graph_frame_text_node();
-            parent->appendChildNode(node);
-            new_nodes[i] = node;
-        }
-    }
-
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        if (!old_used[i]) {
-            parent->removeChildNode(nodes[i]);
-            delete nodes[i];
-        }
-    }
-
-    const bool order_unchanged =
-        nodes.size() == new_nodes.size() &&
-        std::equal(nodes.begin(), nodes.end(), new_nodes.begin());
-
-    nodes = std::move(new_nodes);
-    if (!order_unchanged) {
-        reorder_child_nodes(parent, nodes);
-    }
-
-    for (size_t i = 0; i < new_count; ++i) {
-        nodes[i]->update_from_margin_text(window, margins[i], viewport);
+        update(nodes[i], items[i]);
     }
 }
 
@@ -2276,24 +2048,13 @@ std::vector<QPointF> indicator_geometry(
     switch (primitive.indicator_style) {
         case static_cast<int>(IndicatorStyle::Hidden):
         case static_cast<int>(IndicatorStyle::TextFore):
-        case static_cast<int>(IndicatorStyle::Plain):
             return {};
-        case static_cast<int>(IndicatorStyle::Squiggle):
-        case static_cast<int>(IndicatorStyle::SquigglePixmap):
-            mode = QSGGeometry::DrawTriangles;
-            return make_indicator_squiggle_triangles(rect, false, window);
-        case static_cast<int>(IndicatorStyle::SquiggleLow):
-            mode = QSGGeometry::DrawTriangles;
-            return make_indicator_squiggle_triangles(rect, true, window);
         case static_cast<int>(IndicatorStyle::TT):
             return make_tt_points(rect);
         case static_cast<int>(IndicatorStyle::Diagonal):
             return make_diagonal_points(rect);
         case static_cast<int>(IndicatorStyle::Strike):
             return make_line_points(rect, rect.center().y());
-        case static_cast<int>(IndicatorStyle::Box):
-            mode = QSGGeometry::DrawTriangles;
-            return make_indicator_box_triangles(rect, window);
         case static_cast<int>(IndicatorStyle::RoundBox):
             return line_strip_to_lines(
                 make_rounded_rect_outline_points(rect.adjusted(0.5, 0.5, -0.5, -0.5)));
@@ -2535,20 +2296,28 @@ public:
 
         {
             // Body text from frame visual lines (key-based reuse)
-            sync_text_nodes_by_key(
+            sync_keyed_text_nodes(
                 window,
                 m_text_group,
                 m_text_nodes,
                 frame.visual_lines,
-                frame.text_rect);
+                [](const Visual_line_frame& line) { return line.key; },
+                [&](Scene_graph_frame_text_node* node, const Visual_line_frame& line) {
+                    node->update_from_visual_line(window, line, frame.text_rect);
+                });
 
             // Gutter text from frame margin text primitives (key-based reuse)
-            sync_margin_text_nodes_by_key(
+            sync_keyed_text_nodes(
                 window,
                 m_gutter_group,
                 m_gutter_nodes,
                 frame.margin_text_primitives,
-                frame.margin_rect);
+                [](const Margin_text_primitive& margin) {
+                    return Visual_line_key{margin.document_line, margin.subline_index};
+                },
+                [&](Scene_graph_frame_text_node* node, const Margin_text_primitive& margin) {
+                    node->update_from_margin_text(window, margin, frame.margin_rect);
+                });
         }
 
         // Indicator geometry from frame metadata (index-based to avoid copies).
