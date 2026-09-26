@@ -80,6 +80,31 @@ function(scintillaquick_add_quick_test_target target_name source_file)
         Qt6::Quick)
 endfunction()
 
+# Internal classes are deliberately absent from the installed DLL API.
+function(scintillaquick_add_private_quick_test_target target_name source_file)
+    add_executable(${target_name} ${source_file})
+    target_include_directories(${target_name} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/support
+        ${CMAKE_CURRENT_SOURCE_DIR}/../examples/common
+        ${ARGN})
+    if(TARGET scintillaquick_test_implementation)
+        set(implementation_target scintillaquick_test_implementation)
+    else()
+        set(implementation_target ScintillaQuick::ScintillaQuick)
+    endif()
+    target_link_libraries(${target_name} PRIVATE
+        ${implementation_target} Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+endfunction()
+
+scintillaquick_add_private_quick_test_target(
+    scintillaquick_platform_test
+    platform/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/platform)
+scintillaquick_register_validation_test(
+    scintillaquick_platform_test
+    scintillaquick_platform_test
+    ";QT_FONT_DPI=96;QT_SCALE_FACTOR=1")
+
 scintillaquick_add_quick_test_target(
     scintillaquick_smoke_test
     smoke/main.cpp

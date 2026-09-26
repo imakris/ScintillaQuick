@@ -40,8 +40,6 @@
 #include <QSGRectangleNode>
 #include <QSGTextNode>
 #include <QStyleHints>
-#include <QGlyphRun>
-#include <QRawFont>
 #include <QTextOption>
 #include <QTextLayout>
 #include <QTextLine>
@@ -88,54 +86,6 @@ bool is_simple_printable_ascii(std::string_view text)
     });
 }
 
-bool fill_simple_glyph_positions(const QTextLine& line, std::string_view text, XYPOSITION* positions)
-{
-    if (!line.isValid() || !positions || text.empty()) {
-        return false;
-    }
-
-    const auto glyph_runs = line.glyphRuns(
-        0,
-        line.textLength(),
-        QTextLayout::RetrieveGlyphIndexes   |
-        QTextLayout::RetrieveGlyphPositions |
-        QTextLayout::RetrieveStringIndexes);
-
-    size_t filled = 0;
-    for (const QGlyphRun& glyph_run : glyph_runs) {
-        if (glyph_run.isRightToLeft()) {
-            return false;
-        }
-
-        const QList<quint32> glyph_indexes    = glyph_run.glyphIndexes();
-        const QList<QPointF> glyph_positions  = glyph_run.positions();
-        const QList<qsizetype> string_indexes = glyph_run.stringIndexes();
-        if (glyph_indexes.size() != glyph_positions.size() ||
-            glyph_indexes.size() != string_indexes.size())
-        {
-            return false;
-        }
-
-        const QList<QPointF> advances = glyph_run.rawFont().advancesForGlyphIndexes(glyph_indexes);
-        if (advances.size() != glyph_indexes.size()) {
-            return false;
-        }
-
-        for (qsizetype i = 0; i < glyph_indexes.size(); ++i) {
-            if (filled >= text.size()) {
-                return false;
-            }
-            if (string_indexes[i] != static_cast<qsizetype>(filled)) {
-                return false;
-            }
-            positions[filled] = glyph_positions[i].x() + advances[i].x();
-            ++filled;
-        }
-    }
-
-    return filled == text.size();
-}
-
 QString unicode_from_text(std::string_view text)
 {
     if (is_ascii_text(text)) {
@@ -166,7 +116,7 @@ public:
     // editors) every printable-ASCII character has the same advance, so
     // the single `m_fixed_advance` is enough to compute cumulative
     // positions with one multiply per character, bypassing both
-    // QTextLayout construction and glyph enumeration. The cache is
+    // QTextLayout construction and cursor mapping. The cache is
     // populated on the first successful slow-path measurement so the
     // cached advance matches what shaping produces for that font.
     //
@@ -956,7 +906,7 @@ void Surface_impl::MeasureWidths(
 
     // Fast path: for printable-ASCII text against a font whose advance
     // cache is already populated, just sum the cached advances. This
-    // avoids constructing a QTextLayout and enumerating glyph runs for
+    // avoids constructing a QTextLayout and mapping cursor positions for
     // what is by far the common case (code editing in a fixed-pitch font).
     const Font_and_character_set* font_wrapper = as_font_and_character_set(font);
     QPaintDevice* paint_device = GetPaintDevice();
@@ -973,30 +923,17 @@ void Surface_impl::MeasureWidths(
     tlay.beginLayout();
     tl = tlay.createLine();
     tlay.endLayout();
-    {
-        // Raw glyph advances omit kerning adjustments. Proportional fonts
-        // need the QTextLine cursor mapping below, as in Scintilla's Qt port.
-        if (ascii_text && QFontInfo(*qfont).fixedPitch()) {
-            if (fill_simple_glyph_positions(tl, text, positions)) {
-                // Opportunistically populate the advance cache so that
-                // subsequent calls on the same font can take the fast
-                // path above. The populated values come from the same
-                // slow path used when the cache does not apply, so this
-                // is not an independent source of truth.
-                if (font_wrapper) {
-                    font_wrapper->populate_ascii_cache_from_measurement(text, positions, paint_device);
-                }
-                return;
-            }
-        }
-
-        fill_utf8_cursor_positions_from_cursor(
-            text,
-            su.size(),
-            positions,
-            [&tl](int cursor_position) {
-                return tl.cursorToX(cursor_position);
-            });
+    // Cursor positions include shaping and device-specific advance rounding.
+    // Even fixed-pitch raw glyph advances can differ from the rendered layout.
+    fill_utf8_cursor_positions_from_cursor(
+        text,
+        su.size(),
+        positions,
+        [&tl](int cursor_position) {
+            return tl.cursorToX(cursor_position);
+        });
+    if (ascii_text && font_wrapper) {
+        font_wrapper->populate_ascii_cache_from_measurement(text, positions, paint_device);
     }
 }
 

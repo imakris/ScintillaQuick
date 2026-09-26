@@ -100,8 +100,7 @@ if(NOT DEFINED BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS OFF)
 endif()
 
-add_library(
-    ScintillaQuick
+set(scintillaquick_sources
     include/scintillaquick/scintillaquick_item.h
     src/core/scintillaquick_core.cpp
     src/core/scintillaquick_dispatch_table.h
@@ -114,66 +113,80 @@ add_library(
     src/public/scintillaquick_item.cpp
     $<TARGET_OBJECTS:scintillaquick_scintilla_objects>)
 
+add_library(ScintillaQuick ${scintillaquick_sources})
 add_library(ScintillaQuick::ScintillaQuick ALIAS ScintillaQuick)
 
-target_compile_features(ScintillaQuick PUBLIC cxx_std_20)
-
-if(MSVC)
-    target_compile_options(ScintillaQuick PRIVATE /FS)
+# Private implementation tests must not turn internal classes into DLL exports.
+# Public tests still link ScintillaQuick; only internal tests use this static copy.
+set(scintillaquick_library_targets ScintillaQuick)
+if(BUILD_SHARED_LIBS AND BUILD_TESTING AND SCINTILLAQUICK_BUILD_TESTS)
+    add_library(scintillaquick_test_implementation STATIC ${scintillaquick_sources})
+    list(APPEND scintillaquick_library_targets scintillaquick_test_implementation)
 endif()
 
-target_compile_definitions(
-    ScintillaQuick
-    PRIVATE
-        SCINTILLA_QT_QML=1
-        MAKING_LIBRARY=1
-        _CRT_SECURE_NO_DEPRECATE=1)
+foreach(scintillaquick_library_target IN LISTS scintillaquick_library_targets)
 
-# When building as a static library the SCINTILLAQUICK_EXPORT macro needs
-# to resolve to an empty expansion on Windows. When building shared, the
-# macro must expand to dllexport/dllimport on the library/consumer side
-# respectively; the header already handles that via MAKING_LIBRARY.
-if(NOT BUILD_SHARED_LIBS)
+    target_compile_features(${scintillaquick_library_target} PUBLIC cxx_std_20)
+
+    if(MSVC)
+        target_compile_options(${scintillaquick_library_target} PRIVATE /FS)
+    endif()
+
     target_compile_definitions(
-        ScintillaQuick
+        ${scintillaquick_library_target}
+        PRIVATE
+            SCINTILLA_QT_QML=1
+            MAKING_LIBRARY=1
+            _CRT_SECURE_NO_DEPRECATE=1)
+
+    # When building as a static library the SCINTILLAQUICK_EXPORT macro needs
+    # to resolve to an empty expansion on Windows. When building shared, the
+    # macro must expand to dllexport/dllimport on the library/consumer side
+    # respectively; the header already handles that via MAKING_LIBRARY.
+    get_target_property(scintillaquick_library_type ${scintillaquick_library_target} TYPE)
+    if(scintillaquick_library_type STREQUAL "STATIC_LIBRARY")
+        target_compile_definitions(
+            ${scintillaquick_library_target}
+            PUBLIC
+                SCINTILLAQUICK_STATIC_DEFINE=1)
+    endif()
+
+    target_include_directories(
+        ${scintillaquick_library_target}
         PUBLIC
-            SCINTILLAQUICK_STATIC_DEFINE=1)
-endif()
+            # Consumers get the main header and the Scintilla *public* API
+            # (Scintilla.h, ScintillaTypes.h, ScintillaMessages.h,
+            # ScintillaStructures.h) which the public header references.
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/scintillaquick/third_party/scintilla/include>
+            # Scintilla's *internal* src/ headers (Debugging.h, Geometry.h,
+            # Platform.h, Editor.h, ...) are only needed by in-tree TUs that
+            # include scintillaquick_core.h (the core .cpp itself and the
+            # test-support validation access). Expose them on the
+            # BUILD_INTERFACE so those in-tree consumers compile, but deliberately
+            # do NOT expose them on the INSTALL_INTERFACE: downstream consumers
+            # should not need to know about Scintilla's internals to link the
+            # installed package.
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/src>
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/render
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/src)
 
-target_include_directories(
-    ScintillaQuick
-    PUBLIC
-        # Consumers get the main header and the Scintilla *public* API
-        # (Scintilla.h, ScintillaTypes.h, ScintillaMessages.h,
-        # ScintillaStructures.h) which the public header references.
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/scintillaquick/third_party/scintilla/include>
-        # Scintilla's *internal* src/ headers (Debugging.h, Geometry.h,
-        # Platform.h, Editor.h, ...) are only needed by in-tree TUs that
-        # include scintillaquick_core.h (the core .cpp itself and the
-        # test-support validation access). Expose them on the
-        # BUILD_INTERFACE so those in-tree consumers compile, but deliberately
-        # do NOT expose them on the INSTALL_INTERFACE: downstream consumers
-        # should not need to know about Scintilla's internals to link the
-        # installed package.
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/src>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/render
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/scintilla/src)
+    target_link_libraries(
+        ${scintillaquick_library_target}
+        PUBLIC
+            Qt6::Core
+            Qt6::Gui
+            Qt6::Quick
+        PRIVATE
+            Qt6::Qml)
 
-target_link_libraries(
-    ScintillaQuick
-    PUBLIC
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Quick
-    PRIVATE
-        Qt6::Qml)
+endforeach()
 
 set(scintillaquick_example_common_include_dir
     ${CMAKE_CURRENT_SOURCE_DIR}/examples/common)
