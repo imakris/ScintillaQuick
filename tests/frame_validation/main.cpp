@@ -15,6 +15,7 @@
 #include <QKeyEvent>
 #include <QPointer>
 #include <QQuickWindow>
+#include <QTextLayout>
 
 #include <algorithm>
 #include <cmath>
@@ -2839,6 +2840,52 @@ static bool test_call_tip_highlight_rendering()
     return ok;
 }
 
+static bool test_kerned_text_caret_positions()
+{
+    const char* id = "kerned_text_caret_positions";
+    bool ok = true;
+    for (const QString& family : {QStringLiteral("Arial"), QStringLiteral("Times New Roman"),
+             scintillaquick::shared::deterministic_test_font_family()})
+    {
+        for (const char* text : {"AV", "To", "Ayfi"}) {
+            Fixture_editor fixture;
+            fixture.editor.setProperty("font", QFont(family, 20));
+            fixture.editor.send(SCI_STYLECLEARALL);
+            fixture.set_text(text);
+            fixture.editor.send(SCI_SETSEL, 1, 1);
+            const Render_frame frame = fixture.capture();
+            if (!check(frame.visual_lines.size() == 1 &&
+                    frame.visual_lines.front().text_runs.size() == 1, id,
+                    "fixture must render one uninterrupted text run"))
+            {
+                ok = false;
+                continue;
+            }
+            const Text_run& run = frame.visual_lines.front().text_runs.front();
+            QTextLayout layout(run.text, run.font);
+            QTextOption option;
+            option.setWrapMode(QTextOption::NoWrap);
+            option.setTextDirection(Qt::LeftToRight);
+            layout.setTextOption(option);
+            layout.beginLayout();
+            QTextLine line = layout.createLine();
+            line.setLineWidth(1000000.0);
+            layout.endLayout();
+
+            const qreal cursor_x = run.position.x() + line.cursorToX(1);
+            ok &= check(fixture.editor.send(SCI_POINTXFROMPOSITION, 0, 1) == (sptr_t)cursor_x,
+                id, "public caret coordinate must follow the rendered font's kerned cursor position");
+            ok &= check(frame.caret_primitives.size() == 1, id, "fixture must capture one caret");
+            if (frame.caret_primitives.size() == 1) {
+                // Scintilla's line caret overlaps both character cells by 0.51 pixels.
+                ok &= check(frame.caret_primitives.front().rect.left() == std::round(cursor_x - 0.51),
+                    id, "captured caret must apply Scintilla rounding to the rendered cursor position");
+            }
+        }
+    }
+    return ok;
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -2950,6 +2997,7 @@ int main(int argc, char** argv)
         {"eol_annotation_boxed",                     test_eol_annotation_boxed},
         {"overlapping_indicators",                   test_overlapping_indicators},
         {"call_tip_highlight_rendering",              test_call_tip_highlight_rendering},
+        {"kerned_text_caret_positions",               test_kerned_text_caret_positions},
     };
 
     int fixture_pass = 0;

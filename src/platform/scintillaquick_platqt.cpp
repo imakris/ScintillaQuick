@@ -974,7 +974,9 @@ void Surface_impl::MeasureWidths(
     tl = tlay.createLine();
     tlay.endLayout();
     {
-        if (is_simple_printable_ascii(text)) {
+        // Raw glyph advances omit kerning adjustments. Proportional fonts
+        // need the QTextLine cursor mapping below, as in Scintilla's Qt port.
+        if (ascii_text && QFontInfo(*qfont).fixedPitch()) {
             if (fill_simple_glyph_positions(tl, text, positions)) {
                 // Opportunistically populate the advance cache so that
                 // subsequent calls on the same font can take the fast
