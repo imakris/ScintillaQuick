@@ -125,6 +125,8 @@ For a runnable example, see
 `Ctrl+H` opens both the find and replace rows, and `Escape` closes it. The panel
 provides Find Previous, Find Next, Select All, Replace, Replace & Find, and
 Replace All actions. Searches wrap at the beginning or end of the document.
+Opening either panel seeds the search from a nonempty single-line selection.
+With an empty or multiline selection, the previous search text is retained.
 
 The panel can also be controlled directly from C++ or QML with
 `showFind()`, `showFindReplace()`, and `hideFindPanel()`. Search behavior is

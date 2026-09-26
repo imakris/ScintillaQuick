@@ -1280,6 +1280,46 @@ void test_find_and_replace_panel(ScintillaQuick_item& editor)
     editor.showFindReplace();
     SQ_EXPECT(editor.findText() == QStringLiteral("s"));
 
+    for (const bool replace_mode : {false, true}) {
+        const auto open_panel = [&]() {
+            if (replace_mode) {
+                editor.showFindReplace();
+            }
+            else {
+                editor.showFind();
+            }
+        };
+
+        editor.setProperty("text", QStringLiteral("first\r\nsecond"));
+        editor.setFindText(QStringLiteral("previous"));
+        editor.send(SCI_SELECTALL);
+        open_panel();
+        SQ_EXPECT(editor.findText() == QStringLiteral("previous"));
+
+        // Including just the line ending also makes the selection multiline.
+        editor.send(SCI_SETSEL, 0, 7);
+        open_panel();
+        SQ_EXPECT(editor.findText() == QStringLiteral("previous"));
+        editor.send(SCI_SETSEL, 0, 6);
+        open_panel();
+        SQ_EXPECT(editor.findText() == QStringLiteral("previous"));
+        editor.send(SCI_SETSEL, 7, 7);
+        open_panel();
+        SQ_EXPECT(editor.findText() == QStringLiteral("previous"));
+
+        const QString unicode_selection = QString::fromUtf8("\xce\xbb\xf0\x9f\x98\x80 needle");
+        editor.setProperty("text", unicode_selection + QStringLiteral("\nother"));
+        editor.send(SCI_SETSEL, 0, unicode_selection.toUtf8().size());
+        open_panel();
+        SQ_EXPECT(editor.findText() == unicode_selection);
+
+        const QString long_selection(65536, QLatin1Char('x'));
+        editor.setProperty("text", long_selection);
+        editor.send(SCI_SELECTALL);
+        open_panel();
+        SQ_EXPECT(editor.findText() == long_selection);
+    }
+
     editor.setProperty("text", QStringLiteral("alpha beta alpha\nALPHA"));
     editor.send(SCI_SETMULTIPLESELECTION, 0);
     editor.send(SCI_SETSEL, 0, 0);
@@ -1410,6 +1450,12 @@ void test_find_and_replace_panel(ScintillaQuick_item& editor)
         SQ_EXPECT(replace_field != nullptr);
         if (find_field && replace_field) {
             SQ_EXPECT(std::abs(find_field->width() - replace_field->width()) < 0.001);
+            find_field->setProperty("text", QStringLiteral("edited search"));
+            replace_field->setProperty("text", QStringLiteral("edited replacement"));
+            SQ_EXPECT(editor.findText() == QStringLiteral("edited search"));
+            SQ_EXPECT(editor.replacementText() == QStringLiteral("edited replacement"));
+            editor.setFindText(QStringLiteral("updated search"));
+            SQ_EXPECT(find_field->property("text").toString() == QStringLiteral("updated search"));
         }
 
         delete find_panel;

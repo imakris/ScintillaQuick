@@ -36,6 +36,32 @@ Scintilla::Position document_length(const ScintillaQuick_item& editor)
     return static_cast<Scintilla::Position>(editor.send(SCI_GETLENGTH));
 }
 
+void seed_find_text_from_selection(ScintillaQuick_item& editor)
+{
+    const auto start = static_cast<Scintilla::Position>(editor.send(SCI_GETSELECTIONSTART));
+    const auto end = static_cast<Scintilla::Position>(editor.send(SCI_GETSELECTIONEND));
+    const auto line = editor.send(SCI_LINEFROMPOSITION, start);
+    // Reject multiline selections by document position before copying their
+    // bytes into the panel's single-line field.
+    if (start == end || editor.send(SCI_GETSELECTIONS) != 1 || editor.send(SCI_SELECTIONISRECTANGLE) ||
+        end > editor.send(SCI_GETLINEENDPOSITION, line))
+    {
+        return;
+    }
+
+    const auto length = static_cast<qsizetype>(editor.send(SCI_GETSELTEXT));
+    QByteArray selected(length + 1, Qt::Uninitialized);
+    editor.send(SCI_GETSELTEXT, 0, reinterpret_cast<Scintilla::sptr_t>(selected.data()));
+    editor.setFindText(QString::fromUtf8(selected.constData(), length));
+}
+
+void clear_children(QSGNode* node)
+{
+    while (QSGNode* child = node->firstChild()) {
+        delete child;
+    }
+}
+
 Scintilla::Position search_range(
     ScintillaQuick_item& editor, const QByteArray& needle, Scintilla::Position start, Scintilla::Position end)
 {
@@ -126,6 +152,43 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
         Scintilla::Position selection_end = 0;
         int x_offset = 0;
         bool active_focus = false;
+
+        bool operator==(const Field_visual_state&) const = default;
+    };
+
+    class Field_node final : public QSGNode
+    {
+      public:
+        ~Field_node() override { clear_children(this); }
+
+        Field_visual_state m_state;
+        QFont m_font;
+        qreal m_font_dpi = 0.0;
+        QColor m_background_color;
+        QColor m_foreground_color;
+        QColor m_selection_background_color;
+        QColor m_selection_foreground_color;
+        bool m_valid = false;
+        QByteArray m_utf8;
+        std::unique_ptr<QTextLayout> m_layout;
+    };
+
+    class Panel_node final : public QSGNode
+    {
+      public:
+        Panel_node()
+        {
+            appendChildNode(m_chrome);
+            appendChildNode(m_find);
+            appendChildNode(m_replace);
+        }
+
+        ~Panel_node() override { clear_children(this); }
+
+        QSGNode* m_chrome = new QSGNode();
+        Field_node* m_find = new Field_node();
+        Field_node* m_replace = new Field_node();
+        std::vector<std::unique_ptr<QTextLayout>> m_text_layouts;
     };
 
   public:
@@ -231,8 +294,8 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
         m_selection_background_color = m_owner->findPanelSelectionBackgroundColor();
         m_selection_foreground_color = m_owner->findPanelSelectionForegroundColor();
 
-        sync_field_text(m_find_field, m_owner->findText());
-        sync_field_text(m_replace_field, m_owner->replacementText());
+        sync_field_text(m_find_field, m_find_visual, m_owner->findText());
+        sync_field_text(m_replace_field, m_replace_visual, m_owner->replacementText());
         configure_field(m_find_field);
         configure_field(m_replace_field);
         m_replace_field->setVisible(m_replace_mode);
@@ -253,26 +316,33 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
 
     QSGNode* updatePaintNode(QSGNode* old_node, UpdatePaintNodeData*) override
     {
-        delete old_node;
-        m_text_layouts.clear();
-
         QQuickWindow* quick_window = window();
         if (!quick_window || width() <= 0.0 || height() <= 0.0) {
+            delete old_node;
             return nullptr;
         }
 
-        auto* root = new QSGNode();
-        append_rectangle(root, boundingRect(), m_background_color);
-        append_rectangle(root, QRectF(0.0, 0.0, width(), 1.0), m_border_color);
+        auto* root = static_cast<Panel_node*>(old_node);
+        if (!root) {
+            root = new Panel_node();
+        }
+        clear_children(root->m_chrome);
+        root->m_text_layouts.clear();
+        append_rectangle(root->m_chrome, boundingRect(), m_background_color);
+        append_rectangle(root->m_chrome, QRectF(0.0, 0.0, width(), 1.0), m_border_color);
         if (m_replace_mode) {
-            append_rectangle(root, QRectF(0.0, m_row_height - 1.0, width(), 1.0), m_border_color);
+            append_rectangle(root->m_chrome, QRectF(0.0, m_row_height - 1.0, width(), 1.0), m_border_color);
         }
 
-        append_border(root, m_find_visual.rect.adjusted(-1.0, -1.0, 1.0, 1.0));
-        append_field(root, m_find_visual);
+        append_border(root->m_chrome, m_find_visual.rect.adjusted(-1.0, -1.0, 1.0, 1.0));
+        update_field(root->m_find, m_find_visual);
         if (m_replace_mode) {
-            append_border(root, m_replace_visual.rect.adjusted(-1.0, -1.0, 1.0, 1.0));
-            append_field(root, m_replace_visual);
+            append_border(root->m_chrome, m_replace_visual.rect.adjusted(-1.0, -1.0, 1.0, 1.0));
+            update_field(root->m_replace, m_replace_visual);
+        }
+        else {
+            clear_children(root->m_replace);
+            root->m_replace->m_valid = false;
         }
 
         append_text(root, QStringLiteral("Find:"), QRectF(4.0, 0.0, m_find_visual.rect.left() - 8.0, m_row_height),
@@ -294,7 +364,7 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
         for (int index = 0; index < button_count; ++index) {
             const bool enabled = buttonEnabled(index);
             if (index == m_hovered_button && enabled) {
-                append_rectangle(root, m_button_rects[static_cast<std::size_t>(index)], m_button_hover_color);
+                append_rectangle(root->m_chrome, m_button_rects[static_cast<std::size_t>(index)], m_button_hover_color);
             }
             append_text(root, labels[static_cast<std::size_t>(index)], m_button_rects[static_cast<std::size_t>(index)],
                 enabled ? m_foreground_color : m_disabled_foreground_color, true);
@@ -409,9 +479,6 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
 
     void connect_field(Find_field* field, bool replacement)
     {
-        QObject::connect(field, &ScintillaQuick_item::modified, this, [this, field, replacement]() {
-            fieldChanged(field, replacement);
-        });
         QObject::connect(field, &ScintillaQuick_item::textChanged, this, [this, field, replacement]() {
             fieldChanged(field, replacement);
         });
@@ -432,7 +499,6 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
     void refresh_field_state(Find_field* field, Field_visual_state& state)
     {
         state.rect = QRectF(field->x(), field->y(), field->width(), field->height());
-        state.text = field->property("text").toString();
         state.caret = static_cast<Scintilla::Position>(field->send(SCI_GETCURRENTPOS));
         state.selection_start = static_cast<Scintilla::Position>(field->send(SCI_GETSELECTIONSTART));
         state.selection_end = static_cast<Scintilla::Position>(field->send(SCI_GETSELECTIONEND));
@@ -442,20 +508,21 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
 
     void fieldChanged(Find_field* field, bool replacement)
     {
-        const QString value = field->property("text").toString();
+        Field_visual_state& state = replacement ? m_replace_visual : m_find_visual;
+        state.text = field->property("text").toString();
         if (replacement) {
-            m_owner->setReplacementText(value);
+            m_owner->setReplacementText(state.text);
         }
         else {
-            m_owner->setFindText(value);
+            m_owner->setFindText(state.text);
         }
-        refresh_field_state(field, replacement ? m_replace_visual : m_find_visual);
+        refresh_field_state(field, state);
         update();
     }
 
-    void sync_field_text(Find_field* field, const QString& text)
+    void sync_field_text(Find_field* field, const Field_visual_state& state, const QString& text)
     {
-        if (field->property("text").toString() != text) {
+        if (state.text != text) {
             field->setProperty("text", text);
         }
     }
@@ -550,10 +617,74 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
         append_rectangle(root, QRectF(rect.right() - 1.0, rect.top(), 1.0, rect.height()), m_border_color);
     }
 
-    void append_field(QSGNode* root, const Field_visual_state& state)
+    void update_field(Field_node* root, const Field_visual_state& state)
     {
+        const qreal font_dpi = QFontMetricsF(m_panel_font).fontDpi();
+        const bool text_changed = !root->m_layout || root->m_state.text != state.text;
+        const bool has_selection = state.selection_end > state.selection_start;
+        const bool had_selection = root->m_state.selection_end > root->m_state.selection_start;
+        const bool selection_changed = has_selection != had_selection ||
+            (has_selection && (root->m_state.selection_start != state.selection_start ||
+                root->m_state.selection_end != state.selection_end ||
+                root->m_selection_foreground_color != m_selection_foreground_color));
+        const bool layout_changed = text_changed || selection_changed ||
+                                    root->m_font != m_panel_font || root->m_font_dpi != font_dpi;
+        if (root->m_valid && !layout_changed && root->m_state == state &&
+            root->m_background_color == m_field_background_color &&
+            root->m_foreground_color == m_field_foreground_color &&
+            root->m_selection_background_color == m_selection_background_color &&
+            root->m_selection_foreground_color == m_selection_foreground_color)
+        {
+            return;
+        }
+
+        clear_children(root);
+        if (text_changed) {
+            root->m_utf8 = state.text.toUtf8();
+        }
+        const QByteArray& utf8 = root->m_utf8;
+        auto utf16_index = [&utf8](Scintilla::Position byte_position) {
+            const qsizetype bounded_position =
+                std::clamp<qsizetype>(static_cast<qsizetype>(byte_position), 0, utf8.size());
+            return QString::fromUtf8(utf8.constData(), bounded_position).size();
+        };
+        const int caret_index = utf16_index(state.caret);
+        const int selection_start_index = utf16_index(state.selection_start);
+        const int selection_end_index = utf16_index(state.selection_end);
+
+        root->m_state = state;
+        root->m_font = m_panel_font;
+        root->m_font_dpi = font_dpi;
+        root->m_background_color = m_field_background_color;
+        root->m_foreground_color = m_field_foreground_color;
+        root->m_selection_background_color = m_selection_background_color;
+        root->m_selection_foreground_color = m_selection_foreground_color;
+        root->m_valid = true;
+        if (layout_changed) {
+            root->m_layout = std::make_unique<QTextLayout>(state.text, m_panel_font);
+            root->m_layout->setCacheEnabled(true);
+            QTextOption option;
+            option.setWrapMode(QTextOption::NoWrap);
+            root->m_layout->setTextOption(option);
+            if (has_selection) {
+                // A foreground format draws each glyph once, including when
+                // the separately drawn selection background is translucent.
+                QTextLayout::FormatRange selected_range;
+                selected_range.start = selection_start_index;
+                selected_range.length = selection_end_index - selection_start_index;
+                selected_range.format.setForeground(m_selection_foreground_color);
+                root->m_layout->setFormats({selected_range});
+            }
+            root->m_layout->beginLayout();
+            QTextLine line = root->m_layout->createLine();
+            if (line.isValid()) {
+                line.setLineWidth(1000000.0);
+                line.setPosition(QPointF(0.0, 0.0));
+            }
+            root->m_layout->endLayout();
+        }
+
         const QRectF field_rect = state.rect;
-        const QString& text = state.text;
         append_rectangle(root, field_rect, m_field_background_color);
         if (field_rect.width() <= 4.0 || field_rect.height() <= 4.0) {
             return;
@@ -564,36 +695,13 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
         clip->setClipRect(field_rect.adjusted(2.0, 1.0, -2.0, -1.0));
         root->appendChildNode(clip);
 
-        const QByteArray utf8 = text.toUtf8();
-        auto utf16_index = [&utf8](Scintilla::Position byte_position) {
-            const qsizetype bounded_position =
-                std::clamp<qsizetype>(static_cast<qsizetype>(byte_position), 0, utf8.size());
-            return QString::fromUtf8(utf8.constData(), bounded_position).size();
-        };
-
-        const int caret_index = utf16_index(state.caret);
-        const int selection_start_index = utf16_index(state.selection_start);
-        const int selection_end_index = utf16_index(state.selection_end);
-
-        QTextLayout position_layout(text, m_panel_font);
-        QTextOption position_option;
-        position_option.setWrapMode(QTextOption::NoWrap);
-        position_layout.setTextOption(position_option);
-        position_layout.beginLayout();
-        QTextLine position_line = position_layout.createLine();
-        if (position_line.isValid()) {
-            position_line.setLineWidth(1000000.0);
-            position_line.setPosition(QPointF(0.0, 0.0));
-        }
-        position_layout.endLayout();
+        const QTextLine position_line = root->m_layout->lineCount() > 0 ? root->m_layout->lineAt(0) : QTextLine();
         auto cursor_x = [&position_line](int index) {
             return position_line.isValid() ? position_line.cursorToX(index) : 0.0;
         };
 
         const qreal text_left = field_rect.left() + 3.0;
-        const qreal available_width = std::max<qreal>(1.0, field_rect.width() - 6.0);
         const qreal caret_advance = cursor_x(caret_index);
-        const qreal text_advance = position_line.isValid() ? position_line.naturalTextWidth() : 0.0;
         const qreal origin_x = text_left - state.x_offset;
 
         if (selection_end_index > selection_start_index) {
@@ -605,11 +713,14 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
                 m_selection_background_color);
         }
 
-        append_text(clip, text,
-            QRectF(
-                origin_x, field_rect.top(), std::max<qreal>(available_width, text_advance + 1.0), field_rect.height()),
-            m_field_foreground_color, false, selection_start_index, selection_end_index - selection_start_index,
-            m_selection_foreground_color);
+        if (auto* node = window()->createTextNode()) {
+            const QFontMetricsF metrics(m_panel_font);
+            const qreal text_y = field_rect.top() + std::max<qreal>(0.0, (field_rect.height() - metrics.height()) * 0.5);
+            node->setColor(m_field_foreground_color);
+            node->setViewport(clip->clipRect());
+            node->addTextLayout(QPointF(origin_x, text_y), root->m_layout.get());
+            clip->appendChildNode(node);
+        }
 
         if (state.active_focus) {
             const qreal caret_x = origin_x + caret_advance;
@@ -619,20 +730,12 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
         }
     }
 
-    void append_text(QSGNode* root, const QString& text, const QRectF& rect, const QColor& color, bool centered = false,
-        int selection_start = -1, int selection_length = 0, const QColor& selection_color = QColor())
+    void append_text(Panel_node* root, const QString& text, const QRectF& rect, const QColor& color, bool centered = false)
     {
         auto layout = std::make_unique<QTextLayout>(text, m_panel_font);
         QTextOption option;
         option.setWrapMode(QTextOption::NoWrap);
         layout->setTextOption(option);
-        if (selection_start >= 0 && selection_length > 0) {
-            QTextLayout::FormatRange selected_range;
-            selected_range.start = selection_start;
-            selected_range.length = selection_length;
-            selected_range.format.setForeground(selection_color);
-            layout->setFormats({selected_range});
-        }
         layout->beginLayout();
         QTextLine line = layout->createLine();
         if (line.isValid()) {
@@ -653,9 +756,9 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
             node->setViewport(boundingRect());
             node->clear();
             node->addTextLayout(QPointF(x, y), layout.get());
-            root->appendChildNode(node);
+            root->m_chrome->appendChildNode(node);
         }
-        m_text_layouts.push_back(std::move(layout));
+        root->m_text_layouts.push_back(std::move(layout));
     }
 
     ScintillaQuick_item* m_owner;
@@ -678,7 +781,6 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
     qreal m_row_height = 28.0;
     std::array<QRectF, 6> m_button_rects{};
     int m_hovered_button = -1;
-    std::vector<std::unique_ptr<QTextLayout>> m_text_layouts;
 };
 
 void ScintillaQuick_item::ensureFindPanel()
@@ -857,24 +959,14 @@ SCINTILLAQUICK_FIND_PANEL_COLOR_ACCESSORS(findPanelSelectionForegroundColor, set
 
 void ScintillaQuick_item::showFind()
 {
-    const Scintilla::Position selection_length = static_cast<Scintilla::Position>(send(SCI_GETSELTEXT, 0, 0));
-    if (selection_length > 0) {
-        QByteArray selected(static_cast<qsizetype>(selection_length + 1), Qt::Uninitialized);
-        send(SCI_GETSELTEXT, 0, reinterpret_cast<Scintilla::sptr_t>(selected.data()));
-        setFindText(QString::fromUtf8(selected.constData(), static_cast<qsizetype>(selection_length)));
-    }
+    seed_find_text_from_selection(*this);
     setFindReplaceMode(false);
     setFindPanelVisible(true);
 }
 
 void ScintillaQuick_item::showFindReplace()
 {
-    const Scintilla::Position selection_length = static_cast<Scintilla::Position>(send(SCI_GETSELTEXT, 0, 0));
-    if (selection_length > 0) {
-        QByteArray selected(static_cast<qsizetype>(selection_length + 1), Qt::Uninitialized);
-        send(SCI_GETSELTEXT, 0, reinterpret_cast<Scintilla::sptr_t>(selected.data()));
-        setFindText(QString::fromUtf8(selected.constData(), static_cast<qsizetype>(selection_length)));
-    }
+    seed_find_text_from_selection(*this);
     setFindReplaceMode(true);
     setFindPanelVisible(true);
 }
