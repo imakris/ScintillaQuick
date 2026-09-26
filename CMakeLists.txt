@@ -7,6 +7,7 @@ project(
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+include(cmake/ScintillaQuickLexilla.cmake)
 include(CTest)
 
 # Project-level options.
@@ -293,4 +294,6 @@ install(
     FILES
         ${CMAKE_CURRENT_BINARY_DIR}/ScintillaQuickConfig.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/ScintillaQuickConfigVersion.cmake
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ScintillaQuickLexilla.cmake
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LexillaConfig.cmake
     DESTINATION ${scintillaquick_package_install_dir})

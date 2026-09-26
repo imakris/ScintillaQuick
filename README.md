@@ -221,3 +221,16 @@ Project code is released under the BSD 2-Clause license. See
 
 The repository also vendors Scintilla under its own license. See
 [`third_party/scintilla/LICENSE`](third_party/scintilla/LICENSE).
+
+### Optional Lexilla support
+
+ScintillaQuick does not require Lexilla. Applications that use lexers can call
+`scintillaquick_add_lexilla()` after adding the ScintillaQuick subproject or finding
+its installed package, then link `Lexilla::Lexilla`. This uses an existing target
+or installed Lexilla package first, otherwise fetches upstream `master` and builds
+against ScintillaQuick's public Scintilla headers. Set
+`FETCHCONTENT_SOURCE_DIR_LEXILLA` or pass `SOURCE_DIR <checkout>` to select a local
+checkout. Invalid explicit paths fail configuration.
+
+The helper installs a separate `Lexilla` CMake package alongside ScintillaQuick;
+installed applications can use `find_package(Lexilla CONFIG REQUIRED)` directly.
