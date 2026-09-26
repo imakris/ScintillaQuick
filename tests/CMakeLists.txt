@@ -96,6 +96,13 @@ function(scintillaquick_add_private_quick_test_target target_name source_file)
         ${implementation_target} Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
 endfunction()
 
+if(SCINTILLAQUICK_BUILD_SYNTAX)
+    scintillaquick_add_quick_test_target(scintillaquick_syntax_test syntax/main.cpp)
+    target_link_libraries(scintillaquick_syntax_test PRIVATE ScintillaQuick::Syntax)
+    scintillaquick_register_validation_test(
+        scintillaquick_syntax_test scintillaquick_syntax_test "")
+endif()
+
 scintillaquick_add_private_quick_test_target(
     scintillaquick_platform_test
     platform/main.cpp

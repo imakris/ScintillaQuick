@@ -9,5 +9,12 @@ find_dependency(Qt6 @scintillaquick_qt6_minimum_version@ REQUIRED COMPONENTS Cor
 
 include("${CMAKE_CURRENT_LIST_DIR}/ScintillaQuickTargets.cmake")
 
-check_required_components(ScintillaQuick)
 include("${CMAKE_CURRENT_LIST_DIR}/ScintillaQuickLexilla.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/ScintillaQuickSyntax.cmake")
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/ScintillaQuickSyntaxTargets.cmake" AND
+        NOT TARGET ScintillaQuick::Syntax)
+    find_dependency(Lexilla CONFIG)
+    include("${CMAKE_CURRENT_LIST_DIR}/ScintillaQuickSyntaxTargets.cmake")
+endif()
+
+check_required_components(ScintillaQuick)

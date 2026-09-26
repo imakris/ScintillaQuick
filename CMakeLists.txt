@@ -8,6 +8,7 @@ project(
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(cmake/ScintillaQuickLexilla.cmake)
+include(cmake/ScintillaQuickSyntax.cmake)
 include(CTest)
 
 # Project-level options.
@@ -17,6 +18,8 @@ option(SCINTILLAQUICK_BUILD_BENCHMARKS
     "Build the benchmark applications (scintillaquick_embedded_benchmark)" OFF)
 option(SCINTILLAQUICK_BUILD_TESTS
     "Build the test suite (gated on BUILD_TESTING as well)" ON)
+option(SCINTILLAQUICK_BUILD_SYNTAX
+    "Build the optional default syntax companion" OFF)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -236,6 +239,10 @@ if(SCINTILLAQUICK_BUILD_BENCHMARKS)
             Qt6::Quick)
 endif()
 
+if(SCINTILLAQUICK_BUILD_SYNTAX)
+    scintillaquick_add_syntax()
+endif()
+
 if(BUILD_TESTING AND SCINTILLAQUICK_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
@@ -295,5 +302,7 @@ install(
         ${CMAKE_CURRENT_BINARY_DIR}/ScintillaQuickConfig.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/ScintillaQuickConfigVersion.cmake
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ScintillaQuickLexilla.cmake
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ScintillaQuickSyntax.cmake
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/syntax/scintillaquick_syntax.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LexillaConfig.cmake.in
     DESTINATION ${scintillaquick_package_install_dir})

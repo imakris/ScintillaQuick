@@ -234,3 +234,25 @@ checkout. Invalid explicit paths fail configuration.
 
 The helper installs a separate `Lexilla` CMake package alongside ScintillaQuick;
 installed applications can use `find_package(Lexilla CONFIG REQUIRED)` directly.
+
+### Default document syntax
+
+The optional `ScintillaQuick::Syntax` companion selects Lexilla lexers, keyword
+sets and light/dark lexical colors for C/C++, QML/JavaScript, GLSL, JSON, Python,
+CMake and Rust paths. Unknown paths use plain text. The core editor remains
+independent of Lexilla.
+
+Call `scintillaquick_add_syntax()` after adding the subproject or finding the
+installed package, then link `ScintillaQuick::Syntax`. To build and install the
+companion with ScintillaQuick itself, set `SCINTILLAQUICK_BUILD_SYNTAX=ON`.
+An installed core-only package can build the companion through the same helper;
+its source is included in the package. Repeated helper calls reuse the target.
+
+Include `<scintillaquick/scintillaquick_syntax.h>` and call
+`scintillaquick::configure_default_syntax(pane, path, dark_mode)` once with the
+final language path and theme, then apply any application keyword, property or
+color overrides. Configuration preserves the host's base font, backgrounds,
+margins and predefined styles. Custom lexer owners can use
+`scintillaquick::reset_syntax_styles(pane)` to clear lexical colors, emphasis and
+keyword sets while retaining their lexer. Application-specific lexer policy
+belongs to the host.
