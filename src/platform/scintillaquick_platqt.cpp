@@ -1454,6 +1454,7 @@ void Window::InvalidateAll()
             item->request_scene_graph_update();
         }
         else {
+            window_item->polish();
             window_item->update();
         }
     }
@@ -1467,6 +1468,7 @@ void Window::InvalidateRectangle(PRectangle rc)
             item->request_scene_graph_update();
         }
         else {
+            window_item->polish();
             window_item->update();
         }
     }

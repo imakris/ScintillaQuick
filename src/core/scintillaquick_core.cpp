@@ -1167,41 +1167,52 @@ public:
         setZ(1000.0);
     }
 
-    QSGNode* updatePaintNode(QSGNode* old_node, UpdatePaintNodeData*) override
+    void updatePolish() override
     {
-        QQuickWindow* quick_window = window();
-        if (!quick_window || !pct || !pct->inCallTipMode || width() <= 0.0 || height() <= 0.0) {
-            delete old_node;
-            return nullptr;
+        m_image = {};
+        if (!pct->inCallTipMode || width() <= 0.0 || height() <= 0.0) {
+            update();
+            return;
         }
 
         const QSize image_size(
             std::max(1, static_cast<int>(std::ceil(width()))), std::max(1, static_cast<int>(std::ceil(height()))));
-        QImage image(image_size, QImage::Format_ARGB32_Premultiplied);
-        image.fill(Qt::transparent);
+        m_image = QImage(image_size, QImage::Format_ARGB32_Premultiplied);
+        m_image.fill(Qt::transparent);
 
-        QPainter painter(&image);
+        QPainter painter(&m_image);
         std::unique_ptr<Surface> surface_window = Surface::Allocate(Technology::Default);
         surface_window->Init(false, &painter);
         surface_window->SetMode(SurfaceMode(pct->codePage, false));
         pct->PaintCT(surface_window.get());
+        update();
+    }
+
+    QSGNode* updatePaintNode(QSGNode* old_node, UpdatePaintNodeData*) override
+    {
+        QQuickWindow* quick_window = window();
+        if (!quick_window || m_image.isNull()) {
+            delete old_node;
+            return nullptr;
+        }
 
         auto* image_node = dynamic_cast<QSGImageNode*>(old_node);
         if (!image_node) {
             delete old_node;
             image_node = quick_window->createImageNode();
         }
-        QSGTexture* texture = quick_window->createTextureFromImage(image);
+        QSGTexture* texture = quick_window->createTextureFromImage(m_image);
         image_node->setTexture(texture);
         image_node->setOwnsTexture(true);
-        image_node->setRect(QRectF(QPointF(0.0, 0.0), QSizeF(image_size)));
-        image_node->setSourceRect(QRectF(QPointF(0.0, 0.0), QSizeF(image_size)));
+        image_node->setRect(QRectF(QPointF(0.0, 0.0), QSizeF(m_image.size())));
+        image_node->setSourceRect(QRectF(QPointF(0.0, 0.0), QSizeF(m_image.size())));
         image_node->setFiltering(QSGTexture::Linear);
         return image_node;
     }
 
 private:
     CallTip* pct;
+    QImage m_image;
 };
 
 void ScintillaQuick_core::CreateCallTipWindow(PRectangle rc)
@@ -1219,6 +1230,7 @@ void ScintillaQuick_core::CreateCallTipWindow(PRectangle rc)
     if (QQuickItem* call_tip_item = resolve_window_item(ct.wCallTip.GetID())) {
         call_tip_item->setPosition(QPointF(rc.left, rc.top));
         call_tip_item->setSize(QSizeF(rc.Width(), rc.Height()));
+        call_tip_item->polish();
         call_tip_item->update();
     }
 }

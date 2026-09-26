@@ -11,7 +11,9 @@
 #include <QFontInfo>
 #include <QDebug>
 #include <QGuiApplication>
+#include <QImage>
 #include <QKeyEvent>
+#include <QPointer>
 #include <QQuickWindow>
 
 #include <algorithm>
@@ -2741,6 +2743,66 @@ static bool test_overlapping_indicators()
     return ok;
 }
 
+static bool test_call_tip_highlight_rendering()
+{
+    const char* id = "call_tip_highlight_rendering";
+    QQuickWindow window;
+    Fixture_editor fixture;
+    window.resize(640, 160);
+    fixture.editor.setParentItem(window.contentItem());
+    fixture.editor.setHeight(160);
+    fixture.set_text("function(parameter)");
+    fixture.editor.send(SCI_CALLTIPSETBACK, 0xffffff);
+    fixture.editor.send(SCI_CALLTIPSETFORE, 0x000000);
+    fixture.editor.send(SCI_CALLTIPSETFOREHLT, 0x0000ff);
+    window.show();
+    if (!wait_for_ready(window, fixture, id)) {
+        return false;
+    }
+
+    const QList<QQuickItem*> before = window.contentItem()->childItems();
+    fixture.editor.sends(SCI_CALLTIPSHOW, 0, "function(parameter)");
+    QPointer<QQuickItem> popup;
+    for (QQuickItem* child : window.contentItem()->childItems()) {
+        if (!before.contains(child)) {
+            popup = child;
+            break;
+        }
+    }
+    if (!check(!popup.isNull(), id, "show must create the call-tip item")) {
+        return false;
+    }
+
+    const auto capture_popup = [&]() {
+        fixture.pump();
+        const QImage image = window.grabWindow();
+        const qreal scale = image.width() / (qreal)window.width();
+        return image.copy(QRect(
+            qRound(popup->x() * scale), qRound(popup->y() * scale),
+            qRound(popup->width() * scale), qRound(popup->height() * scale)));
+    };
+    const QImage plain = capture_popup();
+    bool ok = check(!plain.isNull(), id, "visible call tip must render an image");
+    fixture.editor.send(SCI_CALLTIPSETHLT, 0, 8);
+    const QImage highlighted = capture_popup();
+    // Compare the API's reversible state change: subpixel antialiasing can
+    // produce red edge pixels even when the requested text color is black.
+    ok &= check(!highlighted.isNull() && highlighted != plain, id,
+        "changing the highlight must change the published call-tip image");
+    fixture.editor.send(SCI_CALLTIPSETHLT, 0, 0);
+    ok &= check(capture_popup() == plain, id,
+        "clearing the highlight must restore the original call-tip image");
+    fixture.editor.send(SCI_CALLTIPCANCEL);
+    ok &= check(popup.isNull(), id, "cancel must destroy the painted call tip");
+    fixture.editor.sends(SCI_CALLTIPSHOW, 0, "second call tip");
+    fixture.pump();
+    ok &= check(fixture.editor.send(SCI_CALLTIPACTIVE) != 0, id,
+        "call tip must reopen after its published image is destroyed");
+    ok &= check(!window.grabWindow().isNull(), id, "reopened call tip must render");
+    fixture.editor.send(SCI_CALLTIPCANCEL);
+    return ok;
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -2850,6 +2912,7 @@ int main(int argc, char** argv)
         {"annotation_boxed_padding",                 test_annotation_boxed_padding},
         {"eol_annotation_boxed",                     test_eol_annotation_boxed},
         {"overlapping_indicators",                   test_overlapping_indicators},
+        {"call_tip_highlight_rendering",              test_call_tip_highlight_rendering},
     };
 
     int fixture_pass = 0;
