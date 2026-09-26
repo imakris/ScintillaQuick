@@ -183,13 +183,12 @@ private:
     bool          m_device_owned  = false;
     bool          m_painter_owned = false;
     bool          m_capture_only  = false;
-    SurfaceMode   m_mode;
 
     void Clear();
 
 public:
     Surface_impl();
-    Surface_impl(int width, int height, SurfaceMode surface_mode);
+    Surface_impl(int width, int height);
     virtual ~Surface_impl();
 
     void Init(bool signature_flag, Scintilla::Internal::PainterID pid) override;

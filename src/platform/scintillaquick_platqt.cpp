@@ -14,7 +14,6 @@
 #include "Scintilla.h"
 #include "XPM.h"
 #include "UniConversion.h"
-#include "DBCS.h"
 
 #include <QGuiApplication>
 #include <QFont>
@@ -343,7 +342,7 @@ std::shared_ptr<Font> Font::Allocate(const FontParameters& fp)
 
 Surface_impl::Surface_impl() = default;
 
-Surface_impl::Surface_impl(int width, int height, SurfaceMode surface_mode)
+Surface_impl::Surface_impl(int width, int height)
 {
     if (width < 1) {
         width = 1;
@@ -353,7 +352,6 @@ Surface_impl::Surface_impl(int width, int height, SurfaceMode surface_mode)
     }
     m_device_owned = true;
     m_device       = new QPixmap(width, height);
-    m_mode         = surface_mode;
 }
 
 Surface_impl::~Surface_impl()
@@ -400,12 +398,11 @@ void Surface_impl::Init(SurfaceID sid, WindowID /*wid*/)
 
 std::unique_ptr<Surface> Surface_impl::AllocatePixMap(int width, int height)
 {
-    return std::make_unique<Surface_impl>(width, height, m_mode);
+    return std::make_unique<Surface_impl>(width, height);
 }
 
-void Surface_impl::SetMode(SurfaceMode surface_mode)
+void Surface_impl::SetMode(SurfaceMode /*surface_mode*/)
 {
-    m_mode = surface_mode;
 }
 
 void Surface_impl::Release() noexcept
@@ -981,34 +978,13 @@ void Surface_impl::MeasureWidths(
             }
         }
 
-        if (m_mode.codePage == SC_CP_UTF8) {
-            fill_utf8_cursor_positions_from_cursor(
-                text,
-                su.size(),
-                positions,
-                [&tl](int cursor_position) {
-                    return tl.cursorToX(cursor_position);
-                });
-        }
-        else
-        if (m_mode.codePage) {
-            // DBCS
-            int ui = 0;
-            for (size_t i = 0; i < text.length();) {
-                size_t len_char = DBCSIsLeadByte(m_mode.codePage, text[i]) ? 2 : 1;
-                qreal x_position = tl.cursorToX(ui + 1);
-                for (unsigned int byte_pos = 0; (byte_pos < len_char) && (i < text.length()); byte_pos++) {
-                    positions[i++] = x_position;
-                }
-                ui++;
-            }
-        }
-        else {
-            // Single byte encoding
-            for (int i = 0; i < static_cast<int>(text.length()); i++) {
-                positions[i] = tl.cursorToX(i + 1);
-            }
-        }
+        fill_utf8_cursor_positions_from_cursor(
+            text,
+            su.size(),
+            positions,
+            [&tl](int cursor_position) {
+                return tl.cursorToX(cursor_position);
+            });
     }
 }
 
@@ -1966,7 +1942,6 @@ public:
     [[nodiscard]] Quick_list_box_item* GetWidget() const noexcept;
 
 private:
-    bool m_unicode_mode{false};
     int m_visible_rows{5};
     QMap<int, QPixmap> m_images;
     QFont m_font;
@@ -1981,10 +1956,9 @@ void List_box_impl::Create(
     int        /*ctrlID*/,
     Point      location,
     int        /*lineHeight*/,
-    bool       unicode_mode,
+    bool       /*unicode_mode*/,
     Technology /*technology*/)
 {
-    m_unicode_mode = unicode_mode;
     Destroy();
 
     // Resolve through ownership tracking so a stale owned parent becomes
@@ -2057,7 +2031,7 @@ void List_box_impl::Clear() noexcept
 void List_box_impl::Append(char* s, int type)
 {
     if (Quick_list_box_item* list = GetWidget()) {
-        list->appendItem(m_unicode_mode ? QString::fromUtf8(s) : QString::fromLocal8Bit(s), type);
+        list->appendItem(QString::fromUtf8(s), type);
     }
 }
 
@@ -2082,13 +2056,13 @@ int List_box_impl::GetSelection()
 int List_box_impl::Find(const char* prefix)
 {
     Quick_list_box_item* list = GetWidget();
-    return list ? list->findPrefix(m_unicode_mode ? QString::fromUtf8(prefix) : QString::fromLocal8Bit(prefix)) : -1;
+    return list ? list->findPrefix(QString::fromUtf8(prefix)) : -1;
 }
 std::string List_box_impl::GetValue(int n)
 {
     Quick_list_box_item* list = GetWidget();
     QString str               = list ? list->valueAt(n) : QString();
-    QByteArray bytes          = m_unicode_mode ? str.toUtf8() : str.toLocal8Bit();
+    QByteArray bytes          = str.toUtf8();
     return std::string(bytes.constData(), static_cast<size_t>(bytes.size()));
 }
 
