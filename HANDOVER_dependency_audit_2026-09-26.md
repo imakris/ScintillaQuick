@@ -1,10 +1,29 @@
 # Dependency audit completion — 2026-09-26
 
-All validated findings owned exclusively by ScintillaQuick have been addressed on `master` through `ebcb1e6`. The inventory covers **20 local IDs representing 19 distinct findings** because XC-07 duplicates SQ-10. Unsupported parts of the original claims are explicitly narrowed below; completion does not mean every original recommendation was implemented.
+The original ScintillaQuick-local inventory covers **20 IDs representing 19 distinct findings** because XC-07 duplicates SQ-10. Its validated fixes were published through `ebcb1e6`; the local evidence below remains historical. Unsupported parts of the original claims are explicitly narrowed rather than claimed implemented.
 
-The source audit is `C:/plms/varinomics/_agent_reports/dependency_audit_2026-09-26.md`. **SQ-05, SQ-08 and XB-02 remain excluded** because they require other repositories, as do consumer-owned findings that merely mention ScintillaQuick. This work does not close those findings.
+The user expanded this work to valid ScintillaQuick-related findings across repositories and authorized public API and consumer changes. The former repository-based exclusions of **SQ-05, SQ-08 and XB-02 are revoked**. The expanded scope also includes MG-02's shared syntax/palette boundary and affected MG-04/MG-08 integration behavior. Incidental ScintillaQuick mentions in unrelated findings do not create additional editor defects.
 
-## Published disposition
+The source audit is `C:/plms/varinomics/_agent_reports/dependency_audit_2026-09-26.md`.
+
+## Expanded cross-repository disposition
+
+The expanded fixes are implemented and independently reviewed. Validated product revisions are ScintillaQuick `a5d5bc5`, vnm_framework `8ed2339`, vnm_merge `b43c79d`, and Logonomic `916534c9`. SQ-05/XB-02, SQ-08 and the remaining MG-02 syntax/palette finding are addressed across their owners; repository boundaries are not exclusions.
+
+| Finding IDs | Result |
+|---|---|
+| SQ-05, XB-02 | Framework builds and exports the canonical ScintillaQuick target instead of maintaining a parallel source list/definitions. Optional Lexilla acquisition/build/install has one helper owned by ScintillaQuick; the core editor remains independent of Lexilla. Merge no longer requires Lexilla because syntax policy belongs to its host. Logonomic source selection and installed framework consumers use the same providers. |
+| SQ-08 | ScintillaQuick owns scroll range/page/value state, automatic line-number margins and shared color conversion. Framework and Logonomic consumers use the owner APIs and remove duplicate default-font, margin and scrollbar bookkeeping. Shared framework editor colors supply both document and structured-event consumers. |
+| MG-02 | Framework owns the shared path/keyword/syntax-palette configurator. Both real Logonomic entrypoints register a diff subclass that supplies it. Merge has a per-view host callback and explicitly documented plain-text behavior without one; its duplicated C++ tables are deleted. Decoded side-specific diff paths, missing-side fallback, supported language selection, theme/font resets and live lexer reuse are preserved. |
+| MG-04 / MG-08 editor-related slices | Previously published merge fixes remain in place: color-only changes preserve documents and lexer ownership, and redundant Scintilla metatype registration remains removed. The affected merge gate is revalidated. |
+
+Expanded Windows evidence: ScintillaQuick static and shared suites passed 12/12 each; the combined optional-Lexilla shared candidate passed 12/12 and installed. Framework source syntax smoke and a fresh installed consumer passed without provider pre-find calls. Merge passed 3/3 direct runtime tests plus the focused theme/syntax gate. Source and installed-SQ-only host fixtures each passed all four BUILD_TESTING/opt-in configurations, real public-consumer compile/link/runtime, target reuse and no Lexilla acquisition. Lumis and Phylax configured/generated with canonical provider-owned ScintillaQuick object lists; these gates do not claim full application builds or runtime coverage. Phylax optional ML processors were disabled for the bounded editor integration gate.
+
+Logonomic's structured-session suite passed **8/8 using native Windows frames**, including follow-tail/manual scrolling and fitting-to-overflowing-to-fitting horizontal-scrollbar behavior. The old windowless fixture observed the initial unmeasured Scintilla scroll width; the corrected test explicitly captures real frames and retains the fitting-content requirement. Both actual application entrypoints, the git-log viewer and main Logonomic executable, compiled and linked successfully; main deployment completed. The standard registered structured-session gate also passed 1/1.
+
+Builds used queued distributed FASTBuild 1.20 on XENIA after successful preflight, VS 2026 x64/MSVC v145, captured environment disabled and embedded debug information. Detailed scratch evidence is under `C:/plms/_scratch/ScintillaQuick-crossrepo-20260926/gates`. No new hosted cross-platform success is implied by the historical workflows below.
+
+## Published local disposition
 
 | Finding IDs | Commits | Result and qualification |
 |---|---|---|
@@ -27,7 +46,7 @@ CI repair `54b49cc` corrected protected-enum qualification and used the public s
 
 SQ-07 profiling found no UTF8 measurement calls in the normal measured scenarios. Margin scrolling spent approximately 1–2% in WidthText; repeated property synchronization during insertion belonged to SQ-03. These measurements did not justify a generalized WidthText fast path or replacement of the consumer's stronger font probe. Those unsupported recommendations were not adopted. SQ-06's original cache-size claim was also narrowed: the item queried two styles, not 257.
 
-## Verification
+## Original local verification
 
 The final product candidate `ebcb1e6` passed local Windows static and shared CTest suites, **12/12 each**, including **83 renderer cases in each of four native software/RHI × DPR 1/1.25 legs** and **33 unchanged visual-regression fixtures**. The installed shared-library consumer configured, built and ran successfully. The preceding renderer correctness gate also exercised 75 transform cases in each of four backend/DPR legs. Independent review accepted the production batches.
 
@@ -67,4 +86,4 @@ Original baseline reproductions, the narrowed inventory, patches and historical 
 - `g508-performance-summary.json`, `g508-*-frame-parity.json` and matched run records;
 - `g508-static-final-ctest.log`, `g508-shared-ctest.log` and `g508-shared-consumer-*.log`.
 
-The original local WIP `6f4001d` was reconciled by content against `ebcb1e6`. Its useful changes were adopted or corrected; remaining differences were superseded implementations, older tests/documentation or ordering/formatting. The original WIP worktree/branch and the landed CI, renderer and performance worktrees/branches have been removed after checking for unique state. No implementation continuation remains for this local audit. Unrelated worktrees belong to other sessions and were left untouched.
+The original local WIP `6f4001d` was reconciled by content against `ebcb1e6`. Its useful changes were adopted or corrected; remaining differences were superseded implementations, older tests/documentation or ordering/formatting. The original WIP worktree/branch and the landed CI, renderer and performance worktrees/branches have been removed after checking for unique state. No implementation continuation remains for the original local audit or the expanded findings recorded above. Historical local cleanup does not imply that the expanded task worktrees were already removed when these gates ran. Unrelated worktrees belong to other sessions and were left untouched.
