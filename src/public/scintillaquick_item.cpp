@@ -468,11 +468,22 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
     connect(m_core, SIGNAL(notifyParent(Scintilla::NotificationData)), this,
         SLOT(notifyParent(Scintilla::NotificationData)));
 
-    // Connect pass-through signals.
-    connect(m_core, SIGNAL(horizontalRangeChanged(int, int)), this, SIGNAL(horizontalRangeChanged(int, int)));
-    connect(m_core, SIGNAL(verticalRangeChanged(  int, int)), this, SIGNAL(verticalRangeChanged(  int, int)));
-    connect(m_core, SIGNAL(horizontalScrolled(int)), this, SIGNAL(horizontalScrolled(int)));
-    connect(m_core, SIGNAL(verticalScrolled(  int)), this, SIGNAL(verticalScrolled(  int)));
+    connect(m_core, &ScintillaQuick_core::horizontalRangeChanged, this, [this](int maximum, int page) {
+        set_horizontal_scroll_state(maximum, page, static_cast<int>(send(SCI_GETXOFFSET)));
+        emit horizontalRangeChanged(maximum, page);
+    });
+    connect(m_core, &ScintillaQuick_core::horizontalScrolled, this, [this](int value) {
+        set_horizontal_scroll_state(m_horizontal_scroll_max, m_horizontal_scroll_page, value);
+        emit horizontalScrolled(value);
+    });
+    connect(m_core, &ScintillaQuick_core::verticalRangeChanged, this, [this](int maximum, int page) {
+        set_vertical_scroll_state(maximum, page, static_cast<int>(send(SCI_GETFIRSTVISIBLELINE)));
+        emit verticalRangeChanged(maximum, page);
+    });
+    connect(m_core, &ScintillaQuick_core::verticalScrolled, this, [this](int value) {
+        set_vertical_scroll_state(m_vertical_scroll_max, m_vertical_scroll_page, value);
+        emit verticalScrolled(value);
+    });
 
     connect(m_core, SIGNAL(notifyChange()), this, SIGNAL(notifyChange()));
 
@@ -1245,14 +1256,14 @@ void ScintillaQuick_item::enableUpdate(bool enable)
 
 void ScintillaQuick_item::scrollHorizontal(int value)
 {
-    m_core->HorizontalScrollTo(value);
+    m_core->HorizontalScrollTo(std::clamp(value, 0, m_horizontal_scroll_max));
     syncQuickViewProperties();
     request_scene_graph_update(true, false, false);
 }
 
 void ScintillaQuick_item::scrollVertical(int value)
 {
-    m_core->ScrollTo(value);
+    m_core->ScrollTo(std::clamp(value, 0, m_vertical_scroll_max));
     request_scene_graph_update(true, false, true);
 }
 
@@ -3067,6 +3078,8 @@ void ScintillaQuick_item::syncQuickViewProperties()
         }
     });
 
+    update_auto_line_number_margin();
+
     const int char_height          = getCharHeight();
     const int char_width           = getCharWidth();
     const int line_count           = send(SCI_GETLINECOUNT);
@@ -3078,6 +3091,10 @@ void ScintillaQuick_item::syncQuickViewProperties()
     const int visible_columns      = (char_width > 0) ? visible_width / char_width : 0;
     const int first_visible_line   = send(SCI_GETFIRSTVISIBLELINE);
     const int first_visible_column = (char_width > 0) ? send(SCI_GETXOFFSET) / char_width : 0;
+
+    set_vertical_scroll_state(m_vertical_scroll_max, m_vertical_scroll_page, first_visible_line);
+    set_horizontal_scroll_state(m_horizontal_scroll_max, m_horizontal_scroll_page,
+        static_cast<int>(send(SCI_GETXOFFSET)));
 
     using Item = ScintillaQuick_item;
     auto emit_if_changed = [this](int& cached_value, int current_value, void (Item::*signal)()) {
@@ -3103,6 +3120,74 @@ void ScintillaQuick_item::syncQuickViewProperties()
     if (m_logical_height != text_height) {
         m_logical_height = text_height;
         emit logicalHeightChanged();
+    }
+}
+
+void ScintillaQuick_item::set_vertical_scroll_state(int maximum, int page, int value)
+{
+    maximum = std::max(0, maximum);
+    page    = std::max(0, page);
+    value   = std::clamp(value, 0, maximum);
+    const bool maximum_changed = m_vertical_scroll_max != maximum;
+    const bool page_changed    = m_vertical_scroll_page != page;
+    const bool value_changed   = m_vertical_scroll_value != value;
+    m_vertical_scroll_max   = maximum;
+    m_vertical_scroll_page  = page;
+    m_vertical_scroll_value = value;
+    if (maximum_changed) {
+        emit vertical_scroll_max_changed();
+    }
+    if (page_changed) {
+        emit vertical_scroll_page_changed();
+    }
+    if (value_changed) {
+        emit vertical_scroll_value_changed();
+    }
+}
+
+void ScintillaQuick_item::set_horizontal_scroll_state(int maximum, int page, int value)
+{
+    maximum = std::max(0, maximum);
+    page    = std::max(0, page);
+    value   = std::clamp(value, 0, maximum);
+    const bool maximum_changed = m_horizontal_scroll_max != maximum;
+    const bool page_changed    = m_horizontal_scroll_page != page;
+    const bool value_changed   = m_horizontal_scroll_value != value;
+    m_horizontal_scroll_max   = maximum;
+    m_horizontal_scroll_page  = page;
+    m_horizontal_scroll_value = value;
+    if (maximum_changed) {
+        emit horizontal_scroll_max_changed();
+    }
+    if (page_changed) {
+        emit horizontal_scroll_page_changed();
+    }
+    if (value_changed) {
+        emit horizontal_scroll_value_changed();
+    }
+}
+
+void ScintillaQuick_item::set_auto_line_number_margin(int margin, int padding)
+{
+    m_auto_line_number_margin   = margin >= 0 && margin < send(SCI_GETMARGINS) ? margin : -1;
+    m_line_number_margin_padding = std::max(0, padding);
+    if (m_auto_line_number_margin >= 0) {
+        send(SCI_SETMARGINTYPEN, m_auto_line_number_margin, SC_MARGIN_NUMBER);
+        update_auto_line_number_margin();
+    }
+}
+
+void ScintillaQuick_item::update_auto_line_number_margin()
+{
+    if (m_auto_line_number_margin < 0 || m_auto_line_number_margin >= send(SCI_GETMARGINS)) {
+        return;
+    }
+    const int line_count = std::max(1, static_cast<int>(send(SCI_GETLINECOUNT)));
+    const QByteArray sample(QString::number(line_count).size(), '9');
+    const int width = static_cast<int>(sends(SCI_TEXTWIDTH, STYLE_LINENUMBER, sample.constData()))
+        + m_line_number_margin_padding;
+    if (send(SCI_GETMARGINWIDTHN, m_auto_line_number_margin) != width) {
+        send(SCI_SETMARGINWIDTHN, m_auto_line_number_margin, width);
     }
 }
 

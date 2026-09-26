@@ -185,6 +185,22 @@ struct SCINTILLAQUICK_EXPORT ScintillaQuick_edit_result
 using ScintillaQuick_edit_handler =
     std::function<ScintillaQuick_edit_result(const ScintillaQuick_edit_transaction&)>;
 
+namespace scintillaquick {
+
+// Scintilla RGB messages use 0x00BBGGRR; alpha belongs to separate messages.
+inline int rgb_from_color(const QColor& color)
+{
+    const QColor rgb = color.toRgb();
+    return rgb.red() | (rgb.green() << 8) | (rgb.blue() << 16);
+}
+
+inline QColor color_from_rgb(int rgb)
+{
+    return QColor(rgb & 0xff, (rgb >> 8) & 0xff, (rgb >> 16) & 0xff);
+}
+
+} // namespace scintillaquick
+
 // Scrollbar interaction is handled by the surrounding Qt Quick container
 // rather than by embedding widget-style scrollbars into the editor item
 // itself. The item therefore renders the full editor surface and relies on
@@ -192,6 +208,13 @@ using ScintillaQuick_edit_handler =
 class SCINTILLAQUICK_EXPORT ScintillaQuick_item : public QQuickItem
 {
     Q_OBJECT
+
+    Q_PROPERTY(int vertical_scroll_max READ vertical_scroll_max NOTIFY vertical_scroll_max_changed)
+    Q_PROPERTY(int vertical_scroll_page READ vertical_scroll_page NOTIFY vertical_scroll_page_changed)
+    Q_PROPERTY(int vertical_scroll_value READ vertical_scroll_value NOTIFY vertical_scroll_value_changed)
+    Q_PROPERTY(int horizontal_scroll_max READ horizontal_scroll_max NOTIFY horizontal_scroll_max_changed)
+    Q_PROPERTY(int horizontal_scroll_page READ horizontal_scroll_page NOTIFY horizontal_scroll_page_changed)
+    Q_PROPERTY(int horizontal_scroll_value READ horizontal_scroll_value NOTIFY horizontal_scroll_value_changed)
 
     Q_PROPERTY(QString text READ getText WRITE setText NOTIFY textChanged)
     Q_PROPERTY(QFont font READ getFont WRITE setFont NOTIFY fontChanged)
@@ -328,6 +351,19 @@ public:
     // including `length`, stay caller-mutable and are forwarded as written.
     void replace_notification_text(const QByteArray& text);
 
+    // Scroll state is clamped to a nonnegative range. Each axis is updated
+    // before its change notifications and the corresponding raw core signal.
+    int vertical_scroll_max() const { return m_vertical_scroll_max; }
+    int vertical_scroll_page() const { return m_vertical_scroll_page; }
+    int vertical_scroll_value() const { return m_vertical_scroll_value; }
+    int horizontal_scroll_max() const { return m_horizontal_scroll_max; }
+    int horizontal_scroll_page() const { return m_horizontal_scroll_page; }
+    int horizontal_scroll_value() const { return m_horizontal_scroll_value; }
+
+    // A negative margin disables management without changing its current width.
+    // Enabled margins use number type and follow document, style and zoom changes.
+    void set_auto_line_number_margin(int margin, int padding = 16);
+
 public slots:
     // Scroll events coming from GUI to be sent to Scintilla.
     void scrollHorizontal(int value);
@@ -337,6 +373,12 @@ public slots:
     void notifyParent(Scintilla::NotificationData scn);
 
 signals:
+    void vertical_scroll_max_changed();
+    void vertical_scroll_page_changed();
+    void vertical_scroll_value_changed();
+    void horizontal_scroll_max_changed();
+    void horizontal_scroll_page_changed();
+    void horizontal_scroll_value_changed();
     void cursorPositionChanged();
     void horizontalScrolled(int value);
     void verticalScrolled(int value);
@@ -454,6 +496,10 @@ protected:
     QSGNode* updatePaintNode(QSGNode* old_node, UpdatePaintNodeData* update_paint_node_data) override;
 
 private:
+    void set_vertical_scroll_state(int maximum, int page, int value);
+    void set_horizontal_scroll_state(int maximum, int page, int value);
+    void update_auto_line_number_margin();
+
     // The core observes actual document mutations (InsertText/DeleteText)
     // through Editor::NotifyModified(), below the public notification
     // stream, and reports them through record_actual_text_mutation().
@@ -596,6 +642,15 @@ private:
     QFont m_font;
     Qt::InputMethodHints m_input_method_hints;
     qint64 m_last_touch_press_time;
+
+    int m_vertical_scroll_max = 0;
+    int m_vertical_scroll_page = 0;
+    int m_vertical_scroll_value = 0;
+    int m_horizontal_scroll_max = 0;
+    int m_horizontal_scroll_page = 0;
+    int m_horizontal_scroll_value = 0;
+    int m_auto_line_number_margin = -1;
+    int m_line_number_margin_padding = 16;
 
     Scintilla::Internal::ScintillaQuick_core* m_core;
 

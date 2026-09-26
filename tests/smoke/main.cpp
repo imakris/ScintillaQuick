@@ -1450,6 +1450,78 @@ void test_find_and_replace_panel(ScintillaQuick_item& editor)
     editor.setFindOptions(0);
 }
 
+void test_editor_scroll_and_margin_helpers()
+{
+    ScintillaQuick_item editor;
+    editor.setWidth(320);
+    editor.setHeight(160);
+    editor.send(SCI_SETSCROLLWIDTHTRACKING, 0);
+    editor.send(SCI_SETSCROLLWIDTH, 1000);
+    editor.setProperty("text", QString(200, QLatin1Char('\n')));
+    pump_events();
+
+    bool coherent = true;
+    const auto check_vertical_state = [&] {
+        coherent = coherent && editor.vertical_scroll_max() >= 0 && editor.vertical_scroll_page() >= 0 &&
+            editor.vertical_scroll_value() >= 0 && editor.vertical_scroll_value() <= editor.vertical_scroll_max();
+    };
+    QObject::connect(&editor, &ScintillaQuick_item::vertical_scroll_max_changed, &editor, check_vertical_state);
+    QObject::connect(&editor, &ScintillaQuick_item::vertical_scroll_page_changed, &editor, check_vertical_state);
+    QObject::connect(&editor, &ScintillaQuick_item::vertical_scroll_value_changed, &editor, check_vertical_state);
+    SQ_EXPECT(editor.vertical_scroll_max() > 0);
+    SQ_EXPECT(editor.horizontal_scroll_max() > 0);
+    editor.scrollVertical(editor.vertical_scroll_max() / 2);
+    editor.scrollHorizontal(editor.horizontal_scroll_max() / 2);
+    SQ_EXPECT(editor.vertical_scroll_value() == editor.send(SCI_GETFIRSTVISIBLELINE));
+    SQ_EXPECT(editor.horizontal_scroll_value() == editor.send(SCI_GETXOFFSET));
+    editor.scrollVertical(-100);
+    editor.scrollHorizontal(-100);
+    SQ_EXPECT(editor.vertical_scroll_value() == 0);
+    SQ_EXPECT(editor.horizontal_scroll_value() == 0);
+    editor.scrollVertical(100000);
+    editor.scrollHorizontal(100000);
+    SQ_EXPECT(editor.vertical_scroll_value() == editor.vertical_scroll_max());
+    SQ_EXPECT(editor.horizontal_scroll_value() == editor.horizontal_scroll_max());
+    editor.setProperty("text", QStringLiteral("short"));
+    pump_events();
+    SQ_EXPECT(coherent);
+    SQ_EXPECT(editor.vertical_scroll_max() == 0);
+    SQ_EXPECT(editor.vertical_scroll_value() == 0);
+
+    editor.set_auto_line_number_margin(0);
+    const auto expected_margin_width = [&] {
+        const int lines = static_cast<int>(editor.send(SCI_GETLINECOUNT));
+        const QByteArray sample(QString::number(lines).size(), '9');
+        return editor.sends(SCI_TEXTWIDTH, STYLE_LINENUMBER, sample.constData()) + 16;
+    };
+    SQ_EXPECT(editor.send(SCI_GETMARGINTYPEN, 0) == SC_MARGIN_NUMBER);
+    SQ_EXPECT(editor.send(SCI_GETMARGINWIDTHN, 0) == expected_margin_width());
+    editor.setProperty("text", QString(100, QLatin1Char('\n')));
+    pump_events();
+    SQ_EXPECT(editor.send(SCI_GETMARGINWIDTHN, 0) == expected_margin_width());
+    editor.send(SCI_SETZOOM, 4);
+    pump_events();
+    SQ_EXPECT(editor.send(SCI_GETMARGINWIDTHN, 0) == expected_margin_width());
+    editor.send(SCI_STYLESETSIZEFRACTIONAL, STYLE_LINENUMBER, 1800);
+    pump_events();
+    SQ_EXPECT(editor.send(SCI_GETMARGINWIDTHN, 0) == expected_margin_width());
+    const auto new_document = editor.send(SCI_CREATEDOCUMENT);
+    editor.send(SCI_SETDOCPOINTER, 0, new_document);
+    editor.send(SCI_RELEASEDOCUMENT, 0, new_document);
+    pump_events();
+    SQ_EXPECT(editor.send(SCI_GETMARGINWIDTHN, 0) == expected_margin_width());
+    editor.set_auto_line_number_margin(-1);
+    editor.send(SCI_SETMARGINWIDTHN, 0, 27);
+    editor.setProperty("text", QString(1000, QLatin1Char('\n')));
+    pump_events();
+    SQ_EXPECT(editor.send(SCI_GETMARGINWIDTHN, 0) == 27);
+
+    SQ_EXPECT(scintillaquick::rgb_from_color(QColor(0x12, 0x34, 0x56, 17)) == 0x563412);
+    SQ_EXPECT(scintillaquick::color_from_rgb(0x563412) == QColor(0x12, 0x34, 0x56));
+    const QColor hsv = QColor::fromHsv(120, 255, 255);
+    SQ_EXPECT(scintillaquick::rgb_from_color(hsv) == 0x00ff00);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -1464,6 +1536,7 @@ int main(int argc, char** argv)
     editor.setWidth(640);
     editor.setHeight(480);
 
+    test_editor_scroll_and_margin_helpers();
     test_property_roundtrip(editor);
     test_pixel_sized_font(editor);
     test_insert_and_delete(editor);

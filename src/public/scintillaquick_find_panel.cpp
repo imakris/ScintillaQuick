@@ -26,11 +26,6 @@
 namespace
 {
 
-int scintilla_color(const QColor& color)
-{
-    return color.red() | (color.green() << 8) | (color.blue() << 16);
-}
-
 Scintilla::Position document_length(const ScintillaQuick_item& editor)
 {
     return static_cast<Scintilla::Position>(editor.send(SCI_GETLENGTH));
@@ -538,16 +533,16 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
             field->send(SCI_SETMARGINWIDTHN, margin, 0);
         }
 
-        const int foreground = scintilla_color(m_owner->findPanelFieldForegroundColor());
-        const int background = scintilla_color(m_owner->findPanelFieldBackgroundColor());
+        const int foreground = scintillaquick::rgb_from_color(m_owner->findPanelFieldForegroundColor());
+        const int background = scintillaquick::rgb_from_color(m_owner->findPanelFieldBackgroundColor());
         field->send(SCI_STYLESETFORE, STYLE_DEFAULT, foreground);
         field->send(SCI_STYLESETBACK, STYLE_DEFAULT, background);
         field->send(SCI_STYLECLEARALL);
-        field->send(SCI_SETCARETFORE, scintilla_color(m_owner->findPanelFieldForegroundColor()));
-        field->send(SCI_SETSELFORE, 1, scintilla_color(m_owner->findPanelSelectionForegroundColor()));
-        field->send(SCI_SETSELBACK, 1, scintilla_color(m_owner->findPanelSelectionBackgroundColor()));
-        field->send(SCI_SETADDITIONALSELFORE, scintilla_color(m_owner->findPanelSelectionForegroundColor()));
-        field->send(SCI_SETADDITIONALSELBACK, scintilla_color(m_owner->findPanelSelectionBackgroundColor()));
+        field->send(SCI_SETCARETFORE, scintillaquick::rgb_from_color(m_owner->findPanelFieldForegroundColor()));
+        field->send(SCI_SETSELFORE, 1, scintillaquick::rgb_from_color(m_owner->findPanelSelectionForegroundColor()));
+        field->send(SCI_SETSELBACK, 1, scintillaquick::rgb_from_color(m_owner->findPanelSelectionBackgroundColor()));
+        field->send(SCI_SETADDITIONALSELFORE, scintillaquick::rgb_from_color(m_owner->findPanelSelectionForegroundColor()));
+        field->send(SCI_SETADDITIONALSELBACK, scintillaquick::rgb_from_color(m_owner->findPanelSelectionBackgroundColor()));
     }
 
     bool buttonEnabled(int button) const
