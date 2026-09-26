@@ -1241,6 +1241,9 @@ void ScintillaQuick_item::request_scene_graph_update(
     bool needs_style_sync,
     bool scrolling)
 {
+    if (m_core && m_core->needUpdateUI != Update::None) {
+        m_core->QueueIdleWork(WorkItems::updateUI);
+    }
     if (!m_render_data || !m_updates_enabled) {
         return;
     }
@@ -2521,6 +2524,7 @@ void ScintillaQuick_item::build_render_snapshot()
     if (!m_render_data) {
         return;
     }
+    m_core->process_idle_work();
 
     if (!m_render_data->static_content_dirty && !m_render_data->overlay_content_dirty &&
         m_render_data->caret_capture_valid)
@@ -2533,6 +2537,7 @@ void ScintillaQuick_item::build_render_snapshot()
             m_render_data->frame.caret_primitives.clear();
         }
         m_render_data->snapshot_dirty = false;
+        m_core->NotifyPainted();
         return;
     }
 
@@ -2622,6 +2627,7 @@ void ScintillaQuick_item::build_render_snapshot()
         if (current_scroll_width != previous_scroll_width) {
             syncQuickViewProperties();
         }
+        m_core->NotifyPainted();
     }
 }
 

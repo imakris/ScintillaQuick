@@ -8,6 +8,7 @@
 #include <QClipboard>
 #include <QDropEvent>
 #include <QGuiApplication>
+#include <QEventLoop>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMimeData>
@@ -1193,6 +1194,47 @@ void test_horizontal_scroll_survives_edit_and_margin_update()
     SQ_EXPECT(editor.send(SCI_GETXOFFSET) == offset);
 }
 
+void test_ui_and_capture_notifications()
+{
+    Event_editor editor;
+    editor.setWidth(640);
+    editor.setHeight(240);
+    editor.setProperty("text", QStringLiteral("sample"));
+    QGuiApplication::processEvents(QEventLoop::AllEvents);
+    int selection_updates = 0;
+    int completed_captures = 0;
+    QObject::connect(&editor, &ScintillaQuick_item::updateUi, [&](Scintilla::Update updated) {
+        if ((static_cast<int>(updated) & SC_UPDATE_SELECTION) != 0) {
+            ++selection_updates;
+        }
+    });
+    QObject::connect(&editor, &ScintillaQuick_item::painted, [&] { ++completed_captures; });
+    editor.send(SCI_SETSEL, 1, 1);
+    QGuiApplication::processEvents(QEventLoop::AllEvents);
+    SQ_EXPECT(selection_updates > 0);
+    selection_updates = 0;
+    QKeyEvent select_right(QEvent::KeyPress, Qt::Key_Right, Qt::ShiftModifier);
+    QGuiApplication::sendEvent(&editor, &select_right);
+    QGuiApplication::processEvents(QEventLoop::AllEvents);
+    SQ_EXPECT(selection_updates > 0);
+    editor.capture();
+    SQ_EXPECT(completed_captures > 0);
+
+    bool reentered = false;
+    QObject::connect(&editor, &ScintillaQuick_item::updateUi, [&](Scintilla::Update updated) {
+        if (!reentered && (static_cast<int>(updated) & SC_UPDATE_SELECTION) != 0) {
+            reentered = true;
+            editor.send(SCI_SETSEL, 4, 4);
+        }
+    });
+    selection_updates = 0;
+    editor.send(SCI_SETSEL, 3, 3);
+    QGuiApplication::processEvents(QEventLoop::AllEvents);
+    QGuiApplication::processEvents(QEventLoop::AllEvents);
+    SQ_EXPECT(reentered);
+    SQ_EXPECT(selection_updates == 2);
+}
+
 void test_current_selection_preserves_embedded_nul()
 {
     Event_editor editor;
@@ -1300,6 +1342,7 @@ int main(int argc, char** argv)
     test_external_replace_and_find_does_not_use_stale_target();
     test_handled_target_replacement_restores_target();
     test_input_method_offsets_use_utf16_units();
+    test_ui_and_capture_notifications();
     test_horizontal_scroll_survives_edit_and_margin_update();
     test_input_method_geometry_after_composition();
     test_current_selection_preserves_embedded_nul();

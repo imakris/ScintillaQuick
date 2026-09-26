@@ -927,6 +927,39 @@ void ScintillaQuick_core::NotifyURIDropped(const char* uri)
     NotifyParent(scn);
 }
 
+void ScintillaQuick_core::QueueIdleWork(WorkItems items, Sci::Position up_to)
+{
+    Editor::QueueIdleWork(items, up_to);
+    if (m_idle_work_pending) {
+        return;
+    }
+    m_idle_work_pending = true;
+    QTimer::singleShot(0, this, [this] {
+        if (m_owner && m_idle_work_pending) {
+            process_idle_work();
+        }
+    });
+}
+
+void ScintillaQuick_core::process_idle_work()
+{
+    m_idle_work_pending = false;
+    const WorkNeeded work = workNeeded;
+    workNeeded.Reset();
+    if (FlagSet(work.items, WorkItems::style)) {
+        StyleToPositionInView(pdoc->LineStart(pdoc->LineFromPosition(work.upTo) + 2));
+    }
+    if (needUpdateUI != Update::None) {
+        NotificationData notification = {};
+        notification.nmhdr.code = Notification::UpdateUI;
+        notification.updated = needUpdateUI;
+        // Clear before notifying: a synchronous observer may edit or select
+        // again, and its newly queued work belongs to the next delivery.
+        needUpdateUI = Update::None;
+        NotifyParent(notification);
+    }
+}
+
 bool ScintillaQuick_core::FineTickerRunning(TickReason reason)
 {
     return timers[static_cast<size_t>(reason)] != 0;
@@ -967,10 +1000,15 @@ void ScintillaQuick_core::onIdle()
     if (!m_owner) {
         return;
     }
+    // Idle's upstream notification clears flags after calling observers.
+    // Deliver those flags through the same reentrant-safe path as queued work.
+    const Update pending_ui = std::exchange(needUpdateUI, Update::None);
     const bool continue_idling = Idle();
+    needUpdateUI = needUpdateUI | pending_ui;
     if (!continue_idling) {
         SetIdle(false);
     }
+    process_idle_work();
 }
 
 bool ScintillaQuick_core::ChangeIdle(bool on)

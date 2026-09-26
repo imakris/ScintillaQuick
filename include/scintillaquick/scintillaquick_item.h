@@ -374,6 +374,7 @@ signals:
     void marginClicked(Scintilla::Position position, Scintilla::KeyMod modifiers, int margin);
     void textAreaClicked(Scintilla::Position line, int modifiers);
     void needShown(Scintilla::Position position, Scintilla::Position length);
+    // Emitted on the GUI thread after a render snapshot is ready for presentation.
     void painted();
     void userListSelection(); // Wants some args.
     void uriDropped(const QString& uri);

@@ -720,6 +720,27 @@ static bool test_drag_source_deletion_uses_edit_handler()
     return ok;
 }
 
+static bool test_idle_notification_reentry()
+{
+    const char* id = "idle_notification_reentry";
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("sample"));
+    ScintillaQuick_validation_access::run_idle(editor);
+    int updates = 0;
+    QObject::connect(&editor, &ScintillaQuick_item::updateUi, [&](Scintilla::Update flags) {
+        if ((static_cast<int>(flags) & SC_UPDATE_SELECTION) != 0) {
+            ++updates;
+            if (updates == 1) {
+                editor.send(SCI_SETSEL, 4, 4);
+            }
+        }
+    });
+    editor.send(SCI_SETSEL, 2, 2);
+    ScintillaQuick_validation_access::run_idle(editor);
+    ScintillaQuick_validation_access::run_idle(editor);
+    return check(updates == 2, id, "observer selection changes survive native idle delivery");
+}
+
 static bool test_horizontal_scroll_resets_on_doc_switch()
 {
     const char* id = "horizontal_scroll_resets_on_doc_switch";
@@ -2775,6 +2796,7 @@ int main(int argc, char** argv)
         {"plain_ascii_long_wrap",                    test_plain_ascii_long_wrap},
         {"cached_frame_wrap_toggle_rebuilds",        test_cached_frame_wrap_toggle_rebuilds},
         {"horizontal_scroll_resets_on_doc_switch",   test_horizontal_scroll_resets_on_doc_switch},
+        {"idle_notification_reentry",                test_idle_notification_reentry},
         {"drag_source_deletion_uses_edit_handler",    test_drag_source_deletion_uses_edit_handler},
         {"caret_left_scrolls_to_long_previous_line", test_caret_left_scrolls_to_long_previous_line},
         {"cached_overlay_only_selection_refreshes_overlay",

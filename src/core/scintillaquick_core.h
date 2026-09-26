@@ -180,6 +180,9 @@ private:
     // filters or dispatches any public notification.
     void NotifyModified(Document* document, DocModification mh, void* user_data) override;
     void NotifyURIDropped(const char* uri);
+    void QueueIdleWork(WorkItems items, Sci::Position up_to = 0) override;
+    void process_idle_work();
+    bool m_idle_work_pending = false;
     int timers[static_cast<size_t>(TickReason::dwell) + 1]{};
     bool FineTickerRunning(TickReason reason) override;
     void FineTickerStart(TickReason reason, int millis, int tolerance) override;

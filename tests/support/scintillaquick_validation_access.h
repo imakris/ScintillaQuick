@@ -17,6 +17,8 @@ namespace Scintilla::Internal
 class ScintillaQuick_validation_access
 {
 public:
+    static void run_idle(ScintillaQuick_item& item) { item.m_core->onIdle(); }
+
     static void complete_drag(ScintillaQuick_item& item, Qt::DropAction action, bool outside)
     {
         item.m_core->dropWentOutside = outside;
