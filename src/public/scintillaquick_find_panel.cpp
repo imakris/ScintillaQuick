@@ -212,7 +212,7 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
     {
         const QFontMetricsF metrics(m_panel_font);
         const qreal row_height = std::max<qreal>(28.0, std::ceil(metrics.height()) + 10.0);
-        return row_height * (m_replace_mode ? 2.0 : 1.0);
+        return row_height * (m_replace_mode ? 3.0 : 2.0);
     }
 
     void relayout()
@@ -257,6 +257,9 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
 
         layout_row(0, 0, find_button_width);
         layout_row(1, 3, replace_button_width);
+        m_match_case_rect = QRectF(4.0, (m_replace_mode ? 2.0 : 1.0) * m_row_height,
+            std::ceil(metrics.horizontalAdvance(QStringLiteral("\u2610 Match case"))) + padding * 2.0,
+            m_row_height);
         const qreal field_left = label_width + 1.0;
         const qreal field_right = std::max(field_left + 24.0, shared_button_x - 1.0);
 
@@ -365,6 +368,16 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
             append_text(root, labels[static_cast<std::size_t>(index)], m_button_rects[static_cast<std::size_t>(index)],
                 enabled ? m_foreground_color : m_disabled_foreground_color, true);
         }
+        append_rectangle(root->m_chrome,
+            QRectF(0.0, m_match_case_rect.top(), width(), 1.0), m_border_color);
+        if (m_hovered_button == 6) {
+            append_rectangle(root->m_chrome, m_match_case_rect, m_button_hover_color);
+        }
+        append_text(root,
+            m_owner->findOptions() & SCFIND_MATCHCASE
+                ? QStringLiteral("\u2611 Match case")
+                : QStringLiteral("\u2610 Match case"),
+            m_match_case_rect, m_foreground_color, true);
 
         return root;
     }
@@ -548,6 +561,9 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
 
     bool buttonEnabled(int button) const
     {
+        if (button == 6) {
+            return true;
+        }
         const bool has_find_text = !m_find_visual.text.isEmpty();
         if (button < 3) {
             return has_find_text;
@@ -557,6 +573,9 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
 
     int buttonAt(const QPointF& point) const
     {
+        if (m_match_case_rect.contains(point)) {
+            return 6;
+        }
         const int button_count = m_replace_mode ? 6 : 3;
         for (int index = 0; index < button_count; ++index) {
             if (m_button_rects[static_cast<std::size_t>(index)].contains(point)) {
@@ -586,6 +605,9 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
                 break;
             case 5:
                 m_owner->replaceAll();
+                break;
+            case 6:
+                m_owner->setFindOptions(m_owner->findOptions() ^ SCFIND_MATCHCASE);
                 break;
             default:
                 break;
@@ -776,6 +798,7 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
     QColor m_selection_foreground_color;
     qreal m_row_height = 28.0;
     std::array<QRectF, 6> m_button_rects{};
+    QRectF m_match_case_rect;
     int m_hovered_button = -1;
 };
 
@@ -896,6 +919,9 @@ void ScintillaQuick_item::setFindOptions(int options)
     m_last_find_start = -1;
     m_last_find_end = -1;
     m_last_find_text.clear();
+    if (m_find_panel) {
+        m_find_panel->update();
+    }
     emit findOptionsChanged();
 }
 

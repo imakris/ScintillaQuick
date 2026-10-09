@@ -23,6 +23,7 @@
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMetaType>
+#include <QMouseEvent>
 #include <QPointer>
 #include <QQuickItem>
 #include <QScreen>
@@ -1485,6 +1486,29 @@ void test_find_and_replace_panel(ScintillaQuick_item& editor)
         editor.findChild<QQuickItem*>(QStringLiteral("scintillaquickFindPanel"), Qt::FindDirectChildrenOnly);
     SQ_EXPECT(find_panel != nullptr);
     if (find_panel) {
+        editor.setProperty("text", QStringLiteral("alpha ALPHA alpha"));
+        editor.setFindText(QStringLiteral("alpha"));
+        editor.setReplacementText(QStringLiteral("beta"));
+        editor.setFindOptions(SCFIND_WHOLEWORD);
+        SQ_EXPECT(editor.selectAllFindMatches() == 3);
+        const QPointF case_position(20.0, find_panel->height() - 10.0);
+        QMouseEvent case_click(QEvent::MouseButtonPress, case_position, case_position,
+            Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(find_panel, &case_click);
+        SQ_EXPECT(case_click.isAccepted());
+        SQ_EXPECT(editor.findOptions() == (SCFIND_WHOLEWORD | SCFIND_MATCHCASE));
+        SQ_EXPECT(editor.findText() == QStringLiteral("alpha"));
+        SQ_EXPECT(editor.replacementText() == QStringLiteral("beta"));
+        SQ_EXPECT(editor.selectAllFindMatches() == 2);
+        SQ_EXPECT(editor.replaceAll() == 2);
+        SQ_EXPECT(editor.property("text").toString() == QStringLiteral("beta ALPHA beta"));
+        editor.setProperty("readonly", true);
+        QMouseEvent readonly_case_click(QEvent::MouseButtonPress, case_position, case_position,
+            Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(find_panel, &readonly_case_click);
+        SQ_EXPECT(editor.findOptions() == SCFIND_WHOLEWORD);
+        SQ_EXPECT(editor.replaceAll() == 0);
+        editor.setProperty("readonly", false);
         QQuickItem* find_field = find_panel->findChild<QQuickItem*>(
             QStringLiteral("scintillaquickFindField"), Qt::FindDirectChildrenOnly);
         QQuickItem* replace_field = find_panel->findChild<QQuickItem*>(
