@@ -5,6 +5,7 @@
 
 #include "scintillaquick_core.h"
 #include "scintillaquick_platqt.h"
+#include "scintillaquick_text_encoding.h"
 #include <scintillaquick/scintillaquick_item.h>
 
 #include <QAction>
@@ -96,7 +97,8 @@ public:
         const ScintillaQuick_core::Style_attributes& attributes = attributes_for(run.style_id);
 
         Text_run text_run;
-        text_run.text = QString::fromUtf8(run.utf8_text.data(), static_cast<int>(run.utf8_text.size()));
+        text_run.text = scintillaquick::decode_utf8_body(
+            QByteArrayView(run.utf8_text.data(), static_cast<qsizetype>(run.utf8_text.size())));
         text_run.position            = QPointF(run.x, run.baseline_y);
         text_run.width               = run.width;
         text_run.top                 = run.top;
@@ -204,7 +206,8 @@ public:
         const ScintillaQuick_core::Style_attributes& attributes = attributes_for(text.style_id);
 
         Margin_text_primitive primitive;
-        primitive.text = QString::fromUtf8(text.utf8_text.data(), static_cast<int>(text.utf8_text.size()));
+        primitive.text = scintillaquick::decode_utf8_body(
+            QByteArrayView(text.utf8_text.data(), static_cast<qsizetype>(text.utf8_text.size())));
         primitive.position      = QPointF(text.x, text.top);
         primitive.baseline_y    = text.baseline_y;
         primitive.clip_rect     = rect_from_capture(text.left, text.top, text.right, text.bottom);
@@ -221,7 +224,8 @@ public:
         const ScintillaQuick_core::Style_attributes& attributes = attributes_for(text.style_id);
 
         Fold_display_text_primitive primitive;
-        primitive.text = QString::fromUtf8(text.utf8_text.data(), static_cast<int>(text.utf8_text.size()));
+        primitive.text = scintillaquick::decode_utf8_body(
+            QByteArrayView(text.utf8_text.data(), static_cast<qsizetype>(text.utf8_text.size())));
         primitive.position      = QPointF(text.left, text.top);
         primitive.baseline_y    = text.baseline_y;
         primitive.rect          = rect_from_capture(text.left, text.top, text.right, text.bottom);
@@ -239,8 +243,8 @@ public:
         const ScintillaQuick_core::Style_attributes& attributes = attributes_for(annotation.style_id);
 
         Eol_annotation_primitive primitive;
-        primitive.text = QString::fromUtf8(
-            annotation.utf8_text.data(), static_cast<int>(annotation.utf8_text.size()));
+        primitive.text = scintillaquick::decode_utf8_body(
+            QByteArrayView(annotation.utf8_text.data(), static_cast<qsizetype>(annotation.utf8_text.size())));
         primitive.position      = QPointF(annotation.text_left, annotation.top);
         primitive.baseline_y    = annotation.baseline_y;
         primitive.rect          = rect_from_capture(
@@ -259,8 +263,8 @@ public:
         const ScintillaQuick_core::Style_attributes& attributes = attributes_for(annotation.style_id);
 
         Annotation_primitive primitive;
-        primitive.text = QString::fromUtf8(
-            annotation.utf8_text.data(), static_cast<int>(annotation.utf8_text.size()));
+        primitive.text = scintillaquick::decode_utf8_body(
+            QByteArrayView(annotation.utf8_text.data(), static_cast<qsizetype>(annotation.utf8_text.size())));
         primitive.position        = QPointF(annotation.text_left, annotation.top);
         primitive.baseline_y      = annotation.baseline_y;
         primitive.rect            = rect_from_capture(
@@ -584,7 +588,8 @@ bool ScintillaQuick_core::DragThreshold(Point pt_start, Point pt_now)
 static QString string_from_selected_text(const SelectionText& selected_text)
 {
     Q_UNUSED(selected_text.characterSet);
-    return QString::fromUtf8(selected_text.Data(), static_cast<int>(selected_text.Length()));
+    return scintillaquick::decode_utf8_body(
+        QByteArrayView(selected_text.Data(), static_cast<qsizetype>(selected_text.Length())));
 }
 
 static void add_rectangular_to_mime(QMimeData* mime_data, [[maybe_unused]] const QString& su)
@@ -1044,7 +1049,7 @@ CharacterSet ScintillaQuick_core::CharacterSetOfDocument() const
 
 QString ScintillaQuick_core::StringFromDocument(const char* s) const
 {
-    return QString::fromUtf8(s);
+    return scintillaquick::decode_utf8_body(QByteArrayView(s));
 }
 
 QByteArray ScintillaQuick_core::BytesForDocument(const QString& text) const

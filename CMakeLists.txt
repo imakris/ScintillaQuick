@@ -109,6 +109,7 @@ set(scintillaquick_sources
     src/core/scintillaquick_core.cpp
     src/core/scintillaquick_dispatch_table.h
     src/core/scintillaquick_core.h
+    src/core/scintillaquick_text_encoding.h
     src/platform/scintillaquick_platqt.cpp
     src/platform/scintillaquick_platqt.h
     src/render/scintillaquick_scene_graph_renderer.cpp

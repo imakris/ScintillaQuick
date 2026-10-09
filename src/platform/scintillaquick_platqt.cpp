@@ -11,6 +11,7 @@
 
 #include <scintillaquick/scintillaquick_item.h>
 #include "scintillaquick_platqt.h"
+#include "scintillaquick_text_encoding.h"
 #include "Scintilla.h"
 #include "XPM.h"
 #include "UniConversion.h"
@@ -91,7 +92,7 @@ QString unicode_from_text(std::string_view text)
     if (is_ascii_text(text)) {
         return QString::fromLatin1(text.data(), static_cast<int>(text.length()));
     }
-    return QString::fromUtf8(text.data(), static_cast<int>(text.length()));
+    return scintillaquick::decode_utf8_body(QByteArrayView(text.data(), static_cast<qsizetype>(text.length())));
 }
 
 static QFont::StyleStrategy choose_strategy(FontQuality eff)
@@ -1006,7 +1007,7 @@ void Surface_impl::MeasureWidthsUTF8(
     if (!qfont || !positions) {
         return;
     }
-    QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
+    QString su = scintillaquick::decode_utf8_body(QByteArrayView(text.data(), static_cast<qsizetype>(text.length())));
     QTextLayout tlay(su, *qfont, GetPaintDevice());
     tlay.beginLayout();
     QTextLine tl = tlay.createLine();
@@ -1027,7 +1028,7 @@ XYPOSITION Surface_impl::WidthTextUTF8(const Font* font, std::string_view text)
         return 0;
     }
     QFontMetricsF metrics(*qfont, GetPaintDevice());
-    QString su = QString::fromUtf8(text.data(), static_cast<int>(text.length()));
+    QString su = scintillaquick::decode_utf8_body(QByteArrayView(text.data(), static_cast<qsizetype>(text.length())));
     return metrics.horizontalAdvance(su);
 }
 
@@ -1999,7 +2000,7 @@ void List_box_impl::Clear() noexcept
 void List_box_impl::Append(char* s, int type)
 {
     if (Quick_list_box_item* list = GetWidget()) {
-        list->appendItem(QString::fromUtf8(s), type);
+        list->appendItem(scintillaquick::decode_utf8_body(QByteArrayView(s)), type);
     }
 }
 
@@ -2024,7 +2025,7 @@ int List_box_impl::GetSelection()
 int List_box_impl::Find(const char* prefix)
 {
     Quick_list_box_item* list = GetWidget();
-    return list ? list->findPrefix(QString::fromUtf8(prefix)) : -1;
+    return list ? list->findPrefix(scintillaquick::decode_utf8_body(QByteArrayView(prefix))) : -1;
 }
 std::string List_box_impl::GetValue(int n)
 {

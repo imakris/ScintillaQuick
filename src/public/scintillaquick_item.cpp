@@ -10,6 +10,7 @@
 #include "scintillaquick_dispatch_table.h"
 #include "scintillaquick_platqt.h"
 #include "scintillaquick_scene_graph_renderer.h"
+#include "scintillaquick_text_encoding.h"
 
 // Internal Scintilla headers that are not part of the public
 // `scintillaquick_item.h` surface. They are required here for Platform::,
@@ -2385,7 +2386,8 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
             const SelectionRange& range = m_core->sel.RangeMain();
             const std::string text =
                 m_core->RangeText(range.Start().Position(), range.End().Position());
-            return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+            return scintillaquick::decode_utf8_body(
+                QByteArrayView(text.data(), static_cast<qsizetype>(text.size())));
         }
 
         default:
@@ -2818,7 +2820,7 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
             break;
 
         case Notification::AutoCSelection:
-            emit autoCompleteSelection(scn.lParam, QString::fromUtf8(delivered_text));
+            emit autoCompleteSelection(scn.lParam, scintillaquick::decode_utf8_body(delivered_text));
             break;
 
         case Notification::AutoCCancelled:
@@ -2867,7 +2869,7 @@ QString ScintillaQuick_item::getText() const
     const int text_length = static_cast<int>(send(SCI_GETTEXTLENGTH));
     QByteArray buffer(text_length + 1, Qt::Uninitialized);
     send(SCI_GETTEXT, text_length + 1, reinterpret_cast<sptr_t>(buffer.data()));
-    return QString::fromUtf8(buffer.constData(), text_length);
+    return scintillaquick::decode_utf8_body(QByteArrayView(buffer.constData(), text_length));
 }
 
 void ScintillaQuick_item::setText(const QString& txt)

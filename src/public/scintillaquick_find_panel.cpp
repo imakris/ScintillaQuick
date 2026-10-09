@@ -2,6 +2,7 @@
 // Licensed under the BSD 2-Clause License, see LICENSE file for details.
 
 #include <scintillaquick/scintillaquick_item.h>
+#include "scintillaquick_text_encoding.h"
 
 #include <QFontMetricsF>
 #include <QHoverEvent>
@@ -47,7 +48,7 @@ void seed_find_text_from_selection(ScintillaQuick_item& editor)
     const auto length = static_cast<qsizetype>(editor.send(SCI_GETSELTEXT));
     QByteArray selected(length + 1, Qt::Uninitialized);
     editor.send(SCI_GETSELTEXT, 0, reinterpret_cast<Scintilla::sptr_t>(selected.data()));
-    editor.setFindText(QString::fromUtf8(selected.constData(), length));
+    editor.setFindText(scintillaquick::decode_utf8_body(QByteArrayView(selected.constData(), length)));
 }
 
 void clear_children(QSGNode* node)
@@ -641,7 +642,7 @@ class ScintillaQuick_item::Find_panel final : public QQuickItem
         auto utf16_index = [&utf8](Scintilla::Position byte_position) {
             const qsizetype bounded_position =
                 std::clamp<qsizetype>(static_cast<qsizetype>(byte_position), 0, utf8.size());
-            return QString::fromUtf8(utf8.constData(), bounded_position).size();
+            return scintillaquick::decode_utf8_body(QByteArrayView(utf8.constData(), bounded_position)).size();
         };
         const int caret_index = utf16_index(state.caret);
         const int selection_start_index = utf16_index(state.selection_start);

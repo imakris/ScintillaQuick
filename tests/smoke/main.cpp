@@ -15,9 +15,11 @@
 #include "scintillaquick_core.h"
 
 #include <QCoreApplication>
+#include <QClipboard>
 #include <QEventLoop>
 #include <QDebug>
 #include <QGuiApplication>
+#include <QImage>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMetaType>
@@ -28,6 +30,7 @@
 #include <QQmlEngine>
 #include <QTextCharFormat>
 #include <QTextFormat>
+#include <QTextLayout>
 #include <QUrl>
 #include <qqml.h>
 
@@ -136,6 +139,68 @@ void test_property_roundtrip(ScintillaQuick_item& editor)
 
     SQ_EXPECT(text_length(editor) == text.size());
     SQ_EXPECT(editor.property("text").toString() == text);
+}
+
+class Body_getter_probe_editor final : public ScintillaQuick_item
+{
+public:
+    using ScintillaQuick_item::inputMethodQuery;
+};
+
+void test_utf8_body_prefix_getters()
+{
+    Body_getter_probe_editor editor;
+    const QString marker(QChar(0xFEFF));
+    for (const QString& body : {marker + QStringLiteral("body"),
+                               marker + marker + QStringLiteral("body"),
+                               QStringLiteral("prefix") + marker + QStringLiteral("body")})
+    {
+        SQ_EXPECT(editor.setProperty("text", body));
+        SQ_EXPECT(editor.property("text").toString() == body);
+        const QByteArray bytes = body.toUtf8();
+        QByteArray raw(bytes.size() + 1, Qt::Uninitialized);
+        editor.send(SCI_GETTEXT, raw.size(), reinterpret_cast<sptr_t>(raw.data()));
+        raw.chop(1);
+        SQ_EXPECT(raw == bytes);
+        editor.send(SCI_SETSEL, 0, bytes.size());
+        SQ_EXPECT(editor.inputMethodQuery(Qt::ImCurrentSelection).toString() == body);
+        SQ_EXPECT(editor.inputMethodQuery(Qt::ImSurroundingText).toString() == body);
+        editor.send(SCI_COPY);
+        SQ_EXPECT(QGuiApplication::clipboard()->text() == body);
+        editor.showFind();
+        SQ_EXPECT(editor.findText() == body);
+        editor.hideFindPanel();
+        editor.send(SCI_SETTARGETRANGE, bytes.size() - 4, bytes.size());
+        editor.sends(SCI_REPLACETARGET, 4, "Body");
+        const QString changed = body.left(body.size() - 4) + QStringLiteral("Body");
+        SQ_EXPECT(editor.property("text").toString() == changed);
+        editor.send(SCI_UNDO);
+        SQ_EXPECT(editor.property("text").toString() == body);
+        editor.send(SCI_REDO);
+        SQ_EXPECT(editor.property("text").toString() == changed);
+
+        const QByteArray family = QByteArrayLiteral("Cousine");
+        const auto font = Scintilla::Internal::Font::Allocate(
+            Scintilla::Internal::FontParameters(family.constData(), 11));
+        const QFont qt_font(QStringLiteral("Cousine"), 11);
+        QImage image(1, 1, QImage::Format_ARGB32_Premultiplied);
+        Scintilla::Internal::Surface_impl surface;
+        surface.Init(static_cast<Scintilla::Internal::SurfaceID>(&image), nullptr);
+        std::vector<Scintilla::Internal::XYPOSITION> positions(static_cast<size_t>(bytes.size()));
+        surface.MeasureWidths(font.get(), std::string_view(bytes.constData(), bytes.size()), positions.data());
+        QTextLayout layout(body, qt_font, &image);
+        layout.beginLayout();
+        const QTextLine line = layout.createLine();
+        layout.endLayout();
+        size_t byte_index = 0;
+        for (qsizetype character = 0; character < body.size(); ++character) {
+            const qreal expected = line.cursorToX(static_cast<int>(character + 1));
+            const QByteArray character_bytes = body.mid(character, 1).toUtf8();
+            for (qsizetype byte = 0; byte < character_bytes.size(); ++byte) {
+                SQ_EXPECT(std::abs(positions[byte_index++] - expected) < 0.01);
+            }
+        }
+    }
 }
 
 void test_pixel_sized_font(ScintillaQuick_item& editor)
@@ -1536,8 +1601,14 @@ int main(int argc, char** argv)
     editor.setWidth(640);
     editor.setHeight(480);
 
+    if (app.arguments().contains(QStringLiteral("--utf8-body-contracts"))) {
+        test_utf8_body_prefix_getters();
+        return g_failures == 0 ? 0 : 1;
+    }
+
     test_editor_scroll_and_margin_helpers();
     test_property_roundtrip(editor);
+    test_utf8_body_prefix_getters();
     test_pixel_sized_font(editor);
     test_insert_and_delete(editor);
     test_command_signal_propagates_synchronously(editor);
