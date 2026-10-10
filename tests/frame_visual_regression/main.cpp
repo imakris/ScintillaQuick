@@ -178,6 +178,32 @@ struct Fixture_editor
         return false;
     }
 
+    void dump_render_inputs(const char* fixture_name)
+    {
+        const QFont configured = editor.getFont();
+        const QFontInfo resolved(configured);
+        QByteArray style_font(
+            static_cast<qsizetype>(editor.send(SCI_STYLEGETFONT, STYLE_DEFAULT)) + 1, '\0');
+        editor.send(SCI_STYLEGETFONT, STYLE_DEFAULT, reinterpret_cast<sptr_t>(style_font.data()));
+
+        qDebug("capture[%s]: Qt=%s platform=%s dpr=%.3f configured-font='%s' "
+               "resolved-property-font='%s' style='%s' point-size=%.3f pixel-size=%d "
+               "weight=%d italic=%d strategy=%d exact-match=%d",
+            fixture_name, qVersion(), qPrintable(QGuiApplication::platformName()),
+            window.devicePixelRatio(), qPrintable(configured.family()), qPrintable(resolved.family()),
+            qPrintable(resolved.styleName()), resolved.pointSizeF(), resolved.pixelSize(),
+            static_cast<int>(resolved.weight()), resolved.italic(),
+            static_cast<int>(configured.styleStrategy()), resolved.exactMatch());
+        qDebug("capture[%s]: native-default-font='%s' native-quality=%lld "
+               "native-default-size-fractional=%lld native-text-height=%lld native-Hg-width=%lld",
+            fixture_name, style_font.constData(),
+            static_cast<long long>(editor.send(SCI_GETFONTQUALITY)),
+            static_cast<long long>(editor.send(SCI_STYLEGETSIZEFRACTIONAL, STYLE_DEFAULT)),
+            static_cast<long long>(editor.send(SCI_TEXTHEIGHT, 0)),
+            static_cast<long long>(editor.send(SCI_TEXTWIDTH, STYLE_DEFAULT,
+                reinterpret_cast<sptr_t>("Hg"))));
+    }
+
     QImage capture_image(const char* fixture_name)
     {
         pump();
@@ -223,6 +249,7 @@ struct Fixture_editor
             qWarning("capture[%s]: grabWindow() returned null", fixture_name);
         }
 
+        dump_render_inputs(fixture_name);
         return result;
     }
 
@@ -1208,6 +1235,8 @@ static Fixture_outcome vr_eol_annotation_boxed()
 
 int main(int argc, char** argv)
 {
+    qputenv("QT_FORCE_STDERR_LOGGING", "1");
+
     // Pin DPI and scale factor for deterministic rendering.
     qputenv("QT_FONT_DPI", "96");
     qputenv("QT_SCALE_FACTOR", "1");
