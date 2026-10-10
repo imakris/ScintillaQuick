@@ -1239,6 +1239,12 @@ sptr_t ScintillaQuick_core::WndProc(Message i_message, uptr_t w_param, sptr_t l_
     try {
         switch (i_message) {
 
+            case Message::SetDocPointer:
+                // Even an equal-pointer or away-and-back bind is a new custody incarnation.
+                ++m_owner->m_native_binding_revision;
+                result = ScintillaBase::WndProc(i_message, w_param, l_param);
+                break;
+
             case Message::SetBidirectional:
                 bidirectional = static_cast<Scintilla::Bidirectional>(w_param);
                 InvalidateStyleData();

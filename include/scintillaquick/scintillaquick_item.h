@@ -351,6 +351,9 @@ public:
     // including `length`, stay caller-mutable and are forwarded as written.
     void replace_notification_text(const QByteArray& text);
 
+    std::uint64_t native_binding_revision() const { return m_native_binding_revision; }
+    std::uint64_t native_content_revision() const { return m_mutation_generation; }
+
     // Scroll state is clamped to a nonnegative range. Each axis is updated
     // before its change notifications and the corresponding raw core signal.
     int vertical_scroll_max() const { return m_vertical_scroll_max; }
@@ -692,6 +695,7 @@ private:
     mutable bool          m_text_dirty           = false;
     mutable bool          m_readonly_dirty       = false;
     mutable std::uint64_t m_mutation_generation  = 0;
+    std::uint64_t m_native_binding_revision = 0;
     void record_actual_text_mutation();
     void begin_property_batch() const;
     void end_property_batch() const;
