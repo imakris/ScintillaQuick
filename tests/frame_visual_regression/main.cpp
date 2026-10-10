@@ -683,6 +683,7 @@ Fixture_outcome run_scroll_probe_fixture(
     int             steps)
 {
     bool generated_any = false;
+    bool failed_any    = false;
     for (int step = 0; step < steps; ++step) {
         const int previous_first_visible_line = static_cast<int>(editor.editor.send(SCI_GETFIRSTVISIBLELINE));
         const quint64 previous_paint_counter = editor.paint_counter;
@@ -736,13 +737,17 @@ Fixture_outcome run_scroll_probe_fixture(
         }
         Fixture_outcome outcome = run_visual_fixture(step_name_bytes.constData(), captured);
         if (outcome == Fixture_outcome::fail) {
-            return outcome;
+            // Preserve the failure while collecting the remaining scroll samples.
+            failed_any = true;
         }
         if (outcome == Fixture_outcome::generated) {
             generated_any = true;
         }
     }
 
+    if (failed_any) {
+        return Fixture_outcome::fail;
+    }
     return generated_any ? Fixture_outcome::generated : Fixture_outcome::pass;
 }
 
