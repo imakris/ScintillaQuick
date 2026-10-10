@@ -1180,9 +1180,10 @@ void test_horizontal_scroll_survives_edit_and_margin_update()
     editor.capture();
     editor.send(SCI_SETSEL, 100, 100);
     const int caret_x = static_cast<int>(editor.send(SCI_POINTXFROMPOSITION, 0, 100));
-    const int offset = caret_x - 250;
+    const int offset = caret_x + static_cast<int>(editor.send(SCI_GETXOFFSET)) - 250;
     SQ_EXPECT(offset > 0);
     editor.send(SCI_SETXOFFSET, offset);
+    SQ_EXPECT(editor.send(SCI_POINTXFROMPOSITION, 0, 100) == 250);
     editor.send(SCI_DELETEBACK);
     SQ_EXPECT(editor.send(SCI_GETXOFFSET) == offset);
     editor.capture();
@@ -1338,6 +1339,11 @@ void test_readonly_drop_preserves_modify_attempt_notification()
 int main(int argc, char** argv)
 {
     QGuiApplication app(argc, argv);
+    if (app.arguments().contains(QStringLiteral("--horizontal-scroll-contract"))) {
+        test_horizontal_scroll_survives_edit_and_margin_update();
+        return g_failures ? 1 : 0;
+    }
+
 
     test_handler_absent_preserves_direct_edit();
     test_handler_dispositions_and_reentrant_apply();

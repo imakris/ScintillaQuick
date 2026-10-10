@@ -541,7 +541,7 @@ protected:
 
 private:
     struct Save_point_acknowledgement;
-    static thread_local Save_point_acknowledgement* m_save_point_acknowledgement;
+    static Save_point_acknowledgement*& save_point_acknowledgement_slot() noexcept;
     bool defer_save_point(Scintilla::NotificationData notification);
     static void publish_save_point_acknowledgement(std::shared_ptr<Save_point_acknowledgement> acknowledgement);
     void publish_save_point(Scintilla::NotificationData notification,

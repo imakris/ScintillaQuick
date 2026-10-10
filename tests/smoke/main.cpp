@@ -19,7 +19,6 @@
 #include <QEventLoop>
 #include <QDebug>
 #include <QGuiApplication>
-#include <QImage>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMetaType>
@@ -31,7 +30,6 @@
 #include <QQmlEngine>
 #include <QTextCharFormat>
 #include <QTextFormat>
-#include <QTextLayout>
 #include <QUrl>
 #include <qqml.h>
 
@@ -180,28 +178,55 @@ void test_utf8_body_prefix_getters()
         editor.send(SCI_REDO);
         SQ_EXPECT(editor.property("text").toString() == changed);
 
-        const QByteArray family = QByteArrayLiteral("Cousine");
-        const auto font = Scintilla::Internal::Font::Allocate(
-            Scintilla::Internal::FontParameters(family.constData(), 11));
-        const QFont qt_font(QStringLiteral("Cousine"), 11);
-        QImage image(1, 1, QImage::Format_ARGB32_Premultiplied);
-        Scintilla::Internal::Surface_impl surface;
-        surface.Init(static_cast<Scintilla::Internal::SurfaceID>(&image), nullptr);
-        std::vector<Scintilla::Internal::XYPOSITION> positions(static_cast<size_t>(bytes.size()));
-        surface.MeasureWidths(font.get(), std::string_view(bytes.constData(), bytes.size()), positions.data());
-        QTextLayout layout(body, qt_font, &image);
-        layout.beginLayout();
-        const QTextLine line = layout.createLine();
-        layout.endLayout();
-        size_t byte_index = 0;
-        for (qsizetype character = 0; character < body.size(); ++character) {
-            const qreal expected = line.cursorToX(static_cast<int>(character + 1));
-            const QByteArray character_bytes = body.mid(character, 1).toUtf8();
-            for (qsizetype byte = 0; byte < character_bytes.size(); ++byte) {
-                SQ_EXPECT(std::abs(positions[byte_index++] - expected) < 0.01);
+    }
+}
+
+void test_save_point_acknowledgement_scopes()
+{
+    ScintillaQuick_item first;
+    ScintillaQuick_item second;
+    first.setProperty("text", QStringLiteral("first"));
+    second.setProperty("text", QStringLiteral("second"));
+    first.sends(SCI_APPENDTEXT, 1, "!");
+    second.sends(SCI_APPENDTEXT, 1, "!");
+    auto first_fence = first.capture_save_fence();
+    auto second_fence = second.capture_save_fence();
+    bool first_completed = false;
+    bool second_completed = false;
+    int first_clean = 0;
+    int second_clean = 0;
+    QObject::connect(&first, &ScintillaQuick_item::savePointChanged, &first, [&](bool dirty) {
+        if (!dirty) {
+            ++first_clean;
+            if (first_clean == 1) {
+                second.acknowledge_save_point(second_fence, [&](bool current) {
+                    SQ_EXPECT(current);
+                    second_completed = true;
+                });
             }
         }
-    }
+    });
+    QObject::connect(&second, &ScintillaQuick_item::savePointChanged, &second, [&](bool dirty) {
+        if (!dirty) {
+            ++second_clean;
+        }
+    });
+    first.acknowledge_save_point(first_fence, [&](bool current) {
+        SQ_EXPECT(current);
+        SQ_EXPECT(second_completed);
+        first_completed = true;
+    });
+    pump_events();
+    SQ_EXPECT(first_completed && second_completed);
+    SQ_EXPECT(first_clean == 1 && second_clean == 1);
+    SQ_EXPECT(first.send(SCI_GETMODIFY) == 0);
+    SQ_EXPECT(second.send(SCI_GETMODIFY) == 0);
+    SQ_EXPECT(first.send(SCI_CANUNDO) != 0 && second.send(SCI_CANUNDO) != 0);
+    first.sends(SCI_APPENDTEXT, 1, "?");
+    second.sends(SCI_APPENDTEXT, 1, "?");
+    first.send(SCI_SETSAVEPOINT);
+    second.send(SCI_SETSAVEPOINT);
+    SQ_EXPECT(first_clean == 2 && second_clean == 2);
 }
 
 void test_pixel_sized_font(ScintillaQuick_item& editor)
@@ -1633,6 +1658,7 @@ int main(int argc, char** argv)
     test_editor_scroll_and_margin_helpers();
     test_property_roundtrip(editor);
     test_utf8_body_prefix_getters();
+    test_save_point_acknowledgement_scopes();
     test_pixel_sized_font(editor);
     test_insert_and_delete(editor);
     test_command_signal_propagates_synchronously(editor);

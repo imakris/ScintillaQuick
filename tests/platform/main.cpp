@@ -19,6 +19,38 @@ namespace
 
 int g_failures = 0;
 
+void test_utf8_body_prefix_measurement()
+{
+    const QString marker(QChar(0xFEFF));
+    for (const QString& body : {marker + QStringLiteral("body"),
+                               marker + marker + QStringLiteral("body"),
+                               QStringLiteral("prefix") + marker + QStringLiteral("body")})
+    {
+        const QByteArray bytes = body.toUtf8();
+        const QByteArray family = QByteArrayLiteral("Cousine");
+        const auto font = Scintilla::Internal::Font::Allocate(
+            Scintilla::Internal::FontParameters(family.constData(), 11));
+        const QFont qt_font(QStringLiteral("Cousine"), 11);
+        QImage image(1, 1, QImage::Format_ARGB32_Premultiplied);
+        Scintilla::Internal::Surface_impl surface;
+        surface.Init(static_cast<Scintilla::Internal::SurfaceID>(&image), nullptr);
+        std::vector<Scintilla::Internal::XYPOSITION> positions(static_cast<size_t>(bytes.size()));
+        surface.MeasureWidths(font.get(), std::string_view(bytes.constData(), bytes.size()), positions.data());
+        QTextLayout layout(body, qt_font, &image);
+        layout.beginLayout();
+        const QTextLine line = layout.createLine();
+        layout.endLayout();
+        size_t byte_index = 0;
+        for (qsizetype character = 0; character < body.size(); ++character) {
+            const qreal expected = line.cursorToX(static_cast<int>(character + 1));
+            const QByteArray character_bytes = body.mid(character, 1).toUtf8();
+            for (qsizetype byte = 0; byte < character_bytes.size(); ++byte) {
+                SQ_EXPECT(std::abs(positions[byte_index++] - expected) < 0.01);
+            }
+        }
+    }
+}
+
 void test_surface_measurement_tracks_device_dpi()
 {
     using namespace Scintilla::Internal;
@@ -74,6 +106,7 @@ int main(int argc, char** argv)
     if (!scintillaquick::shared::ensure_bundled_test_fonts_loaded(&font_error)) {
         qFatal("%s", qPrintable(font_error));
     }
+    test_utf8_body_prefix_measurement();
     test_surface_measurement_tracks_device_dpi();
     return g_failures == 0 ? 0 : 1;
 }

@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: Windows / Qt 6.10.1 / shared=${{ matrix.build-shared }}
+    name: Windows / Qt 6.12.0 / shared=${{ matrix.build-shared }}
     runs-on: windows-latest
 
     strategy:
@@ -26,7 +26,9 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: 6.10.1
+          # Upstream aqt handles the architecture-specific Qt 6.11+ Windows repositories.
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git'
+          version: 6.12.0
           arch: win64_msvc2022_64
           cache: true
 

@@ -26,11 +26,8 @@ set(CMAKE_AUTORCC ON)
 # CMAKE_AUTOUIC is intentionally NOT enabled: the project contains no .ui
 # files, so running `uic` on every build is pure overhead.
 
-# Qt 6.7 is the effective minimum because the renderer and platform layer
-# rely on QSGTextNode. If you bump the floor again, document the specific
-# API that requires it, and update the variable below so that the
-# generated package config inherits the new floor.
-set(scintillaquick_qt6_minimum_version 6.7)
+# Keep source builds and installed consumers on the same Qt baseline.
+set(scintillaquick_qt6_minimum_version 6.12)
 
 find_package(
     Qt6 ${scintillaquick_qt6_minimum_version} REQUIRED

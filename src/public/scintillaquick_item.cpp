@@ -2653,12 +2653,16 @@ struct ScintillaQuick_item::Save_point_acknowledgement
     std::function<void(bool)> completed;
 };
 
-thread_local ScintillaQuick_item::Save_point_acknowledgement*
-    ScintillaQuick_item::m_save_point_acknowledgement = nullptr;
+ScintillaQuick_item::Save_point_acknowledgement*&
+ScintillaQuick_item::save_point_acknowledgement_slot() noexcept
+{
+    static thread_local Save_point_acknowledgement* acknowledgement = nullptr;
+    return acknowledgement;
+}
 
 bool ScintillaQuick_item::defer_save_point(NotificationData notification)
 {
-    auto* acknowledgement = m_save_point_acknowledgement;
+    auto* acknowledgement = save_point_acknowledgement_slot();
     if (!acknowledgement || notification.nmhdr.code != Notification::SavePointReached ||
         acknowledgement->document != m_core->pdoc)
     {
@@ -2685,8 +2689,8 @@ void ScintillaQuick_item::acknowledge_save_point(
     acknowledgement->source = std::move(fence);
     acknowledgement->completed = std::move(completed);
     {
-        auto* previous = std::exchange(m_save_point_acknowledgement, acknowledgement.get());
-        const auto restore = qScopeGuard([previous] { m_save_point_acknowledgement = previous; });
+        auto* previous = std::exchange(save_point_acknowledgement_slot(), acknowledgement.get());
+        const auto restore = qScopeGuard([previous] { save_point_acknowledgement_slot() = previous; });
         send(SCI_SETSAVEPOINT, 0, 0);
     }
     publish_save_point_acknowledgement(std::move(acknowledgement));
