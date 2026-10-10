@@ -1,23 +1,34 @@
 // Copyright (c) 2026, Ioannis Makris
 // Licensed under the BSD 2-Clause License, see LICENSE file for details.
 
-#include <scintillaquick/scintillaquick_item.h>
+#include "scintillaquick_validation_access.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
 #include <QFont>
 #include <QFontInfo>
+#include <QGlyphRun>
 #include <QDebug>
 #include <QGuiApplication>
 #include <QImage>
+#include <QLoggingCategory>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QRect>
+#include <QRawFont>
+#include <QTextCharFormat>
+#include <QTextLayout>
+#include <QTextOption>
 #include <QWheelEvent>
 #include <QThread>
+
+#ifdef Q_OS_WIN
+#include <QtCore/qt_windows.h>
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -63,6 +74,70 @@ namespace
 int g_pass_count  = 0;
 int g_fail_count  = 0;
 int g_gen_count   = 0;
+
+void dump_runtime_file_identity(const char* label, const QString& file_path, const char* path_source)
+{
+    QFile file(file_path);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if (!file.open(QIODevice::ReadOnly) || !hash.addData(&file)) {
+        qDebug(
+            "diagnostic[plain_ascii_short]: runtime=%s path='%s' path-source=%s file-identity-unavailable='%s'",
+            label, qPrintable(file_path), path_source, qPrintable(file.errorString()));
+        return;
+    }
+
+    qDebug("diagnostic[plain_ascii_short]: runtime=%s path='%s' path-source=%s file-sha256=%s bytes=%lld",
+        label, qPrintable(file_path), path_source,
+        hash.result().toHex().constData(), static_cast<long long>(file.size()));
+}
+
+void dump_runtime_identities()
+{
+#ifdef Q_OS_WIN
+    struct module_t
+    {
+        const char*    label;
+        const wchar_t* name;
+    };
+
+    const module_t modules[] = {
+        {"executable", nullptr},
+#ifdef QT_DEBUG
+        {"QtGui",      L"Qt6Guid.dll"},
+        {"QtQuick",    L"Qt6Quickd.dll"},
+        {"qwindows",   L"qwindowsd.dll"},
+#else
+        {"QtGui",      L"Qt6Gui.dll"},
+        {"QtQuick",    L"Qt6Quick.dll"},
+        {"qwindows",   L"qwindows.dll"},
+#endif
+    };
+
+    for (const module_t& module : modules) {
+        const HMODULE handle = module.name ? GetModuleHandleW(module.name) : nullptr;
+        if (module.name && !handle) {
+            qDebug("diagnostic[plain_ascii_short]: runtime=%s loaded-module-unavailable win32-error=%lu",
+                module.label, GetLastError());
+            continue;
+        }
+
+        constexpr DWORD k_path_capacity = 32768;
+        wchar_t path[k_path_capacity];
+        const DWORD length = GetModuleFileNameW(handle, path, k_path_capacity);
+        if (length == 0 || length == k_path_capacity) {
+            qDebug("diagnostic[plain_ascii_short]: runtime=%s loaded-path-unavailable win32-error=%lu",
+                module.label, GetLastError());
+            continue;
+        }
+        dump_runtime_file_identity(module.label,
+            QString::fromWCharArray(path, static_cast<int>(length)), "GetModuleFileNameW");
+    }
+#else
+    dump_runtime_file_identity("executable", QCoreApplication::applicationFilePath(),
+        "QCoreApplication::applicationFilePath-only");
+    qDebug("diagnostic[plain_ascii_short]: QtGui/QtQuick/platform loaded-module identities unavailable");
+#endif
+}
 
 struct Fixture_editor
 {
@@ -204,6 +279,86 @@ struct Fixture_editor
                 reinterpret_cast<sptr_t>("Hg"))));
     }
 
+    void dump_published_font_inputs(const char* fixture_name)
+    {
+        if (std::strcmp(fixture_name, "plain_ascii_short") != 0) {
+            return;
+        }
+
+        qDebug("diagnostic[plain_ascii_short]: postcapture diagnostics begin; reconstructed shapes follow");
+        dump_runtime_identities();
+        const Render_frame frame = ScintillaQuick_validation_access::capture_cached_frame(editor);
+        qDebug("diagnostic[plain_ascii_short]: postcapture published-frame visual-lines=%lld",
+            static_cast<long long>(frame.visual_lines.size()));
+        for (const Visual_line_frame& visual_line : frame.visual_lines) {
+            for (const Text_run& run : visual_line.text_runs) {
+                qDebug(
+                    "diagnostic[plain_ascii_short]: published-run text='%s' font-key='%s' "
+                    "point-size=%.3f pixel-size=%d weight=%d stretch=%d style=%d strategy=%d hinting=%d "
+                    "position=(%.6f,%.6f) baseline=%.6f width=%.6f",
+                    qPrintable(run.text), qPrintable(run.font.key()), run.font.pointSizeF(), run.font.pixelSize(),
+                    static_cast<int>(run.font.weight()), run.font.stretch(), static_cast<int>(run.font.style()),
+                    static_cast<int>(run.font.styleStrategy()), static_cast<int>(run.font.hintingPreference()),
+                    run.position.x(), run.position.y(), visual_line.baseline_y, run.width);
+
+                // Shape the published request after capture; this is not the live scene-graph glyph engine.
+                QTextLayout layout(run.text, run.font);
+                QTextOption option;
+                option.setWrapMode(QTextOption::NoWrap);
+                option.setTextDirection(Qt::LeftToRight);
+                layout.setTextOption(option);
+
+                QTextCharFormat format;
+                format.setForeground(run.foreground);
+                format.setFont(run.font);
+                QTextLayout::FormatRange range;
+                range.start  = 0;
+                range.length = run.text.length();
+                range.format = format;
+                layout.setFormats({range});
+
+                layout.beginLayout();
+                QTextLine line = layout.createLine();
+                if (line.isValid()) {
+                    line.setLineWidth(1000000.0);
+                    line.setPosition(QPointF(0.0, 0.0));
+                }
+                layout.endLayout();
+
+                qDebug("diagnostic[plain_ascii_short]: reconstructed-layout valid=%d ascent=%.6f",
+                    line.isValid(), line.isValid() ? line.ascent() : 0.0);
+                const auto glyph_runs = layout.glyphRuns(0, run.text.length(),
+                    QTextLayout::RetrieveGlyphIndexes | QTextLayout::RetrieveGlyphPositions);
+                for (const QGlyphRun& glyph_run : glyph_runs) {
+                    const QRawFont raw_font = glyph_run.rawFont();
+                    qDebug(
+                        "diagnostic[plain_ascii_short]: reconstructed-raw-font valid=%d family='%s' "
+                        "style='%s' pixel-size=%.6f weight=%d hinting=%d units-per-em=%.6f",
+                        raw_font.isValid(), qPrintable(raw_font.familyName()), qPrintable(raw_font.styleName()),
+                        raw_font.pixelSize(), raw_font.weight(), static_cast<int>(raw_font.hintingPreference()),
+                        raw_font.unitsPerEm());
+                    qDebug()
+                        << "diagnostic[plain_ascii_short]: reconstructed-glyph-indexes="
+                        << glyph_run.glyphIndexes() << "positions=" << glyph_run.positions();
+
+                    constexpr const char* k_table_tags[] = {"name", "glyf", "cmap", "gasp"};
+                    for (const char* tag : k_table_tags) {
+                        const QByteArray table = raw_font.fontTable(tag);
+                        const QByteArray digest = table.isEmpty()
+                            ? QByteArray("absent")
+                            : QCryptographicHash::hash(table, QCryptographicHash::Sha256).toHex();
+                        qDebug("diagnostic[plain_ascii_short]: reconstructed-font-table tag=%s bytes=%lld sha256=%s",
+                            tag, static_cast<long long>(table.size()), digest.constData());
+                        if (std::strcmp(tag, "gasp") == 0) {
+                            qDebug("diagnostic[plain_ascii_short]: reconstructed-gasp-hex=%s",
+                                table.toHex().constData());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     QImage capture_image(const char* fixture_name)
     {
         pump();
@@ -250,6 +405,7 @@ struct Fixture_editor
         }
 
         dump_render_inputs(fixture_name);
+        dump_published_font_inputs(fixture_name);
         return result;
     }
 
@@ -1236,6 +1392,8 @@ static Fixture_outcome vr_eol_annotation_boxed()
 int main(int argc, char** argv)
 {
     qputenv("QT_FORCE_STDERR_LOGGING", "1");
+    QLoggingCategory::setFilterRules(qEnvironmentVariable("QT_LOGGING_RULES")
+        + QStringLiteral("\nqt.qpa.fonts.debug=true"));
 
     // Pin DPI and scale factor for deterministic rendering.
     qputenv("QT_FONT_DPI", "96");

@@ -255,7 +255,9 @@ set(VR_ARTIFACT_DIR "${CMAKE_CURRENT_BINARY_DIR}/visual_regression_artifacts")
 
 scintillaquick_add_quick_test_target(
     scintillaquick_visual_regression_test
-    frame_visual_regression/main.cpp)
+    frame_visual_regression/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/render)
 
 target_compile_definitions(
     scintillaquick_visual_regression_test
