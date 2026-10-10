@@ -180,7 +180,7 @@ struct Fixture_editor
 
     void dump_render_inputs(const char* fixture_name)
     {
-        const QFont configured = editor.getFont();
+        const QFont configured = editor.property("font").value<QFont>();
         const QFontInfo resolved(configured);
         QByteArray style_font(
             static_cast<qsizetype>(editor.send(SCI_STYLEGETFONT, STYLE_DEFAULT)) + 1, '\0');
