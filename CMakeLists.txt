@@ -66,6 +66,7 @@ set(scintillaquick_scintilla_sources
     third_party/scintilla/src/ScintillaBase.cxx
     third_party/scintilla/src/Selection.cxx
     third_party/scintilla/src/Style.cxx
+    third_party/scintilla/src/UndoHistory.cxx
     third_party/scintilla/src/UniConversion.cxx
     third_party/scintilla/src/UniqueString.cxx
     third_party/scintilla/src/ViewStyle.cxx

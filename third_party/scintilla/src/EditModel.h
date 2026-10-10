@@ -14,12 +14,41 @@ namespace Scintilla::Internal {
 */
 class Caret {
 public:
-	bool active;
-	bool on;
-	int period;
-
-	Caret() noexcept;
+	static constexpr int periodCaret = 500;	// Default caret period in milliseconds
+	bool active=false;
+	bool on=false;
+	int period=periodCaret;
 };
+
+enum class UndoRedo { undo, redo };
+
+// Selection stack is sparse so use a map
+
+struct SelectionWithScroll {
+	std::string selection;
+	Sci::Line topLine = 0;
+};
+
+using SelectionStack = std::map<int, SelectionWithScroll>;
+
+struct SelectionHistory {
+	int indexCurrent = 0;
+	std::string ssCurrent;
+	SelectionStack stack;
+};
+
+struct ModelState : ViewState {
+	SelectionHistory historyForUndo;
+	SelectionHistory historyForRedo;
+	void RememberSelectionForUndo(int index, const Selection &sel);
+	void ForgetSelectionForUndo() noexcept;
+	void RememberSelectionOntoStack(int index, Sci::Line topLine);
+	void RememberSelectionForRedoOntoStack(int index, const Selection &sel, Sci::Line topLine);
+	SelectionWithScroll SelectionFromStack(int index, UndoRedo history) const;
+	void TruncateUndo(int index) final;
+};
+
+using ModelStateShared = std::shared_ptr<ModelState>;
 
 class EditModel {
 public:
@@ -27,7 +56,7 @@ public:
 	int xOffset;		///< Horizontal scrolled amount in pixels
 	bool trackLineWidth;
 
-	SpecialRepresentations reprs;
+	std::unique_ptr<SpecialRepresentations> reprs;
 	Caret caret;
 	SelectionPosition posDrag;
 	Sci::Position braces[2];
@@ -36,6 +65,7 @@ public:
 	bool hasFocus;
 	Selection sel;
 	bool primarySelection;
+	std::string copySeparator;
 
 	Scintilla::IMEInteraction imeInteraction;
 	Scintilla::Bidirectional bidirectional;
@@ -45,7 +75,7 @@ public:
 	UniqueString defaultFoldDisplayText;
 	std::unique_ptr<IContractionState> pcs;
 	// Hotspot support
-	Range hotspot;
+	ForwardRange hotspot;
 	bool hotspotSingleLine;
 	Sci::Position hoverIndicatorPos;
 
@@ -55,6 +85,10 @@ public:
 	int wrapWidth;
 
 	Document *pdoc;
+
+	Scintilla::UndoSelectionHistoryOption undoSelectionHistoryOption = UndoSelectionHistoryOption::Disabled;
+	bool needRedoRemembered = false;
+	ModelStateShared modelState;
 
 	EditModel();
 	// Deleted so EditModel objects can not be copied.
@@ -73,7 +107,11 @@ public:
 	const char *GetDefaultFoldDisplayText() const noexcept;
 	const char *GetFoldDisplayText(Sci::Line lineDoc) const noexcept;
 	InSelection LineEndInSelection(Sci::Line lineDoc) const;
+	[[nodiscard]] Sci::Position VirtualSpaceForLine(Sci::Line lineDoc) const;
 	[[nodiscard]] int GetMark(Sci::Line line) const;
+
+	void EnsureModelState();
+	void ChangeUndoSelectionHistory(Scintilla::UndoSelectionHistoryOption undoSelectionHistoryOptionNew);
 };
 
 }

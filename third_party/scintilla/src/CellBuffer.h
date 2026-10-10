@@ -10,89 +10,40 @@
 
 namespace Scintilla::Internal {
 
+struct Failure : public std::runtime_error {
+	Status status;
+	explicit Failure(Status status_) : std::runtime_error("failure with status"), status(status_) {}
+};
+
 // Interface to per-line data that wants to see each line insertion and deletion
 class PerLine {
 public:
-	virtual ~PerLine() {}
+	virtual ~PerLine() = default;
 	virtual void Init()=0;
 	virtual void InsertLine(Sci::Line line)=0;
 	virtual void InsertLines(Sci::Line line, Sci::Line lines) = 0;
 	virtual void RemoveLine(Sci::Line line)=0;
 };
 
+class UndoHistory;
 class ChangeHistory;
+
 /**
  * The line vector contains information about each of the lines in a cell buffer.
  */
 class ILineVector;
 
-enum class ActionType { insert, remove, start, container };
+enum class ActionType : unsigned char { insert, remove, container };
 
 /**
- * Actions are used to store all the information required to perform one undo/redo step.
+ * Actions are used to return the information required to report one undo/redo step.
  */
-class Action {
-public:
-	ActionType at;
-	Sci::Position position;
-	std::unique_ptr<char[]> data;
-	Sci::Position lenData;
-	bool mayCoalesce;
-
-	Action() noexcept;
-	void Create(ActionType at_, Sci::Position position_=0, const char *data_=nullptr, Sci::Position lenData_=0, bool mayCoalesce_=true);
-	void Clear() noexcept;
-};
-
-/**
- *
- */
-class UndoHistory {
-	std::vector<Action> actions;
-	int maxAction;
-	int currentAction;
-	int undoSequenceDepth;
-	int savePoint;
-	int tentativePoint;
-	std::optional<int> detach;
-
-	void EnsureUndoRoom();
-
-public:
-	UndoHistory();
-
-	const char *AppendAction(ActionType at, Sci::Position position, const char *data, Sci::Position lengthData, bool &startSequence, bool mayCoalesce=true);
-
-	void BeginUndoAction();
-	void EndUndoAction();
-	void DropUndoSequence();
-	void DeleteUndoHistory();
-
-	/// The save point is a marker in the undo stack where the container has stated that
-	/// the buffer was saved. Undo and redo can move over the save point.
-	void SetSavePoint() noexcept;
-	bool IsSavePoint() const noexcept;
-	bool BeforeSavePoint() const noexcept;
-	bool BeforeReachableSavePoint() const noexcept;
-	bool AfterSavePoint() const noexcept;
-	bool AfterDetachPoint() const noexcept;
-
-	// Tentative actions are used for input composition so that it can be undone cleanly
-	void TentativeStart();
-	void TentativeCommit();
-	bool TentativeActive() const noexcept;
-	int TentativeSteps() noexcept;
-
-	/// To perform an undo, StartUndo is called to retrieve the number of steps, then UndoStep is
-	/// called that many times. Similarly for redo.
-	bool CanUndo() const noexcept;
-	int StartUndo();
-	const Action &GetUndoStep() const;
-	void CompletedUndoStep();
-	bool CanRedo() const noexcept;
-	int StartRedo();
-	const Action &GetRedoStep() const;
-	void CompletedRedoStep();
+struct Action {
+	ActionType at = ActionType::insert;
+	bool mayCoalesce = false;
+	Sci::Position position = 0;
+	const char *data = nullptr;
+	Sci::Position lenData = 0;
 };
 
 struct SplitView {
@@ -109,7 +60,7 @@ struct SplitView {
 		return !(*this == other);
 	}
 
-	char CharAt(size_t position) const noexcept {
+	[[nodiscard]] char CharAt(size_t position) const noexcept {
 		if (position < length1) {
 			return segment1[position];
 		}
@@ -120,6 +71,24 @@ struct SplitView {
 	}
 };
 
+struct ChangedRange {
+	Sci::Position start = Sci::invalidPosition;
+	Sci::Position end = Sci::invalidPosition;
+	ChangedRange() noexcept = default;
+	ChangedRange(Sci::Position start_, Sci::Position end_) noexcept : start(start_), end(end_) {}
+	[[nodiscard]] bool Empty() const noexcept {
+		return start < 0;
+	}
+	void Merge(const ChangedRange &cr2) noexcept {
+		if (cr2.start >= 0) {
+			if (start < 0) {
+				*this = cr2;
+			} else {
+				end = cr2.end;
+			}
+		}
+	}
+};
 
 /**
  * Holder for an expandable array of characters that supports undo and line markers.
@@ -137,17 +106,17 @@ private:
 	Scintilla::LineEndType utf8LineEnds;
 
 	bool collectingUndo;
-	UndoHistory uh;
+	std::unique_ptr<UndoHistory> uh;
 
 	std::unique_ptr<ChangeHistory> changeHistory;
 
 	std::unique_ptr<ILineVector> plv;
 
-	bool UTF8LineEndOverlaps(Sci::Position position) const noexcept;
-	bool UTF8IsCharacterBoundary(Sci::Position position) const;
+	[[nodiscard]] bool UTF8LineEndOverlaps(Sci::Position position) const noexcept;
+	[[nodiscard]] bool UTF8IsCharacterBoundary(Sci::Position position) const;
 	void ResetLineEnds();
 	void RecalculateIndexLineStarts(Sci::Line lineFirst, Sci::Line lineLast);
-	bool MaintainingLineCharacterIndex() const noexcept;
+	[[nodiscard]] bool MaintainingLineCharacterIndex() const noexcept;
 	/// Actions without undo
 	void BasicInsertString(Sci::Position position, const char *s, Sci::Position insertLength);
 	void BasicDeleteChars(Sci::Position position, Sci::Position deleteLength);
@@ -163,75 +132,93 @@ public:
 	~CellBuffer() noexcept;
 
 	/// Retrieving positions outside the range of the buffer works and returns 0
-	char CharAt(Sci::Position position) const noexcept;
-	unsigned char UCharAt(Sci::Position position) const noexcept;
+	[[nodiscard]] char CharAt(Sci::Position position) const noexcept;
+	[[nodiscard]] unsigned char UCharAt(Sci::Position position) const noexcept;
 	void GetCharRange(char *buffer, Sci::Position position, Sci::Position lengthRetrieve) const;
-	char StyleAt(Sci::Position position) const noexcept;
+	[[nodiscard]] char StyleAt(Sci::Position position) const noexcept;
 	void GetStyleRange(unsigned char *buffer, Sci::Position position, Sci::Position lengthRetrieve) const;
-	const char *BufferPointer();
-	const char *RangePointer(Sci::Position position, Sci::Position rangeLength) noexcept;
-	Sci::Position GapPosition() const noexcept;
-	SplitView AllView() const noexcept;
+	[[nodiscard]] const char *BufferPointer();
+	[[nodiscard]] const char *RangePointer(Sci::Position position, Sci::Position rangeLength) noexcept;
+	[[nodiscard]] Sci::Position GapPosition() const noexcept;
+	[[nodiscard]] SplitView AllView() const noexcept;
 
-	Sci::Position Length() const noexcept;
+	[[nodiscard]] Sci::Position Length() const noexcept;
 	void Allocate(Sci::Position newSize);
 	void SetUTF8Substance(bool utf8Substance_) noexcept;
-	Scintilla::LineEndType GetLineEndTypes() const noexcept { return utf8LineEnds; }
+	[[nodiscard]] Scintilla::LineEndType GetLineEndTypes() const noexcept { return utf8LineEnds; }
 	void SetLineEndTypes(Scintilla::LineEndType utf8LineEnds_);
-	bool ContainsLineEnd(const char *s, Sci::Position length) const noexcept;
+	[[nodiscard]] bool ContainsLineEnd(const char *s, Sci::Position length) const noexcept;
 	void SetPerLine(PerLine *pl) noexcept;
-	Scintilla::LineCharacterIndexType LineCharacterIndex() const noexcept;
+	[[nodiscard]] Scintilla::LineCharacterIndexType LineCharacterIndex() const noexcept;
 	void AllocateLineCharacterIndex(Scintilla::LineCharacterIndexType lineCharacterIndex);
 	void ReleaseLineCharacterIndex(Scintilla::LineCharacterIndexType lineCharacterIndex);
-	Sci::Line Lines() const noexcept;
+	[[nodiscard]] Sci::Line Lines() const noexcept;
 	void AllocateLines(Sci::Line lines);
-	Sci::Position LineStart(Sci::Line line) const noexcept;
-	Sci::Position IndexLineStart(Sci::Line line, Scintilla::LineCharacterIndexType lineCharacterIndex) const noexcept;
-	Sci::Line LineFromPosition(Sci::Position pos) const noexcept;
-	Sci::Line LineFromPositionIndex(Sci::Position pos, Scintilla::LineCharacterIndexType lineCharacterIndex) const noexcept;
+	[[nodiscard]] Sci::Position LineStart(Sci::Line line) const noexcept;
+	[[nodiscard]] Sci::Position LineEnd(Sci::Line line) const noexcept;
+	[[nodiscard]] Sci::Position IndexLineStart(Sci::Line line, Scintilla::LineCharacterIndexType lineCharacterIndex) const noexcept;
+	[[nodiscard]] Sci::Line LineFromPosition(Sci::Position pos) const noexcept;
+	[[nodiscard]] Sci::Line LineFromPositionIndex(Sci::Position pos, Scintilla::LineCharacterIndexType lineCharacterIndex) const noexcept;
 	void InsertLine(Sci::Line line, Sci::Position position, bool lineStart);
 	void RemoveLine(Sci::Line line);
 	const char *InsertString(Sci::Position position, const char *s, Sci::Position insertLength, bool &startSequence);
 
 	/// Setting styles for positions outside the range of the buffer is safe and has no effect.
-	/// @return true if the style of a character is changed.
-	bool SetStyleAt(Sci::Position position, char styleValue) noexcept;
-	bool SetStyleFor(Sci::Position position, Sci::Position lengthStyle, char styleValue) noexcept;
+	/// @return range where style of characters changed.
+	ChangedRange SetStyles(Sci::Position position, const char *styles, Sci::Position length) noexcept;
+	ChangedRange SetStyleFor(Sci::Position position, Sci::Position length, char value) noexcept;
 
 	const char *DeleteChars(Sci::Position position, Sci::Position deleteLength, bool &startSequence);
 
-	bool IsReadOnly() const noexcept;
+	[[nodiscard]] bool IsReadOnly() const noexcept;
 	void SetReadOnly(bool set) noexcept;
-	bool IsLarge() const noexcept;
-	bool HasStyles() const noexcept;
+	[[nodiscard]] bool IsLarge() const noexcept;
+	[[nodiscard]] bool HasStyles() const noexcept;
 
 	/// The save point is a marker in the undo stack where the container has stated that
 	/// the buffer was saved. Undo and redo can move over the save point.
 	void SetSavePoint();
-	bool IsSavePoint() const noexcept;
+	[[nodiscard]] bool IsSavePoint() const noexcept;
 
-	void TentativeStart();
-	void TentativeCommit();
-	bool TentativeActive() const noexcept;
-	int TentativeSteps() noexcept;
+	void TentativeStart() noexcept;
+	void TentativeCommit() noexcept;
+	[[nodiscard]] bool TentativeActive() const noexcept;
+	[[nodiscard]] int TentativeSteps() noexcept;
 
-	bool SetUndoCollection(bool collectUndo);
-	bool IsCollectingUndo() const noexcept;
-	void BeginUndoAction();
-	void EndUndoAction();
+	bool SetUndoCollection(bool collectUndo) noexcept;
+	[[nodiscard]] bool IsCollectingUndo() const noexcept;
+	void BeginUndoAction(bool mayCoalesce=false) noexcept;
+	void EndUndoAction() noexcept;
+	[[nodiscard]] int UndoSequenceDepth() const noexcept;
+	[[nodiscard]] bool AfterUndoSequenceStart() const noexcept;
 	void AddUndoAction(Sci::Position token, bool mayCoalesce);
-	void DeleteUndoHistory();
+	void DeleteUndoHistory() noexcept;
 
 	/// To perform an undo, StartUndo is called to retrieve the number of steps, then UndoStep is
 	/// called that many times. Similarly for redo.
-	bool CanUndo() const noexcept;
-	int StartUndo();
-	const Action &GetUndoStep() const;
+	[[nodiscard]] bool CanUndo() const noexcept;
+	int StartUndo() noexcept;
+	[[nodiscard]] Action GetUndoStep() const noexcept;
 	void PerformUndoStep();
-	bool CanRedo() const noexcept;
-	int StartRedo();
-	const Action &GetRedoStep() const;
+	[[nodiscard]] bool CanRedo() const noexcept;
+	int StartRedo() noexcept;
+	[[nodiscard]] Action GetRedoStep() const noexcept;
 	void PerformRedoStep();
+
+	[[nodiscard]] int UndoActions() const noexcept;
+	void SetUndoSavePoint(int action) noexcept;
+	[[nodiscard]] int UndoSavePoint() const noexcept;
+	void SetUndoDetach(int action) noexcept;
+	[[nodiscard]] int UndoDetach() const noexcept;
+	void SetUndoTentative(int action) noexcept;
+	[[nodiscard]] int UndoTentative() const noexcept;
+	void SetUndoCurrent(int action);
+	[[nodiscard]] int UndoCurrent() const noexcept;
+	[[nodiscard]] int UndoActionType(int action) const noexcept;
+	[[nodiscard]] Sci::Position UndoActionPosition(int action) const noexcept;
+	[[nodiscard]] std::string_view UndoActionText(int action) const noexcept;
+	void PushUndoActionType(int type, Sci::Position position);
+	void ChangeLastUndoActionText(size_t length, const char *text);
 
 	void ChangeHistorySet(bool set);
 	[[nodiscard]] int EditionAt(Sci::Position pos) const noexcept;

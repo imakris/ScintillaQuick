@@ -15,6 +15,13 @@ namespace Scintilla {
 
 enum class Message;	// Declare in case ScintillaMessages.h not included
 
+// Declare in case ScintillaStructures.h not included
+struct TextRangeFull;
+struct TextToFindFull;
+struct RangeToFormatFull;
+
+class IDocumentEditable;
+
 using FunctionDirect = intptr_t(*)(intptr_t ptr, unsigned int iMessage, uintptr_t wParam, intptr_t lParam, int *pStatus);
 
 struct Failure {
@@ -96,7 +103,7 @@ public:
 	void SelectAll();
 	void SetSavePoint();
 	Position GetStyledText(void *tr);
-	Position GetStyledTextFull(void *tr);
+	Position GetStyledTextFull(TextRangeFull *tr);
 	bool CanRedo();
 	Line MarkerLineFromHandle(int markerHandle);
 	void MarkerDeleteHandle(int markerHandle);
@@ -202,6 +209,8 @@ public:
 	void StyleSetHotSpot(int style, bool hotspot);
 	void StyleSetCheckMonospaced(int style, bool checkMonospaced);
 	bool StyleGetCheckMonospaced(int style);
+	void StyleSetStretch(int style, Scintilla::FontStretch stretch);
+	Scintilla::FontStretch StyleGetStretch(int style);
 	void StyleSetInvisibleRepresentation(int style, const char *representation);
 	int StyleGetInvisibleRepresentation(int style, char *representation);
 	std::string StyleGetInvisibleRepresentation(int style);
@@ -238,6 +247,22 @@ public:
 	int CharacterCategoryOptimization();
 	void BeginUndoAction();
 	void EndUndoAction();
+	int UndoSequence();
+	int UndoActions();
+	void SetUndoSavePoint(int action);
+	int UndoSavePoint();
+	void SetUndoDetach(int action);
+	int UndoDetach();
+	void SetUndoTentative(int action);
+	int UndoTentative();
+	void SetUndoCurrent(int action);
+	int UndoCurrent();
+	void PushUndoActionType(int type, Position pos);
+	void ChangeLastUndoActionText(Position length, const char *text);
+	int UndoActionType(int action);
+	Position UndoActionPosition(int action);
+	int UndoActionText(int action, char *text);
+	std::string UndoActionText(int action);
 	void IndicSetStyle(int indicator, Scintilla::IndicatorStyle indicatorStyle);
 	Scintilla::IndicatorStyle IndicGetStyle(int indicator);
 	void IndicSetFore(int indicator, Colour fore);
@@ -297,6 +322,10 @@ public:
 	int AutoCGetMaxWidth();
 	void AutoCSetMaxHeight(int rowCount);
 	int AutoCGetMaxHeight();
+	void AutoCSetStyle(int style);
+	int AutoCGetStyle();
+	void AutoCSetImageScale(int scalePercent);
+	int AutoCGetImageScale();
 	void SetIndent(int indentSize);
 	int Indent();
 	void SetUseTabs(bool useTabs);
@@ -328,11 +357,16 @@ public:
 	void SetPrintColourMode(Scintilla::PrintOption mode);
 	Scintilla::PrintOption PrintColourMode();
 	Position FindText(Scintilla::FindOption searchFlags, void *ft);
-	Position FindTextFull(Scintilla::FindOption searchFlags, void *ft);
+	Position FindTextFull(Scintilla::FindOption searchFlags, TextToFindFull *ft);
 	Position FormatRange(bool draw, void *fr);
-	Position FormatRangeFull(bool draw, void *fr);
+	Position FormatRangeFull(bool draw, RangeToFormatFull *fr);
 	void SetChangeHistory(Scintilla::ChangeHistoryOption changeHistory);
 	Scintilla::ChangeHistoryOption ChangeHistory();
+	void SetUndoSelectionHistory(Scintilla::UndoSelectionHistoryOption undoSelectionHistory);
+	Scintilla::UndoSelectionHistoryOption UndoSelectionHistory();
+	void SetSelectionSerialized(const char *selectionString);
+	Position SelectionSerialized(char *selectionString);
+	std::string SelectionSerialized();
 	Line FirstVisibleLine();
 	Position GetLine(Line line, char *text);
 	std::string GetLine(Line line);
@@ -347,7 +381,7 @@ public:
 	Position GetSelText(char *text);
 	std::string GetSelText();
 	Position GetTextRange(void *tr);
-	Position GetTextRangeFull(void *tr);
+	Position GetTextRangeFull(TextRangeFull *tr);
 	void HideSelection(bool hide);
 	bool SelectionHidden();
 	int PointXFromPosition(Position pos);
@@ -355,6 +389,7 @@ public:
 	Line LineFromPosition(Position pos);
 	Position PositionFromLine(Line line);
 	void LineScroll(Position columns, Line lines);
+	void ScrollVertical(Line docLine, Line subLine);
 	void ScrollCaret();
 	void ScrollRange(Position secondary, Position primary);
 	void ReplaceSel(const char *text);
@@ -515,7 +550,9 @@ public:
 	void Cancel();
 	void DeleteBack();
 	void Tab();
+	void LineIndent();
 	void BackTab();
+	void LineDedent();
 	void NewLine();
 	void FormFeed();
 	void VCHome();
@@ -556,8 +593,8 @@ public:
 	Position BraceMatchNext(Position pos, Position startPos);
 	bool ViewEOL();
 	void SetViewEOL(bool visible);
-	void *DocPointer();
-	void SetDocPointer(void *doc);
+	IDocumentEditable *DocPointer();
+	void SetDocPointer(IDocumentEditable *doc);
 	void SetModEventMask(Scintilla::ModificationFlags eventMask);
 	Position EdgeColumn();
 	void SetEdgeColumn(Position column);
@@ -576,9 +613,9 @@ public:
 	bool SelectionIsRectangle();
 	void SetZoom(int zoomInPoints);
 	int Zoom();
-	void *CreateDocument(Position bytes, Scintilla::DocumentOption documentOptions);
-	void AddRefDocument(void *doc);
-	void ReleaseDocument(void *doc);
+	IDocumentEditable *CreateDocument(Position bytes, Scintilla::DocumentOption documentOptions);
+	void AddRefDocument(IDocumentEditable *doc);
+	void ReleaseDocument(IDocumentEditable *doc);
 	Scintilla::DocumentOption DocumentOptions();
 	Scintilla::ModificationFlags ModEventMask();
 	void SetCommandEvents(bool commandEvents);
@@ -629,7 +666,9 @@ public:
 	void CopyRange(Position start, Position end);
 	void CopyText(Position length, const char *text);
 	void SetSelectionMode(Scintilla::SelectionMode selectionMode);
+	void ChangeSelectionMode(Scintilla::SelectionMode selectionMode);
 	Scintilla::SelectionMode SelectionMode();
+	void SetMoveExtendsSelection(bool moveExtendsSelection);
 	bool MoveExtendsSelection();
 	Position GetLineSelStartPosition(Line line);
 	Position GetLineSelEndPosition(Line line);
@@ -699,6 +738,10 @@ public:
 	void SetLayoutThreads(int threads);
 	int LayoutThreads();
 	void CopyAllowLine();
+	void CutAllowLine();
+	void SetCopySeparator(const char *separator);
+	int CopySeparator(char *separator);
+	std::string CopySeparator();
 	void *CharacterPointer();
 	void *RangePointer(Position start, Position lengthRange);
 	Position GapPosition();
@@ -710,7 +753,7 @@ public:
 	int ExtraAscent();
 	void SetExtraDescent(int extraDescent);
 	int ExtraDescent();
-	int MarkerSymbolDefined(int markerNumber);
+	Scintilla::MarkerSymbol MarkerSymbolDefined(int markerNumber);
 	void MarginSetText(Line line, const char *text);
 	int MarginGetText(Line line, char *text);
 	std::string MarginGetText(Line line);
@@ -758,6 +801,7 @@ public:
 	void ClearSelections();
 	void SetSelection(Position caret, Position anchor);
 	void AddSelection(Position caret, Position anchor);
+	int SelectionFromPoint(int x, int y);
 	void DropSelectionN(int selection);
 	void SetMainSelection(int selection);
 	int MainSelection();
@@ -849,6 +893,8 @@ public:
 	void ReleaseLineCharacterIndex(Scintilla::LineCharacterIndexType lineCharacterIndex);
 	Line LineFromIndexPosition(Position pos, Scintilla::LineCharacterIndexType lineCharacterIndex);
 	Position IndexPositionFromLine(Line line, Scintilla::LineCharacterIndexType lineCharacterIndex);
+	bool DragDropEnabled();
+	void SetDragDropEnabled(bool dragDropEnabled);
 	void StartRecord();
 	void StopRecord();
 	int Lexer();
@@ -889,6 +935,8 @@ public:
 	int DescriptionOfStyle(int style, char *description);
 	std::string DescriptionOfStyle(int style);
 	void SetILexer(void *ilexer);
+	void SetScaleTechnique(Scintilla::ScaleTechnique technique);
+	Scintilla::ScaleTechnique ScaleTechnique();
 	Scintilla::Bidirectional Bidirectional();
 	void SetBidirectional(Scintilla::Bidirectional bidirectional);
 

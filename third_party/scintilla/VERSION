@@ -4,43 +4,40 @@ ScintillaQuick vendored Scintilla fork
 This directory contains Scintilla source and interface files with maintained
 ScintillaQuick patches. It omits upstream platform implementations, lexers,
 documentation, tests, and build scripts. LOCAL_CHANGES.md records the local
-delta and the additional headers retained from an older upstream release.
+delta and the lexer constants supplied by Lexilla.
 
 Upstream project: https://www.scintilla.org/
 Upstream VCS:     https://sourceforge.net/p/scintilla/code/ (Mercurial)
 Upstream license: ./LICENSE (upstream License.txt, unchanged)
 Local capture interface license: ../../LICENSE (BSD 2-Clause)
 
-Recovered comparison anchors (verified 2026-09-26)
-------------------------------------------------
+Upstream import
+---------------
 
 Main source and interface files:
-  Release:       Scintilla 5.3.2
-  Archive:       https://www.scintilla.org/scintilla532.zip
-  SHA-256:       a618548d29e2cc0c2ae50cadc038b0346305597b38ce1b4eb458671c953fb4ae
-  Mercurial node: 91b4ae661b0933968d5fabc76ec46ca77137d380
-  Archive tag:   rel-5-3-2 (latesttagdistance: 1)
+  Release:       Scintilla 5.6.7
+  Archive:       https://www.scintilla.org/scintilla567.zip
+  SHA-256:       2309181e59e7da4659f890dbc128db7451ccd094748770e7be674b830494587c
+  Mercurial node: 967909317010991a346f13ec8b9ccd4207da347a
+  Archive tag:   rel-5-6-7
+  Import date:   2026-10-10
+  Importer:      Codex, for Ioannis Makris
 
-Additional headers (SciLexer.h, FontQuality.h, IntegerRectangle.h):
-  Release:       Scintilla 4.4.6
-  Archive:       https://www.scintilla.org/scintilla446.zip
-  SHA-256:       aa5c65aebbe83184d7b243d29656f17a6f176cfc3898db85b02a5f4f138f9552
-  Mercurial node: 1fd979759d49a05ab9514f267469694112d35547
-  Archive tag:   rel-4-4-6 (latesttagdistance: 1)
+Lexer and style constants (include/SciLexer.h):
+  Project:       Lexilla
+  Release:       5.5.4
+  Repository:    https://github.com/ScintillaOrg/lexilla
+  Git revision:  322c94ab308aa9b8e4326805348a14b44369f57d
+  Source path:   include/SciLexer.h
 
-These are content comparison anchors, recovered from official release
-archives; they do not identify an independently recorded original import
-revision. The Mercurial nodes and tag distances come from each archive's
-.hg_archival.txt. File comparisons ignore only CRLF versus LF line endings.
-
-The repository's initial import is commit
-621c4dd7797a3e0ae18838b6a9cf3e056feb9dbd, authored by Ioannis Makris on
-2026-04-16. It already contained the local patches and RenderCapture.h.
+The Mercurial node and tag come from the archive's .hg_archival.txt.
+Source comparisons ignore only CRLF versus LF line endings. The capture
+integration is maintained locally; its source delta is described in the ledger.
 
 Updating the fork
 -----------------
 
-1. Compare against these archives and the LOCAL_CHANGES.md ledger before
+1. Compare against these sources and the LOCAL_CHANGES.md ledger before
    replacing source files. Preserve or deliberately retire each local hook.
 2. Record the new upstream archive/revision, checksum, import date, and
    importer here. Update the ledger in the same change as any local patch.

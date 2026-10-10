@@ -15,6 +15,8 @@ if(WIN32 AND TARGET Qt6::qmake)
 endif()
 
 function(scintillaquick_set_test_environment test_name target_name extra_environment)
+    set_tests_properties(${test_name} PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
     if(WIN32)
         set(test_environment
             "QT_QPA_PLATFORM=windows${extra_environment}")

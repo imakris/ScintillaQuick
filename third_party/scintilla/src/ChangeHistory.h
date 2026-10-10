@@ -22,27 +22,39 @@ constexpr unsigned int bitSaved = 2;
 constexpr unsigned int bitModified = 4;
 constexpr unsigned int bitRevertedToModified = 8;
 
-struct InsertionSpan {
+struct ChangeSpan {
 	Sci::Position start;
 	Sci::Position length;
 	int edition;
+	int count;
 	enum class Direction { insertion, deletion } direction;
 };
 
-using EditionSet = std::vector<int>;
+struct EditionCount {
+	int edition;
+	int count;
+	// Used in tests.
+	constexpr bool operator==(const EditionCount &other) const noexcept {
+		return (edition == other.edition) && (count == other.count);
+	}
+};
+
+// EditionSet is ordered from oldest to newest, its not really a set
+using EditionSet = std::vector<EditionCount>;
 using EditionSetOwned = std::unique_ptr<EditionSet>;
 
 class ChangeStack {
-	std::vector<size_t> steps;
-	std::vector<InsertionSpan> insertions;
+	std::vector<int> steps;
+	std::vector<ChangeSpan> changes;
 public:
 	void Clear() noexcept;
 	void AddStep();
-	void PushDeletion(Sci::Position positionDeletion, int edition);
+	void PushDeletion(Sci::Position positionDeletion, const EditionCount &ec);
 	void PushInsertion(Sci::Position positionInsertion, Sci::Position length, int edition);
-	[[nodiscard]] size_t PopStep() noexcept;
-	[[nodiscard]] InsertionSpan PopSpan() noexcept;
+	[[nodiscard]] int PopStep() noexcept;
+	[[nodiscard]] ChangeSpan PopSpan(int maxSteps) noexcept;
 	void SetSavePoint() noexcept;
+	void Check() const noexcept;
 };
 
 struct ChangeLog {
@@ -55,15 +67,15 @@ struct ChangeLog {
 	void DeleteRange(Sci::Position position, Sci::Position deleteLength);
 	void Insert(Sci::Position start, Sci::Position length, int edition);
 	void CollapseRange(Sci::Position position, Sci::Position deleteLength);
-	void PushDeletionAt(Sci::Position position, int edition);
-	void InsertFrontDeletionAt(Sci::Position position, int edition);
+	void PushDeletionAt(Sci::Position position, EditionCount ec);
+	void InsertFrontDeletionAt(Sci::Position position, EditionCount ec);
 	void SaveRange(Sci::Position position, Sci::Position length);
 	void PopDeletion(Sci::Position position, Sci::Position deleteLength);
 	void SaveHistoryForDelete(Sci::Position position, Sci::Position deleteLength);
 	void DeleteRangeSavingHistory(Sci::Position position, Sci::Position deleteLength);
 	void SetSavePoint();
 
-	Sci::Position Length() const noexcept;
+	[[nodiscard]] Sci::Position Length() const noexcept;
 	[[nodiscard]] size_t DeletionCount(Sci::Position start, Sci::Position length) const noexcept;
 	void Check() const noexcept;
 };
@@ -76,7 +88,7 @@ class ChangeHistory {
 	int historicEpoch = -1;
 
 public:
-	ChangeHistory(Sci::Position length=0);
+	explicit ChangeHistory(Sci::Position length=0);
 
 	void Insert(Sci::Position position, Sci::Position insertLength, bool collectingUndo, bool beforeSave);
 	void DeleteRange(Sci::Position position, Sci::Position deleteLength, bool reverting);
@@ -103,7 +115,7 @@ public:
 
 	// Testing - not used by Scintilla
 	[[nodiscard]] size_t DeletionCount(Sci::Position start, Sci::Position length) const noexcept;
-	EditionSet DeletionsAt(Sci::Position pos) const;
+	[[nodiscard]] EditionSet DeletionsAt(Sci::Position pos) const;
 	void Check() noexcept;
 };
 

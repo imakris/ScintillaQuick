@@ -97,6 +97,25 @@ void test_surface_measurement_tracks_device_dpi()
     }
 }
 
+void test_font_stretch_matches_qt()
+{
+    using namespace Scintilla::Internal;
+    for (const Scintilla::FontStretch stretch : {
+            Scintilla::FontStretch::Condensed,
+            Scintilla::FontStretch::Normal,
+            Scintilla::FontStretch::Expanded})
+    {
+        FontParameters parameters("Cousine", 11);
+        parameters.stretch = stretch;
+        const auto font = Font::Allocate(parameters);
+        QFont expected(QStringLiteral("Cousine"));
+        expected.setPointSizeF(11);
+        expected.setStretch(stretch == Scintilla::FontStretch::Condensed ? QFont::Condensed :
+            stretch == Scintilla::FontStretch::Expanded ? QFont::Expanded : QFont::Unstretched);
+        SQ_EXPECT(realized_font(font.get()).stretch() == expected.stretch());
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -108,5 +127,6 @@ int main(int argc, char** argv)
     }
     test_utf8_body_prefix_measurement();
     test_surface_measurement_tracks_device_dpi();
+    test_font_stretch_matches_qt();
     return g_failures == 0 ? 0 : 1;
 }

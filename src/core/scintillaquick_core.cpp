@@ -476,7 +476,7 @@ Render_frame ScintillaQuick_core::current_render_frame(
         const bool caret_on_before_capture = caret.on;
         caret.on = true;
         const auto restore_caret_phase = qScopeGuard([&] { caret.on = caret_on_before_capture; });
-        view.PaintText(surface, *this, capture_rect, client_rect, vs, &collector);
+        view.PaintText(surface, *this, vs, capture_rect, client_rect, &collector);
     }
 
     PRectangle margin_rect = capture_rect;

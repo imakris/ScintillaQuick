@@ -42,7 +42,6 @@ void DrawTextNoClipPhase(Surface *surface, PRectangle rc, const Style &style, XY
 	std::string_view text, DrawPhase phase);
 void DrawStyledText(Surface *surface, const ViewStyle &vs, int styleOffset, PRectangle rcText,
 	const StyledText &st, size_t start, size_t length, DrawPhase phase);
-void Hexits(char *hexits, int ch) noexcept;
 
 typedef void (*DrawTabArrowFn)(Surface *surface, PRectangle rcTab, int ymid,
 	const ViewStyle &vsDraw, Stroke stroke);
@@ -52,7 +51,7 @@ class LineTabstops;
 /**
 * EditView draws the main text area.
 */
-class EditView {
+class EditView : public TabStopProvider {
 public:
 	PrintParameters printParameters;
 	std::unique_ptr<LineTabstops> ldTabstops;
@@ -80,6 +79,9 @@ public:
 	std::unique_ptr<Surface> pixmapLine;
 	std::unique_ptr<Surface> pixmapIndentGuide;
 	std::unique_ptr<Surface> pixmapIndentGuideHighlight;
+
+	enum class SinglesState { invalid, valid, impossible } singlesState = SinglesState::invalid;
+	SingleByteWidths singles{};
 
 	LineLayoutCache llc;
 	std::unique_ptr<IPositionCache> posCache;
@@ -111,7 +113,7 @@ public:
 	unsigned int GetLayoutThreads() const noexcept;
 
 	void ClearAllTabstops() noexcept;
-	XYPOSITION NextTabstopPos(Sci::Line line, XYPOSITION x, XYPOSITION tabWidth) const noexcept;
+	[[nodiscard]] XYPOSITION NextTabstopPos(Sci::Line line, XYPOSITION x, XYPOSITION tabWidth) const noexcept override;
 	bool ClearTabstops(Sci::Line line) noexcept;
 	bool AddTabstop(Sci::Line line, int x);
 	int GetNextTabstop(Sci::Line line, int x) const noexcept;
@@ -120,9 +122,12 @@ public:
 	void DropGraphics() noexcept;
 	void RefreshPixMaps(Surface *surfaceWindow, const ViewStyle &vsDraw);
 
+	void InvalidateSingles() noexcept;
+	void CalculateSingles(const EditModel &model, Surface *surface, const ViewStyle &vstyle, bool callerMultiThreaded);
+
 	std::shared_ptr<LineLayout> RetrieveLineLayout(Sci::Line lineNumber, const EditModel &model);
 	void LayoutLine(const EditModel &model, Surface *surface, const ViewStyle &vstyle,
-		LineLayout *ll, int width);
+		LineLayout *ll, int width, bool callerMultiThreaded=false);
 
 	static void UpdateBidiData(const EditModel &model, const ViewStyle &vstyle, LineLayout *ll);
 
@@ -135,38 +140,30 @@ public:
 	Sci::Line DisplayFromPosition(Surface *surface, const EditModel &model, Sci::Position pos, const ViewStyle &vs);
 	Sci::Position StartEndDisplayLine(Surface *surface, const EditModel &model, Sci::Position pos, bool start, const ViewStyle &vs);
 
-	void DrawIndentGuide(Surface *surface, const ViewStyle &vsDraw, Sci::Line lineVisible, int lineHeight, XYPOSITION start, PRectangle rcSegment, bool highlight,
-		Render_collector *collector = nullptr);
-	void DrawEOL(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll, PRectangle rcLine,
-		Sci::Line line, Sci::Position lineEnd, int xStart, int subLine, XYACCUMULATOR subLineStart,
-		std::optional<ColourRGBA> background, Render_collector *collector = nullptr);
+private:
+	void UpdateMaxWidth(XYPOSITION width) noexcept;
+	void DrawEOL(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
+		Sci::Line line, int xStart, PRectangle rcLine, int subLine, Sci::Position lineEnd, XYPOSITION subLineStart, ColourOptional background, Render_collector *collector = nullptr);
 	void DrawFoldDisplayText(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
-		Sci::Line line, int xStart, PRectangle rcLine, int subLine, XYACCUMULATOR subLineStart, DrawPhase phase,
-		Render_collector *collector = nullptr);
+		Sci::Line line, int xStart, PRectangle rcLine, int subLine, XYPOSITION subLineStart, DrawPhase phase, Render_collector *collector = nullptr);
 	void DrawEOLAnnotationText(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
-		Sci::Line line, int xStart, PRectangle rcLine, int subLine, XYACCUMULATOR subLineStart, DrawPhase phase,
-		Render_collector *collector = nullptr);
+		Sci::Line line, int xStart, PRectangle rcLine, int subLine, XYPOSITION subLineStart, DrawPhase phase, Render_collector *collector = nullptr);
 	void DrawAnnotation(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
-		Sci::Line line, int xStart, PRectangle rcLine, int subLine, DrawPhase phase,
-		Render_collector *collector = nullptr);
-	void DrawCarets(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll, Sci::Line lineDoc,
-		int xStart, PRectangle rcLine, int subLine, Render_collector *collector = nullptr) const;
-	void DrawBackground(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll, PRectangle rcLine,
-		Range lineRange, Sci::Position posLineStart, int xStart,
-		int subLine, std::optional<ColourRGBA> background, Render_collector *collector = nullptr) const;
-	void DrawForeground(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll, Sci::Line lineVisible,
-		PRectangle rcLine, Range lineRange, Sci::Position posLineStart, int xStart,
-		int subLine, std::optional<ColourRGBA> background, Render_collector *collector = nullptr);
+		Sci::Line line, int xOrigin, PRectangle rcLine, int subLine, DrawPhase phase, Render_collector *collector = nullptr);
+	void DrawCarets(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
+		Sci::Line lineDoc, int xOrigin, PRectangle rcLine, int subLine, Render_collector *collector = nullptr) const;
+	void DrawIndentGuide(Surface *surface, const ViewStyle &vsDraw, XYPOSITION start, PRectangle rcSegment, bool highlight, bool offset, Render_collector *collector = nullptr) const;
+	void DrawForeground(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
+		int xStart, PRectangle rcLine, int subLine, Sci::Line lineVisible, ForwardRange lineRange, Sci::Position posLineStart,
+		ColourOptional background, Render_collector *collector = nullptr);
 	void DrawIndentGuidesOverEmpty(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
-		Sci::Line line, Sci::Line lineVisible, PRectangle rcLine, int xStart, int subLine,
-		Render_collector *collector = nullptr);
-	void DrawLine(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll, Sci::Line line,
-		Sci::Line lineVisible, int xStart, PRectangle rcLine, int subLine, DrawPhase phase,
-		Render_collector *collector = nullptr);
-	void PaintText(Surface *surfaceWindow, const EditModel &model, PRectangle rcArea, PRectangle rcClient,
-		const ViewStyle &vsDraw, Render_collector *collector = nullptr);
-	void FillLineRemainder(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
-		Sci::Line line, PRectangle rcArea, int subLine, Render_collector *collector = nullptr) const;
+		Sci::Line line, int xStart, PRectangle rcLine, int subLine, Sci::Line lineVisible, Render_collector *collector = nullptr);
+	void DrawLine(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
+		Sci::Line line, Sci::Line lineVisible, int xOrigin, PRectangle rcLine, int subLine, DrawPhase phase, Render_collector *collector = nullptr);
+
+public:
+	void PaintText(Surface *surfaceWindow, const EditModel &model, const ViewStyle &vsDraw,
+		PRectangle rcArea, PRectangle rcClient, Render_collector *collector = nullptr);
 	Sci::Position FormatRange(bool draw, CharacterRangeFull chrg, Rectangle rc, Surface *surface, Surface *surfaceMeasure,
 		const EditModel &model, const ViewStyle &vs);
 };

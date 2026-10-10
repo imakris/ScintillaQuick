@@ -917,6 +917,9 @@ bool ScintillaQuick_item::document_edit_message(unsigned int i_message) const
         case SCI_BACKTAB:
         case SCI_NEWLINE:
         case SCI_FORMFEED:
+        case SCI_CUTALLOWLINE:
+        case SCI_LINEINDENT:
+        case SCI_LINEDEDENT:
         case SCI_LINECUT:
         case SCI_LINEDELETE:
         case SCI_LINETRANSPOSE:

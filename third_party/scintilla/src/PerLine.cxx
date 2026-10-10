@@ -6,10 +6,12 @@
 // The License.txt file describes the conditions under which this software may be distributed.
 
 #include <cstddef>
+#include <cstdint>
 #include <cassert>
 #include <cstring>
 
 #include <stdexcept>
+#include <utility>
 #include <string_view>
 #include <vector>
 #include <forward_list>
@@ -264,11 +266,28 @@ int LineLevels::SetLevel(Sci::Line line, int level, Sci::Line lines) {
 }
 
 int LineLevels::GetLevel(Sci::Line line) const noexcept {
-	if (levels.Length() && (line >= 0) && (line < levels.Length())) {
+	if ((line >= 0) && (line < levels.Length())) {
 		return levels[line];
-	} else {
-		return static_cast<int>(Scintilla::FoldLevel::Base);
 	}
+	return static_cast<int>(Scintilla::FoldLevel::Base);
+}
+
+Scintilla::FoldLevel LineLevels::GetFoldLevel(Sci::Line line) const noexcept {
+	if ((line >= 0) && (line < levels.Length())) {
+		return static_cast<FoldLevel>(levels[line]);
+	}
+	return Scintilla::FoldLevel::Base;
+}
+
+Sci::Line LineLevels::GetFoldParent(Sci::Line line) const noexcept {
+	const FoldLevel level = LevelNumberPart(GetFoldLevel(line));
+	for (Sci::Line lineLook = line - 1; lineLook >= 0; lineLook--) {
+		const FoldLevel levelTry = GetFoldLevel(lineLook);
+		if (LevelIsHeader(levelTry) && LevelNumberPart(levelTry) < level) {
+			return lineLook;
+		}
+	}
+	return -1;
 }
 
 void LineState::Init() {
@@ -523,7 +542,7 @@ bool LineTabstops::AddTabstop(Sci::Line line, int x) {
 
 int LineTabstops::GetNextTabstop(Sci::Line line, int x) const noexcept {
 	if (line < tabstops.Length()) {
-		TabstopList *tl = tabstops[line].get();
+		const TabstopList *tl = tabstops[line].get();
 		if (tl) {
 			for (const int i : *tl) {
 				if (i > x) {

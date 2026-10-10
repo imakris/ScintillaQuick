@@ -106,6 +106,21 @@ static QFont::StyleStrategy choose_strategy(FontQuality eff)
     }
 }
 
+QFont::Stretch qt_font_stretch(FontStretch stretch)
+{
+    switch (stretch) {
+        case FontStretch::UltraCondensed: return QFont::UltraCondensed;
+        case FontStretch::ExtraCondensed: return QFont::ExtraCondensed;
+        case FontStretch::Condensed:      return QFont::Condensed;
+        case FontStretch::SemiCondensed:  return QFont::SemiCondensed;
+        case FontStretch::SemiExpanded:   return QFont::SemiExpanded;
+        case FontStretch::Expanded:       return QFont::Expanded;
+        case FontStretch::ExtraExpanded:  return QFont::ExtraExpanded;
+        case FontStretch::UltraExpanded:  return QFont::UltraExpanded;
+        default:                         return QFont::Unstretched;
+    }
+}
+
 class Font_and_character_set : public Font
 {
 public:
@@ -142,6 +157,7 @@ public:
         if (weight > 0) {
             m_font->setWeight(static_cast<QFont::Weight>(std::clamp(weight, 1, 1000)));
         }
+        m_font->setStretch(qt_font_stretch(fp.stretch));
         m_font->setItalic(fp.italic);
     }
 
@@ -1682,18 +1698,20 @@ public:
             qreal x = row_rect.left() + horizontalPadding();
             const QPixmap icon = iconFor(index);
             if (!icon.isNull()) {
-                const qreal icon_y = row_rect.top() + std::max(0.0, (row_rect.height() - icon.height()) * 0.5);
+                const qreal icon_width  = icon.width() / m_options.imageScale;
+                const qreal icon_height = icon.height() / m_options.imageScale;
+                const qreal icon_y      = row_rect.top() + std::max(0.0, (row_rect.height() - icon_height) * 0.5);
                 if (auto* icon_node = window->createImageNode()) {
                     const QImage icon_image = icon.toImage();
                     QSGTexture* texture     = window->createTextureFromImage(icon_image);
                     icon_node->setTexture(texture);
                     icon_node->setOwnsTexture(true);
-                    icon_node->setRect(QRectF(x, icon_y, icon.width(), icon.height()));
+                    icon_node->setRect(QRectF(x, icon_y, icon_width, icon_height));
                     icon_node->setSourceRect(QRectF(0.0, 0.0, icon_image.width(), icon_image.height()));
                     icon_node->setFiltering(QSGTexture::Linear);
                     root->appendChildNode(icon_node);
                 }
-                x += icon.width() + iconSpacing();
+                x += icon_width + iconSpacing();
             }
 
             auto layout = std::make_unique<QTextLayout>(entry.text, font);
@@ -1813,7 +1831,7 @@ private:
         for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
             width = std::max(width, it.value().width());
         }
-        return width;
+        return qCeil(width / m_options.imageScale);
     }
 
     int maxIconHeight() const
@@ -1822,7 +1840,7 @@ private:
         for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
             height = std::max(height, it.value().height());
         }
-        return height;
+        return qCeil(height / m_options.imageScale);
     }
 
     QPixmap iconFor(int index) const

@@ -687,6 +687,27 @@ void test_unsupported_multi_selection_fails_closed()
     SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
 }
 
+void test_native_edit_commands_obey_edit_handler_boundary()
+{
+    // The edit handler owns all document changes, including native commands
+    // that cannot be represented by a single replacement transaction.
+    for (const unsigned int command : {SCI_LINEINDENT, SCI_LINEDEDENT, SCI_CUTALLOWLINE}) {
+        ScintillaQuick_item editor;
+        const QString text = QStringLiteral("    first line\n    second line");
+        editor.setProperty("text", text);
+        editor.send(SCI_SETSEL, 6, 6);
+        const auto revision = editor.native_content_revision();
+        editor.set_edit_handler(
+            [](const ScintillaQuick_edit_transaction&) {
+                return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::DECLINED, {}};
+            });
+        editor.send(command);
+        SQ_EXPECT(text_of(editor) == text);
+        SQ_EXPECT(editor.native_content_revision() == revision);
+        SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+    }
+}
+
 void test_anchor_queries_track_selection_anchor()
 {
     Event_editor forward_editor;
@@ -1361,6 +1382,7 @@ int main(int argc, char** argv)
     test_committed_ime_restores_preedit_selection();
     test_clipboard_and_drop_ingress();
     test_unsupported_multi_selection_fails_closed();
+    test_native_edit_commands_obey_edit_handler_boundary();
     test_anchor_queries_track_selection_anchor();
     test_supplementary_plane_key_text_inserts();
     test_text_changed_notification_coalescing();

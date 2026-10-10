@@ -5,7 +5,10 @@
 // Copyright 1998-2001 by Neil Hodgson <neilh@scintilla.org>
 // The License.txt file describes the conditions under which this software may be distributed.
 
+#include <cstdint>
+
 #include <stdexcept>
+#include <utility>
 #include <string_view>
 #include <vector>
 #include <optional>
@@ -27,6 +30,7 @@ bool FontSpecification::operator==(const FontSpecification &other) const noexcep
 	       weight == other.weight &&
 	       italic == other.italic &&
 	       size == other.size &&
+	       stretch == other.stretch &&
 	       characterSet == other.characterSet &&
 	       extraFontFlag == other.extraFontFlag &&
 	       checkMonospaced == other.checkMonospaced;
@@ -41,6 +45,8 @@ bool FontSpecification::operator<(const FontSpecification &other) const noexcept
 		return !italic;
 	if (size != other.size)
 		return size < other.size;
+	if (stretch != other.stretch)
+		return stretch < other.stretch;
 	if (characterSet != other.characterSet)
 		return characterSet < other.characterSet;
 	if (extraFontFlag != other.extraFontFlag)
@@ -57,7 +63,9 @@ int DefaultFontSize() noexcept {
 	try {
 		return Platform::DefaultFontSize();
 	} catch (...) {
-		return 10;
+		// Should never happen
+		constexpr int sensibleFontSize = 10;
+		return sensibleFontSize;
 	}
 }
 
@@ -65,8 +73,8 @@ int DefaultFontSize() noexcept {
 
 Style::Style(const char *fontName_) noexcept :
 	FontSpecification(fontName_, DefaultFontSize() * FontSizeMultiplier),
-	fore(0,0,0),
-	back(0xff, 0xff, 0xff),
+	fore(black),
+	back(white),
 	eolFilled(false),
 	underline(false),
 	caseForce(CaseForce::mixed),
@@ -78,5 +86,5 @@ Style::Style(const char *fontName_) noexcept :
 
 void Style::Copy(std::shared_ptr<Font> font_, const FontMeasurements &fm_) noexcept {
 	font = std::move(font_);
-	(FontMeasurements &)(*this) = fm_;
+	static_cast<FontMeasurements &>(*this) = fm_;
 }

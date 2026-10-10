@@ -93,7 +93,7 @@ void DrawWrapMarker(Surface *surface, PRectangle rcPlace,
 		}
 	};
 
-	Relative rel = { x0, isEndMarker ? 1 : -1, y0, 1, widthStroke / 2.0f };
+	const Relative rel = { x0, isEndMarker ? 1 : -1, y0, 1, widthStroke / 2.0f };
 
 	// arrow head
 	const Point head[] = {
@@ -125,7 +125,7 @@ void MarginView::DropGraphics() noexcept {
 }
 
 void MarginView::RefreshPixMaps(Surface *surfaceWindow, const ViewStyle &vsDraw) {
-	if (!pixmapSelPattern) {
+	if (!(pixmapSelPattern && pixmapSelPatternOffset1)) {
 		constexpr int patternSize = 8;
 		pixmapSelPattern = surfaceWindow->AllocatePixMap(patternSize, patternSize);
 		pixmapSelPatternOffset1 = surfaceWindow->AllocatePixMap(patternSize, patternSize);
@@ -139,7 +139,7 @@ void MarginView::RefreshPixMaps(Surface *surfaceWindow, const ViewStyle &vsDraw)
 		ColourRGBA colourFMFill = vsDraw.selbar;
 		ColourRGBA colourFMStripes = vsDraw.selbarlight;
 
-		if (!(vsDraw.selbarlight == ColourRGBA(0xff, 0xff, 0xff))) {
+		if (!(vsDraw.selbarlight == white)) {
 			// User has chosen an unusual chrome colour scheme so just use the highlight edge colour.
 			// (Typically, the highlight colour is white.)
 			colourFMFill = vsDraw.selbarlight;
@@ -279,7 +279,7 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 	const Point ptOrigin = model.GetVisibleOriginInMain();
 	const Sci::Line lineStartPaint = static_cast<Sci::Line>(rcOneMargin.top + ptOrigin.y) / vs.lineHeight;
 	Sci::Line visibleLine = model.TopLineOfMain() + lineStartPaint;
-	XYPOSITION yposScreen = lineStartPaint * vs.lineHeight - ptOrigin.y;
+	XYPOSITION yposScreen = static_cast<XYPOSITION>(lineStartPaint * vs.lineHeight) - ptOrigin.y;
 	if (visibleLine < 0) {
 		const int skipped_display_lines = static_cast<int>(-visibleLine);
 		yposScreen += skipped_display_lines * vs.lineHeight;
@@ -382,15 +382,15 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 					char number[100] = "";
 					if (FlagSet(model.foldFlags, FoldFlag::LevelNumbers)) {
 						const FoldLevel lev = model.pdoc->GetFoldLevel(lineDoc);
-						sprintf(number, "%c%c %03X %03X",
+						snprintf(number,std::size(number), "%c%c %03X %03X",
 							LevelIsHeader(lev) ? 'H' : '_',
 							LevelIsWhitespace(lev) ? 'W' : '_',
 							LevelNumber(lev),
-							static_cast<int>(lev) >> 16
+							static_cast<unsigned int>(lev) >> 16
 						);
 					} else {
 						const int state = model.pdoc->GetLineState(lineDoc);
-						sprintf(number, "%0X", state);
+						snprintf(number, std::size(number), "%0X", state);
 					}
 					sNumber = number;
 				}
@@ -568,7 +568,7 @@ void MarginView::PaintMargin(Surface *surface, Sci::Line topLine, PRectangle rc,
 				surface->FillRectangle(rcOneMargin, vs.styles[StyleLineNumber].back);
 			}
 
-			if (marginStyle.ShowsFolding() && highlightDelimiter.isEnabled) {
+			if (marginStyle.ShowsFolding() && highlightDelimiter.IsEnabled()) {
 				const Sci::Line lastLine = model.pcs->DocFromDisplay(topLine + model.LinesOnScreen()) + 1;
 				model.pdoc->GetHighlightDelimiters(highlightDelimiter,
 					model.pdoc->SciLineFromPosition(model.sel.MainCaret()), lastLine);
