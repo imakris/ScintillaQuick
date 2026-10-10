@@ -9,6 +9,7 @@
 #define SCINTILLAQUICK_SCINTILLAQUICK_ITEM_H
 
 #include <cstddef>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -354,6 +355,46 @@ public:
     std::uint64_t native_binding_revision() const { return m_native_binding_revision; }
     std::uint64_t native_content_revision() const { return m_mutation_generation; }
 
+    struct Save_fence
+    {
+        const std::uint64_t binding_revision;
+        const std::uint64_t content_revision;
+
+        Save_fence(std::uint64_t binding, std::uint64_t content)
+            : binding_revision(binding), content_revision(content) {}
+
+        bool is_current() const { return !(m_state.load(std::memory_order_acquire) & k_invalid); }
+        bool admit_commit()
+        {
+            unsigned expected = 0;
+            return m_state.compare_exchange_strong(expected, k_admitted, std::memory_order_acq_rel);
+        }
+        bool cancel()
+        {
+            unsigned current = m_state.load(std::memory_order_acquire);
+            do {
+                if (current & k_admitted) {
+                    return false;
+                }
+            } while (!m_state.compare_exchange_weak(current, current | k_cancelled, std::memory_order_acq_rel));
+            return true;
+        }
+        void invalidate() { m_state.fetch_or(k_invalid, std::memory_order_acq_rel); }
+
+    private:
+        static constexpr unsigned k_invalid = 1;
+        static constexpr unsigned k_cancelled = 2;
+        static constexpr unsigned k_admitted = 4;
+        std::atomic_uint m_state = 0;
+    };
+
+    std::shared_ptr<Save_fence> capture_save_fence();
+    void invalidate_save_fences();
+    // Acknowledge the captured document only after its native notification,
+    // dispatch and property frames have unwound. Completion retains the same
+    // mutation fence; a committed file can belong to an older editor revision.
+    void acknowledge_save_point(std::shared_ptr<Save_fence> fence, std::function<void(bool)> completed);
+
     // Scroll state is clamped to a nonnegative range. Each axis is updated
     // before its change notifications and the corresponding raw core signal.
     int vertical_scroll_max() const { return m_vertical_scroll_max; }
@@ -499,6 +540,12 @@ protected:
     QSGNode* updatePaintNode(QSGNode* old_node, UpdatePaintNodeData* update_paint_node_data) override;
 
 private:
+    struct Save_point_acknowledgement;
+    static thread_local Save_point_acknowledgement* m_save_point_acknowledgement;
+    bool defer_save_point(Scintilla::NotificationData notification);
+    static void publish_save_point_acknowledgement(std::shared_ptr<Save_point_acknowledgement> acknowledgement);
+    void publish_save_point(Scintilla::NotificationData notification,
+        const std::shared_ptr<Save_fence>& source, const std::shared_ptr<Save_fence>& recipient);
     void set_vertical_scroll_state(int maximum, int page, int value);
     void set_horizontal_scroll_state(int maximum, int page, int value);
     void update_auto_line_number_margin();
@@ -696,6 +743,8 @@ private:
     mutable bool          m_readonly_dirty       = false;
     mutable std::uint64_t m_mutation_generation  = 0;
     std::uint64_t m_native_binding_revision = 0;
+    std::vector<std::weak_ptr<Save_fence>> m_save_fences;
+    mutable int m_property_publication_depth = 0;
     void record_actual_text_mutation();
     void begin_property_batch() const;
     void end_property_batch() const;

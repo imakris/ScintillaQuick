@@ -21,6 +21,7 @@
 #include "Position.h"
 
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QGuiApplication>
 #include <QInputMethod>
 #include <QMetaMethod>
@@ -502,6 +503,7 @@ ScintillaQuick_item::ScintillaQuick_item(QQuickItem* parent)
 
 ScintillaQuick_item::~ScintillaQuick_item()
 {
+    invalidate_save_fences();
     // Tell the core to stop all of its timers and disconnect from the
     // clipboard before the ScintillaQuick_item subobject finishes
     // destructing. `m_core` is a child QObject (parented to `this`) and
@@ -2617,10 +2619,157 @@ void ScintillaQuick_item::replace_notification_text(const QByteArray& text)
     *m_delivered_notification_text = text;
 }
 
+std::shared_ptr<ScintillaQuick_item::Save_fence> ScintillaQuick_item::capture_save_fence()
+{
+    std::erase_if(m_save_fences, [](const auto& fence) { return fence.expired(); });
+    auto fence = std::make_shared<Save_fence>(m_native_binding_revision, m_mutation_generation);
+    m_save_fences.push_back(fence);
+    return fence;
+}
+
+void ScintillaQuick_item::invalidate_save_fences()
+{
+    std::erase_if(m_save_fences, [](const auto& weak) {
+        if (const auto fence = weak.lock()) {
+            fence->invalidate();
+        }
+        return true;
+    });
+}
+
+struct ScintillaQuick_item::Save_point_acknowledgement
+{
+    struct Recipient
+    {
+        QPointer<ScintillaQuick_item> item;
+        std::shared_ptr<Save_fence> fence;
+        NotificationData notification;
+    };
+
+    Document* document = nullptr;
+    QPointer<ScintillaQuick_item> owner;
+    std::shared_ptr<Save_fence> source;
+    std::vector<Recipient> recipients;
+    std::function<void(bool)> completed;
+};
+
+thread_local ScintillaQuick_item::Save_point_acknowledgement*
+    ScintillaQuick_item::m_save_point_acknowledgement = nullptr;
+
+bool ScintillaQuick_item::defer_save_point(NotificationData notification)
+{
+    auto* acknowledgement = m_save_point_acknowledgement;
+    if (!acknowledgement || notification.nmhdr.code != Notification::SavePointReached ||
+        acknowledgement->document != m_core->pdoc)
+    {
+        return false;
+    }
+    // Collect the actual Document watchers, including native aliases which
+    // are not registered framework views. This custody ends with this Save.
+    acknowledgement->recipients.push_back({this, capture_save_fence(), notification});
+    return true;
+}
+
+void ScintillaQuick_item::acknowledge_save_point(
+    std::shared_ptr<Save_fence> fence, std::function<void(bool)> completed)
+{
+    if (!fence || !fence->is_current() || fence->binding_revision != m_native_binding_revision ||
+        fence->content_revision != m_mutation_generation)
+    {
+        completed(false);
+        return;
+    }
+    auto acknowledgement = std::make_shared<Save_point_acknowledgement>();
+    acknowledgement->document = m_core->pdoc;
+    acknowledgement->owner = this;
+    acknowledgement->source = std::move(fence);
+    acknowledgement->completed = std::move(completed);
+    {
+        auto* previous = std::exchange(m_save_point_acknowledgement, acknowledgement.get());
+        const auto restore = qScopeGuard([previous] { m_save_point_acknowledgement = previous; });
+        send(SCI_SETSAVEPOINT, 0, 0);
+    }
+    publish_save_point_acknowledgement(std::move(acknowledgement));
+}
+
+void ScintillaQuick_item::publish_save_point_acknowledgement(
+    std::shared_ptr<Save_point_acknowledgement> acknowledgement)
+{
+    const auto frames_active = [](const QPointer<ScintillaQuick_item>& item) {
+        return item && (item->m_core->m_wnd_proc_depth != 0 ||
+            !item->m_core->m_direct_status_captures.empty() ||
+            item->m_property_batch_depth != 0 || item->m_property_publication_depth != 0);
+    };
+    // Completion can arrive through a nested event loop in another alias's
+    // native callback. A queued turn alone does not prove those frames left.
+    if (frames_active(acknowledgement->owner) ||
+        std::ranges::any_of(acknowledgement->recipients,
+            [&](const auto& recipient) { return frames_active(recipient.item); }))
+    {
+        QTimer::singleShot(0, QCoreApplication::instance(), [acknowledgement = std::move(acknowledgement)] {
+            publish_save_point_acknowledgement(acknowledgement);
+        });
+        return;
+    }
+    for (const auto& recipient : acknowledgement->recipients) {
+        if (!acknowledgement->source->is_current()) {
+            break;
+        }
+        if (recipient.item && recipient.fence->is_current()) {
+            recipient.item->publish_save_point(recipient.notification, acknowledgement->source, recipient.fence);
+        }
+    }
+    acknowledgement->completed(acknowledgement->source->is_current());
+}
+
+void ScintillaQuick_item::publish_save_point(NotificationData notification,
+    const std::shared_ptr<Save_fence>& source, const std::shared_ptr<Save_fence>& recipient)
+{
+    const QPointer<ScintillaQuick_item> alive(this);
+    const auto current = [&] { return alive && source->is_current() && recipient->is_current(); };
+    static const QMetaMethod typed_signal = QMetaMethod::fromSignal(&ScintillaQuick_item::notificationReceived);
+    const bool typed_connected = isSignalConnected(typed_signal);
+    const auto payload = notification_text_payload(notification);
+    QByteArray delivered_text = payload.bytes;
+    const auto snapshot = typed_connected ? notification_snapshot_from(notification, payload)
+                                          : ScintillaQuick_notification();
+    const char* const original_text = notification.text;
+    {
+        auto* previous = m_delivered_notification_text;
+        const auto restore = qScopeGuard([alive, previous] {
+            if (alive) { alive->m_delivered_notification_text = previous; }
+        });
+        m_delivered_notification_text = &delivered_text;
+        emit notify(&notification);
+    }
+    if (!current()) {
+        return;
+    }
+    if (notification.text != original_text) {
+        qWarning("ScintillaQuick: assigning NotificationData::text from a notify() slot has no "
+            "effect; call ScintillaQuick_item::replace_notification_text() instead");
+    }
+    if (typed_connected) {
+        emit notificationReceived(snapshot);
+        if (!current()) {
+            return;
+        }
+    }
+    // Preserve the raw scalar contract, without replaying a clean notification
+    // after an earlier channel or watcher invalidated the captured document.
+    if (notification.nmhdr.code == Notification::SavePointReached) {
+        emit savePointChanged(false);
+    }
+    else if (notification.nmhdr.code == Notification::SavePointLeft) {
+        emit savePointChanged(true);
+    }
+}
+
 void ScintillaQuick_item::record_actual_text_mutation()
 {
     // Called from ScintillaQuick_core::NotifyModified() for an observed
     // InsertText/DeleteText, before any public notification filtering.
+    invalidate_save_fences();
     ++m_mutation_generation;
     m_last_find_start = -1;
     m_last_find_end   = -1;
@@ -2659,14 +2808,19 @@ void ScintillaQuick_item::flush_property_changes() const
 
     ScintillaQuick_item* self = const_cast<ScintillaQuick_item*>(this);
 
+    const QPointer<ScintillaQuick_item> alive(self);
+    ++m_property_publication_depth;
+    const auto leave_publication = qScopeGuard([alive] {
+        if (alive) { --alive->m_property_publication_depth; }
+    });
+
     // Refresh the input method before the notification so that observers of
     // readonlyChanged() already see the final state.
     if (readonly_changed) {
         self->updateInputMethod(Qt::ImReadOnly);
     }
 
-    const QPointer<ScintillaQuick_item> alive(self);
-    if (text_changed) {
+    if (alive && text_changed) {
         emit self->textChanged();
     }
     if (alive && readonly_changed) {

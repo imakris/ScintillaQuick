@@ -884,21 +884,29 @@ void ScintillaQuick_core::NotifyParent(NotificationData scn)
 {
     scn.nmhdr.hwndFrom = wMain.GetID();
     scn.nmhdr.idFrom   = GetCtrlID();
+    if (m_owner && m_owner->defer_save_point(scn)) {
+        return;
+    }
     emit notifyParent(scn);
 }
 
 void ScintillaQuick_core::NotifyModified(Document* document, DocModification mh, void* user_data)
 {
-    // Observe actual text mutations below the public notification stream:
-    // SCI_SETMODEVENTMASK can suppress SCN_MODIFIED and notify() slots can
-    // rewrite notification fields, but neither can hide a real document
-    // mutation from this watcher hook. The item only records the mutation
-    // here; it must not emit Qt signals while Scintilla is mid-edit.
-    if (m_owner &&
-        (FlagSet(mh.modificationType, ModificationFlags::InsertText) ||
-         FlagSet(mh.modificationType, ModificationFlags::DeleteText)))
+    // Invalidate before an accepted mutation can reach another watcher's
+    // callback. Count only actual positive-length text changes below the
+    // public notification mask, without emitting Qt signals mid-edit.
+    if (m_owner && mh.length > 0)
     {
-        m_owner->record_actual_text_mutation();
+        if (FlagSet(mh.modificationType, ModificationFlags::BeforeInsert) ||
+            FlagSet(mh.modificationType, ModificationFlags::BeforeDelete))
+        {
+            m_owner->invalidate_save_fences();
+        }
+        if (FlagSet(mh.modificationType, ModificationFlags::InsertText) ||
+            FlagSet(mh.modificationType, ModificationFlags::DeleteText))
+        {
+            m_owner->record_actual_text_mutation();
+        }
     }
     Editor::NotifyModified(document, mh, user_data);
 }
@@ -1241,6 +1249,7 @@ sptr_t ScintillaQuick_core::WndProc(Message i_message, uptr_t w_param, sptr_t l_
 
             case Message::SetDocPointer:
                 // Even an equal-pointer or away-and-back bind is a new custody incarnation.
+                m_owner->invalidate_save_fences();
                 ++m_owner->m_native_binding_revision;
                 result = ScintillaBase::WndProc(i_message, w_param, l_param);
                 break;
