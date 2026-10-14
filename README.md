@@ -8,7 +8,8 @@
 [Scintilla](https://www.scintilla.org/) editing engine.
 
 It is intended for applications that want Scintilla behavior inside a real
-`QQuickItem`.
+`QQuickItem`. Applications can integrate through C++ or the optional QML type
+registration helper.
 
 ## What It Provides
 
@@ -17,18 +18,6 @@ It is intended for applications that want Scintilla behavior inside a real
 - Qt Quick-native focus, input, IME, and scene-graph rendering
 - CMake package export for `find_package(ScintillaQuick)`
 - A minimal example application, benchmark target, and validation tests
-
-## Status
-
-`ScintillaQuick` is usable today, but it is still an early-stage library.
-
-Current repository state:
-
-- Version `0.1.0`
-- Qt `6.12+`
-- Static library build
-- C++ integration first
-- Optional QML type registration helper is available
 
 ## Requirements
 
@@ -164,33 +153,53 @@ registers:
 - version: `1.0`
 - type: `ScintillaQuick_item`
 
+## Optional Lexilla Support
+
+ScintillaQuick does not require Lexilla. Applications that use lexers can call
+`scintillaquick_add_lexilla()` after adding the ScintillaQuick subproject or finding
+its installed package, then link `Lexilla::Lexilla`. This uses an existing target
+or installed Lexilla package first, otherwise fetches upstream `master` and builds
+against ScintillaQuick's public Scintilla headers. Set
+`FETCHCONTENT_SOURCE_DIR_LEXILLA` or pass `SOURCE_DIR <checkout>` to select a local
+checkout. Invalid explicit paths fail configuration.
+
+The helper installs a separate `Lexilla` CMake package alongside ScintillaQuick;
+installed applications can use `find_package(Lexilla CONFIG REQUIRED)` directly.
+
+## Default Document Syntax
+
+The optional `ScintillaQuick::Syntax` companion selects Lexilla lexers, keyword
+sets and light/dark lexical colors for C/C++, QML/JavaScript, GLSL, JSON, Python,
+CMake and Rust paths. Unknown paths use plain text. The core editor remains
+independent of Lexilla.
+
+Call `scintillaquick_add_syntax()` after adding the subproject or finding the
+installed package, then link `ScintillaQuick::Syntax`. To build and install the
+companion with ScintillaQuick itself, set `SCINTILLAQUICK_BUILD_SYNTAX=ON`.
+An installed core-only package can build the companion through the same helper;
+its source is included in the package. Repeated helper calls reuse the target.
+
+Include `<scintillaquick/scintillaquick_syntax.h>` and call
+`scintillaquick::configure_default_syntax(pane, path, dark_mode)` once with the
+final language path and theme, then apply any application keyword, property or
+color overrides. Configuration preserves the host's base font, backgrounds,
+margins and predefined styles. Custom lexer owners can use
+`scintillaquick::reset_syntax_styles(pane)` to clear lexical colors, emphasis and
+keyword sets while retaining their lexer. Application-specific lexer policy
+belongs to the host.
+
 ## Testing
 
-CTest currently registers:
-
-- `scintillaquick_smoke_test`
-- `scintillaquick_dispatch_table_test`
-- `scintillaquick_embedded_benchmark` when `SCINTILLAQUICK_BUILD_BENCHMARKS=ON`
-- `scintillaquick_frame_validation_test`
-- `scintillaquick_renderer_software_1_test` and
-  `scintillaquick_renderer_software_1_25_test`
-- `scintillaquick_renderer_rhi_1_test` and
-  `scintillaquick_renderer_rhi_1_25_test` on Windows
-- `scintillaquick_visual_regression_test`
-
-Run them with:
+Run the test suite with:
 
 ```bash
 ctest --test-dir build --output-on-failure
 ```
 
-Notes:
-
-- Stored visual baselines use Qt's software scene graph. Renderer conformance
-  also checks the RHI scene graph on Windows; both backend checks run at
-  device-pixel ratios 1 and 1.25 against Scintilla's drawing algorithms.
-- On Windows, the visual tests use the normal `windows` Qt platform plugin, so
-  they require a desktop session rather than a truly headless environment.
+On Windows, visual tests require a desktop session.
+See [Getting Started](docs/getting_started.md#testing) for test setup and
+[Maintenance Invariants](docs/maintenance_invariants.md#test-and-benchmark-playbook)
+for maintainer validation guidance.
 
 ## Repository Layout
 
@@ -221,38 +230,3 @@ Project code is released under the BSD 2-Clause license. See
 
 The repository also vendors Scintilla under its own license. See
 [`third_party/scintilla/LICENSE`](third_party/scintilla/LICENSE).
-
-### Optional Lexilla support
-
-ScintillaQuick does not require Lexilla. Applications that use lexers can call
-`scintillaquick_add_lexilla()` after adding the ScintillaQuick subproject or finding
-its installed package, then link `Lexilla::Lexilla`. This uses an existing target
-or installed Lexilla package first, otherwise fetches upstream `master` and builds
-against ScintillaQuick's public Scintilla headers. Set
-`FETCHCONTENT_SOURCE_DIR_LEXILLA` or pass `SOURCE_DIR <checkout>` to select a local
-checkout. Invalid explicit paths fail configuration.
-
-The helper installs a separate `Lexilla` CMake package alongside ScintillaQuick;
-installed applications can use `find_package(Lexilla CONFIG REQUIRED)` directly.
-
-### Default document syntax
-
-The optional `ScintillaQuick::Syntax` companion selects Lexilla lexers, keyword
-sets and light/dark lexical colors for C/C++, QML/JavaScript, GLSL, JSON, Python,
-CMake and Rust paths. Unknown paths use plain text. The core editor remains
-independent of Lexilla.
-
-Call `scintillaquick_add_syntax()` after adding the subproject or finding the
-installed package, then link `ScintillaQuick::Syntax`. To build and install the
-companion with ScintillaQuick itself, set `SCINTILLAQUICK_BUILD_SYNTAX=ON`.
-An installed core-only package can build the companion through the same helper;
-its source is included in the package. Repeated helper calls reuse the target.
-
-Include `<scintillaquick/scintillaquick_syntax.h>` and call
-`scintillaquick::configure_default_syntax(pane, path, dark_mode)` once with the
-final language path and theme, then apply any application keyword, property or
-color overrides. Configuration preserves the host's base font, backgrounds,
-margins and predefined styles. Custom lexer owners can use
-`scintillaquick::reset_syntax_styles(pane)` to clear lexical colors, emphasis and
-keyword sets while retaining their lexer. Application-specific lexer policy
-belongs to the host.
