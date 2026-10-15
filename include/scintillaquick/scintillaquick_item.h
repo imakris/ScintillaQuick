@@ -768,6 +768,7 @@ private:
     void ensureFindPanel();
     void updateFindPanelGeometry();
     bool handle_find_navigation_key(QKeyEvent* event);
+    bool find_in_direction(bool backwards);
 
     QPointer<Find_panel> m_find_panel;
     bool m_find_panel_visible = false;

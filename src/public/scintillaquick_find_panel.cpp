@@ -998,91 +998,54 @@ void ScintillaQuick_item::hideFindPanel()
     setFindPanelVisible(false);
 }
 
-bool ScintillaQuick_item::findNext()
+bool ScintillaQuick_item::findNext()     { return find_in_direction(false); }
+bool ScintillaQuick_item::findPrevious() { return find_in_direction(true);  }
+
+bool ScintillaQuick_item::find_in_direction(bool backwards)
 {
     const QByteArray needle = m_find_text.toUtf8();
     if (needle.isEmpty()) {
         return false;
     }
 
-    const Scintilla::Position length = document_length(*this);
-    const Scintilla::Position selection_start = static_cast<Scintilla::Position>(send(SCI_GETSELECTIONSTART));
-    const Scintilla::Position selection_end = static_cast<Scintilla::Position>(send(SCI_GETSELECTIONEND));
-    const bool repeated_zero_width = selection_start == selection_end && selection_start == m_last_find_start &&
-                                     selection_end == m_last_find_end && m_find_text == m_last_find_text &&
-                                     m_find_options == m_last_find_options;
+    using Position = Scintilla::Position;
+    const Position length          = document_length(*this);
+    const Position selection_start = static_cast<Position>(send(SCI_GETSELECTIONSTART));
+    const Position selection_end   = static_cast<Position>(send(SCI_GETSELECTIONEND));
+    const bool repeated_zero_width =
+        selection_start == selection_end     && selection_start == m_last_find_start &&
+        selection_end   == m_last_find_end   && m_find_text     == m_last_find_text  &&
+        m_find_options  == m_last_find_options;
 
-    Scintilla::Position search_start = selection_end;
-    Scintilla::Position match = -1;
+    const Position search_start = backwards ? selection_start : selection_end;
+    const Position search_end   = backwards ? 0 : length;
+    const Position wrap_start   = backwards ? length : 0;
+    Position match = -1;
     if (repeated_zero_width) {
-        const Scintilla::Position advanced = static_cast<Scintilla::Position>(send(SCI_POSITIONAFTER, search_start));
-        if (advanced > search_start) {
-            match = search_range(*this, needle, advanced, length);
+        const Position advanced = static_cast<Position>(send(
+            backwards ? SCI_POSITIONBEFORE : SCI_POSITIONAFTER, search_start));
+        if (backwards ? advanced < search_start : advanced > search_start) {
+            match = search_range(*this, needle, advanced, search_end);
         }
     }
     else {
-        match = search_range(*this, needle, search_start, length);
+        match = search_range(*this, needle, search_start, search_end);
     }
-    if (match < 0 && search_start > 0) {
-        match = search_range(*this, needle, 0, search_start);
+    if (match < 0 && (backwards ? search_start < length : search_start > 0)) {
+        match = search_range(*this, needle, wrap_start, search_start);
     }
     if (match < 0) {
         return false;
     }
 
-    const Scintilla::Position target_start = static_cast<Scintilla::Position>(send(SCI_GETTARGETSTART));
-    const Scintilla::Position target_end = static_cast<Scintilla::Position>(send(SCI_GETTARGETEND));
+    const Position target_start = static_cast<Position>(send(SCI_GETTARGETSTART));
+    const Position target_end   = static_cast<Position>(send(SCI_GETTARGETEND));
     if (repeated_zero_width && target_start == m_last_find_start && target_end == m_last_find_end) {
         return false;
     }
-    m_last_find_start = target_start;
-    m_last_find_end = target_end;
-    m_last_find_text = m_find_text;
-    m_last_find_options = m_find_options;
-    reveal_match_and_center(*this, target_start, target_end);
-    return true;
-}
-
-bool ScintillaQuick_item::findPrevious()
-{
-    const QByteArray needle = m_find_text.toUtf8();
-    if (needle.isEmpty()) {
-        return false;
-    }
-
-    const Scintilla::Position length = document_length(*this);
-    const Scintilla::Position selection_start = static_cast<Scintilla::Position>(send(SCI_GETSELECTIONSTART));
-    const Scintilla::Position selection_end = static_cast<Scintilla::Position>(send(SCI_GETSELECTIONEND));
-    const bool repeated_zero_width = selection_start == selection_end && selection_start == m_last_find_start &&
-                                     selection_end == m_last_find_end && m_find_text == m_last_find_text &&
-                                     m_find_options == m_last_find_options;
-
-    Scintilla::Position match = -1;
-    if (repeated_zero_width) {
-        const Scintilla::Position retreated =
-            static_cast<Scintilla::Position>(send(SCI_POSITIONBEFORE, selection_start));
-        if (retreated < selection_start) {
-            match = search_range(*this, needle, retreated, 0);
-        }
-    }
-    else {
-        match = search_range(*this, needle, selection_start, 0);
-    }
-    if (match < 0 && selection_start < length) {
-        match = search_range(*this, needle, length, selection_start);
-    }
-    if (match < 0) {
-        return false;
-    }
-
-    const Scintilla::Position target_start = static_cast<Scintilla::Position>(send(SCI_GETTARGETSTART));
-    const Scintilla::Position target_end = static_cast<Scintilla::Position>(send(SCI_GETTARGETEND));
-    if (repeated_zero_width && target_start == m_last_find_start && target_end == m_last_find_end) {
-        return false;
-    }
-    m_last_find_start = target_start;
-    m_last_find_end = target_end;
-    m_last_find_text = m_find_text;
+    m_last_find_start   = target_start;
+    m_last_find_end     = target_end;
+    m_last_find_text    = m_find_text;
     m_last_find_options = m_find_options;
     reveal_match_and_center(*this, target_start, target_end);
     return true;
