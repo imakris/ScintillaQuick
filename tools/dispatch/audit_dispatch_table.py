@@ -343,11 +343,11 @@ def build_audit(iface: ParsedIface, table: ParsedTable) -> Audit:
         for rule in table.rules
         if rule.macro in messages_by_macro
         and messages_by_macro[rule.macro].kind == "set"
-        and rule.effect == "Read_only"
+        and rule.effect == "READ_ONLY"
     ]
     if set_read_only:
         structural_errors.append(
-            "set messages classified Read_only: "
+            "set messages classified READ_ONLY: "
             + ", ".join(message.macro for message in set_read_only)
         )
 
@@ -386,7 +386,7 @@ def build_audit(iface: ParsedIface, table: ParsedTable) -> Audit:
         if message.kind == "get"
         and (
             message.macro not in rules_by_macro
-            or rules_by_macro[message.macro].effect != "Read_only"
+            or rules_by_macro[message.macro].effect != "READ_ONLY"
         )
     ]
     read_only_fun = [
@@ -394,7 +394,7 @@ def build_audit(iface: ParsedIface, table: ParsedTable) -> Audit:
         for message in iface.messages
         if message.kind == "fun"
         and message.macro in rules_by_macro
-        and rules_by_macro[message.macro].effect == "Read_only"
+        and rules_by_macro[message.macro].effect == "READ_ONLY"
     ]
     query_fun_absent = [
         message
@@ -455,8 +455,8 @@ def build_audit(iface: ParsedIface, table: ParsedTable) -> Audit:
             "  by effect:",
         ]
     )
-    for effect in ("Read_only", "Overlay", "Static_content", "Static_content_and_style", "Scroll"):
-        report_lines.append(f"    {effect}: {effect_counts.get(effect, 0)}")
+    for effect, count in sorted(effect_counts.items()):
+        report_lines.append(f"    {effect}: {count}")
     report_lines.append("")
 
     report_lines.extend(["Unclassified Messages", "---------------------"])
@@ -507,11 +507,11 @@ def build_audit(iface: ParsedIface, table: ParsedTable) -> Audit:
     report_lines.append("")
 
     report_lines.extend(["Getter / Mutator Ambiguity", "---------------------------"])
-    report_lines.append(f"  get entries not classified Read_only: {len(get_not_read_only)}")
+    report_lines.append(f"  get entries not classified READ_ONLY: {len(get_not_read_only)}")
     report_lines.extend(lines_or_none(sorted_message_lines(get_not_read_only), limit=80))
-    report_lines.append(f"  set entries classified Read_only: {len(set_read_only)}")
+    report_lines.append(f"  set entries classified READ_ONLY: {len(set_read_only)}")
     report_lines.extend(lines_or_none(sorted_message_lines(set_read_only), limit=80))
-    report_lines.append(f"  fun entries classified Read_only: {len(read_only_fun)}")
+    report_lines.append(f"  fun entries classified READ_ONLY: {len(read_only_fun)}")
     report_lines.extend(lines_or_none(sorted_message_lines(read_only_fun), limit=120))
     report_lines.append("")
 

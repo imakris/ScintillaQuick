@@ -181,6 +181,11 @@ if(Python3_Interpreter_FOUND)
             --check
             --repo-root
             ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    add_test(
+        NAME scintillaquick_dispatch_audit_regression_test
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tools/dispatch/test_audit_dispatch_table.py)
 else()
     message(WARNING
         "Python3 interpreter not found; skipping "
