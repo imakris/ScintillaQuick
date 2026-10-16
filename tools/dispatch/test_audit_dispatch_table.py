@@ -17,8 +17,8 @@ class DispatchAuditTests(unittest.TestCase):
         cls.table = audit.parse_dispatch_table(root / "src/core/scintillaquick_dispatch_table.h")
 
     def test_setter_classified_like_a_pure_query_fails(self):
-        query = next(rule for rule in self.table.rules if rule.macro == "SCI_GETTEXT")
-        setter = next(rule for rule in self.table.rules if rule.macro == "SCI_SETTEXT")
+        query = next(rule for rule in self.table.rules if rule.macro == "SCI_GETTABWIDTH")
+        setter = next(rule for rule in self.table.rules if rule.macro == "SCI_SETTABWIDTH")
         table = replace(self.table, rules=[
             replace(rule, effect=query.effect) if rule == setter else rule
             for rule in self.table.rules
