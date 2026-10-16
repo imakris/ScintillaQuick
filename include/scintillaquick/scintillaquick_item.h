@@ -73,7 +73,7 @@ class Surface_impl;
 struct Render_frame;
 
 // Test / benchmark support type. Consumed by the in-tree benchmark harness
-// and by test_support/ScintillaQuick_validation_access.h. Not intended as
+// and by tests/support/scintillaquick_validation_access.h. Not intended as
 // part of the long-term public API; treat as internal.
 struct Displayed_row_for_test
 {
