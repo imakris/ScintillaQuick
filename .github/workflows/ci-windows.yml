@@ -15,6 +15,11 @@ jobs:
     name: Windows / Qt 6.12.0 / shared=${{ matrix.build-shared }}
     runs-on: windows-latest
 
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_GENERATOR: Ninja
+
     strategy:
       fail-fast: false
       matrix:
@@ -22,6 +27,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -38,6 +51,8 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_POLICY_DEFAULT_CMP0141=NEW
+          '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>'
           -DBUILD_SHARED_LIBS=${{ matrix.build-shared }}
           -DBUILD_TESTING=ON
           -DSCINTILLAQUICK_BUILD_EXAMPLES=ON
@@ -51,7 +66,7 @@ jobs:
         if: matrix.build-shared == 'ON'
         shell: pwsh
         run: |
-          "$PWD/build/Release" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "$PWD/build" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       # tests/CMakeLists.txt pins QT_QPA_PLATFORM, QT_FONT_DPI,
       # QT_SCALE_FACTOR and QT_ENABLE_HIGHDPI_SCALING per test as a CTest
@@ -110,7 +125,14 @@ jobs:
           int main() { return scintillaquick::version_major >= 0 ? 0 : 1; }
           EOF
           cmake -S build/_consumer -B build/_consumer/_build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_DEFAULT_CMP0141=NEW \
+            '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>' \
             -DCMAKE_PREFIX_PATH="$PWD/build/_install"
           cmake --build build/_consumer/_build --config Release
           export PATH="$PWD/build/_install/bin:$PATH"
-          ./build/_consumer/_build/Release/consumer_smoke.exe
+          ./build/_consumer/_build/consumer_smoke.exe
+
+      - name: Report compiler cache use
+        if: always()
+        run: sccache --show-stats

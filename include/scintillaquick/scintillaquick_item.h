@@ -177,6 +177,7 @@ enum class ScintillaQuick_edit_disposition
 struct SCINTILLAQUICK_EXPORT ScintillaQuick_edit_result
 {
     ScintillaQuick_edit_disposition disposition = ScintillaQuick_edit_disposition::DECLINED;
+    // A HANDLED callback owns the resulting document projection and selection.
     // A HANDLED callback must not throw. An escaping exception terminates the
     // process because the callback may already have applied part of a compound
     // replacement and ScintillaQuick cannot roll that external state back.
@@ -644,6 +645,9 @@ private:
         QByteArray                    inserted_text,
         ScintillaQuick_edit_replacement& replacement,
         bool                          overtype = false) const;
+    bool ime_commit_replacements(
+        const QInputMethodEvent&                      event,
+        std::vector<ScintillaQuick_edit_replacement>& replacements) const;
     Delete_key_replacement_result delete_key_replacement(
         Scintilla::Message             command,
         ScintillaQuick_edit_replacement& replacement) const;
@@ -707,9 +711,12 @@ private:
     QElapsedTimer m_elapsed_timer;
 
     Scintilla::Position m_preedit_pos;
-    Scintilla::Position m_handler_ime_anchor = 0;
-    Scintilla::Position m_handler_ime_caret  = 0;
-    bool m_handler_ime_active = false;
+    Scintilla::Position m_ime_anchor = 0;
+    Scintilla::Position m_ime_caret  = 0;
+    bool m_ime_restore_selection = false;
+    // A post-commit Selection locates preedit at its caret without replacing it.
+    bool m_ime_preserve_selection = false;
+    QString m_ime_preedit;
     // Owned text payload of the notification currently being delivered by
     // `notifyParent()`, and the target of `replace_notification_text()`. Points into the
     // active `notifyParent()` frame while `notify()` is being emitted and is null at all

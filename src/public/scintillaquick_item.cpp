@@ -817,6 +817,59 @@ bool ScintillaQuick_item::single_stream_replacement(
         replacement.position + replacement.deleted_length);
 }
 
+bool ScintillaQuick_item::ime_commit_replacements(
+    const QInputMethodEvent&                      event,
+    std::vector<ScintillaQuick_edit_replacement>& replacements) const
+{
+    ScintillaQuick_edit_replacement selection;
+    if (!single_stream_replacement({}, selection) || event.replacementLength() < 0) {
+        return false;
+    }
+
+    const QByteArray committed_text = m_core->BytesForDocument(event.commitString());
+    if (event.replacementStart() == 0 && event.replacementLength() == 0) {
+        selection.inserted_text = committed_text;
+        replacements.push_back(std::move(selection));
+        return true;
+    }
+
+    // Qt removes the selection first, then measures the replacement in UTF-16
+    // units around the preedit origin. Resolve both sides without changing the
+    // document: the edit handler must see the entire transaction before it runs.
+    const Sci::Position selection_start = selection.position;
+    const Sci::Position selection_end   = selection_start + selection.deleted_length;
+    const auto relative_position = [&](qint64 offset) {
+        if (!std::in_range<Sci::Position>(offset)) {
+            return Sci::invalidPosition;
+        }
+        return m_core->pdoc->GetRelativePositionUTF16(
+            offset > 0 ? selection_end : selection_start,
+            static_cast<Sci::Position>(offset));
+    };
+    const Sci::Position replacement_start = relative_position(event.replacementStart());
+    const Sci::Position replacement_end = relative_position(
+        static_cast<qint64>(event.replacementStart()) + event.replacementLength());
+    if (replacement_start < 0 || replacement_end < replacement_start ||
+        m_core->RangeContainsProtected(replacement_start, replacement_end))
+    {
+        return false;
+    }
+
+    const auto without_selection = [&](Sci::Position position) {
+        return position > selection_start ? position - selection.deleted_length : position;
+    };
+    ScintillaQuick_edit_replacement replacement{
+        without_selection(replacement_start),
+        without_selection(replacement_end) - without_selection(replacement_start),
+        committed_text,
+    };
+    if (selection.deleted_length > 0) {
+        replacements.push_back(std::move(selection));
+    }
+    replacements.push_back(std::move(replacement));
+    return true;
+}
+
 ScintillaQuick_item::Delete_key_replacement_result ScintillaQuick_item::delete_key_replacement(
     Message                         command,
     ScintillaQuick_edit_replacement& replacement) const
@@ -1999,10 +2052,10 @@ static std::pair<int, int> clamped_ime_attribute_range(int start, int length, in
     return {static_cast<int>(begin), static_cast<int>(end - begin)};
 }
 
-static int clamped_ime_position(int position, int limit)
+static int clamped_ime_position(long long position, int limit)
 {
     return static_cast<int>(std::clamp(
-        static_cast<long long>(position),
+        position,
         0LL,
         static_cast<long long>(std::max(0, limit))));
 }
@@ -2087,15 +2140,119 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         return;
     }
 
-    // Follows the shape of QQuickTextControlPrivate::inputMethodEvent().
-    // Only Selection attributes are actioned here; Cursor attributes
-    // from the IME are intentionally ignored because the caret is
-    // driven by the ScintillaQuick selection model after Scintilla
-    // applies the composition, and there is no public Scintilla hook
-    // to override the cursor visibility while a composition is in
-    // progress. The loop still inspects every attribute so that new
-    // Qt attribute types do not silently cause us to skip a Selection
-    // that follows them.
+    const auto event_guard = qScopeGuard([this, event] {
+        m_core->ShowCaretAtCurrentPosition();
+        cursorChangedUpdateMarker();
+        syncQuickViewProperties();
+        request_scene_graph_update(true, true, false);
+        event->accept();
+    });
+
+    // A Selection from the preceding event belongs to surrounding text. A
+    // changed preedit consumes it as a committed edit; an attribute-only
+    // update of the same preedit leaves it in place.
+    const bool consume_surrounding_selection =
+        m_core->pdoc->TentativeActive() && m_ime_preserve_selection &&
+        event->preeditString() != m_ime_preedit;
+    m_ime_preedit.clear();
+
+    bool initial_compose = false;
+    if (m_core->pdoc->TentativeActive()) {
+        m_core->pdoc->TentativeUndo();
+        if (m_ime_restore_selection) {
+            m_core->SetSelection(
+                SelectionPosition(m_ime_caret),
+                SelectionPosition(m_ime_anchor));
+        }
+    }
+    else {
+        // No tentative undo means start of this composition so
+        // Fill in any virtual spaces.
+        initial_compose = true;
+    }
+
+    m_core->view.imeCaretBlockOverride = false;
+
+    const bool has_replacement = event->replacementStart() != 0 || event->replacementLength() != 0;
+    const bool has_selection_deletion =
+        consume_surrounding_selection && !m_core->sel.Empty() &&
+        event->commitString().isEmpty() && !has_replacement;
+    const bool apply_replacements = has_replacement || has_selection_deletion;
+    if (!event->commitString().isEmpty() || apply_replacements) {
+        const QString& commit_str = event->commitString();
+        const int commit_str_len  = commit_str.length();
+
+        m_ime_restore_selection = false;
+        m_ime_preserve_selection = false;
+        m_preedit_pos = -1;
+
+        std::vector<ScintillaQuick_edit_replacement> replacements;
+        if ((apply_replacements || edit_handler_active()) &&
+            !ime_commit_replacements(*event, replacements))
+        {
+            dispatch_scintilla_message_raw(
+                SCI_SETSTATUS,
+                static_cast<uptr_t>(Status::Failure),
+                0);
+            return;
+        }
+        // A deletion changes surrounding text without moving composition to
+        // the deletion site. Translate the origin through the ordered edits.
+        Sci::Position deletion_origin = m_core->sel.RangeMain().Start().Position();
+        if (commit_str.isEmpty()) {
+            for (const ScintillaQuick_edit_replacement& replacement : replacements) {
+                if (deletion_origin > replacement.position) {
+                    deletion_origin -= std::min(
+                        deletion_origin - replacement.position,
+                        replacement.deleted_length);
+                }
+            }
+        }
+        const ScintillaQuick_edit_disposition disposition = edit_handler_active()
+            ? dispatch_edit_span(replacements)
+            : ScintillaQuick_edit_disposition::DECLINED;
+        if (disposition == ScintillaQuick_edit_disposition::REJECTED) {
+            return;
+        }
+
+        if (disposition == ScintillaQuick_edit_disposition::DECLINED) {
+            UndoGroup undo(m_core->pdoc, apply_replacements);
+            const bool was_overstrike = m_core->inOverstrike;
+            const auto overstrike_guard = qScopeGuard([this, was_overstrike] {
+                m_core->inOverstrike = was_overstrike;
+            });
+            if (apply_replacements) {
+                // The replacement plan owns deletion; overtype must not remove
+                // more surrounding text as the committed characters arrive.
+                m_core->inOverstrike = false;
+                for (const ScintillaQuick_edit_replacement& replacement : replacements) {
+                    m_core->SetSelection(
+                        SelectionPosition(replacement.position + replacement.deleted_length),
+                        SelectionPosition(replacement.position));
+                    m_core->ClearSelection();
+                }
+            }
+            for (int i = 0; i < commit_str_len;) {
+                const int uc_width           = commit_str.at(i).isHighSurrogate() ? 2 : 1;
+                const QString one_char_utf16 = commit_str.mid(i, uc_width);
+                const QByteArray one_char    = m_core->BytesForDocument(one_char_utf16);
+
+                m_core->InsertCharacter(
+                    std::string_view(one_char.data(), one_char.length()), CharacterSource::DirectInput);
+                i += uc_width;
+            }
+        }
+        // A handled edit owns its final selection, including any mapping into
+        // a rebuilt model projection. Raw offsets apply only to native edits.
+        if (commit_str.isEmpty() && disposition == ScintillaQuick_edit_disposition::DECLINED)
+        {
+            m_core->SetEmptySelection(SelectionPosition(deletion_origin));
+        }
+        initial_compose = true;
+    }
+
+    // Selection attributes address committed surrounding text. Apply them
+    // after the commit and before starting the next tentative composition.
     for (int i = 0; i < event->attributes().size(); ++i) {
         const QInputMethodEvent::Attribute& a = event->attributes().at(i);
         if (a.type == QInputMethodEvent::Selection) {
@@ -2108,88 +2265,33 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
             const Sci::Position para_end   = m_core->pdoc->ParaDown(cur_pos);
             const int para_length =
                 bounded_ime_length(m_core->pdoc->CountUTF16(para_start, para_end));
-            const auto [selection_start, selection_length] =
-                clamped_ime_attribute_range(a.start, a.length, para_length);
-
-            SelectionPosition new_start(
-                m_core->pdoc->GetRelativePositionUTF16(para_start, selection_start));
-            SelectionPosition new_end(
-                m_core->pdoc->GetRelativePositionUTF16(para_start, selection_start + selection_length));
-            if (new_start > new_end) {
-                m_core->SetSelection(new_end, new_start);
+            const int anchor_offset = clamped_ime_position(a.start, para_length);
+            const int caret_offset = clamped_ime_position(
+                static_cast<long long>(a.start) + a.length,
+                para_length);
+            const Sci::Position anchor = m_core->pdoc->GetRelativePositionUTF16(para_start, anchor_offset);
+            const Sci::Position caret  = m_core->pdoc->GetRelativePositionUTF16(para_start, caret_offset);
+            if (anchor < 0 || caret < 0) {
+                dispatch_scintilla_message_raw(
+                    SCI_SETSTATUS,
+                    static_cast<uptr_t>(Status::Failure),
+                    0);
+                return;
             }
-            else {
-                m_core->SetSelection(new_start, new_end);
-            }
+            m_core->SetSelection(SelectionPosition(caret), SelectionPosition(anchor));
+            m_ime_restore_selection = false;
+            m_ime_preserve_selection = true;
 
             // update markers by triggering QtAndroidInputContext::updateSelectionHandles()
             cursorChangedUpdateMarker();
         }
     }
 
-    bool initial_compose = false;
-    if (m_core->pdoc->TentativeActive()) {
-        m_core->pdoc->TentativeUndo();
-        if (m_handler_ime_active) {
-            m_core->SetSelection(
-                SelectionPosition(m_handler_ime_caret),
-                SelectionPosition(m_handler_ime_anchor));
-        }
-    }
-    else {
-        // No tentative undo means start of this composition so
-        // Fill in any virtual spaces.
-        initial_compose = true;
-    }
-
-    m_core->view.imeCaretBlockOverride = false;
-
-    if (!event->commitString().isEmpty()) {
-        const QString& commit_str = event->commitString();
-        const int commit_str_len  = commit_str.length();
-
-        bool insert_with_scintilla = true;
-        if (edit_handler_active()) {
-            ScintillaQuick_edit_replacement replacement;
-            const bool normalized = single_stream_replacement(
-                m_core->BytesForDocument(commit_str),
-                replacement);
-            if (!normalized) {
-                dispatch_scintilla_message_raw(
-                    SCI_SETSTATUS,
-                    static_cast<uptr_t>(Status::Failure),
-                    0);
-                insert_with_scintilla = false;
-            }
-            else {
-                const ScintillaQuick_edit_disposition disposition =
-                    dispatch_edit(std::move(replacement));
-                insert_with_scintilla =
-                    disposition == ScintillaQuick_edit_disposition::DECLINED;
-            }
-        }
-
-        m_handler_ime_active = false;
-        m_preedit_pos = -1;
-
-        if (insert_with_scintilla) {
-            for (int i = 0; i < commit_str_len;) {
-                const int uc_width           = commit_str.at(i).isHighSurrogate() ? 2 : 1;
-                const QString one_char_utf16 = commit_str.mid(i, uc_width);
-                const QByteArray one_char    = m_core->BytesForDocument(one_char_utf16);
-
-                m_core->InsertCharacter(
-                    std::string_view(one_char.data(), one_char.length()), CharacterSource::DirectInput);
-                i += uc_width;
-            }
-        }
-    }
-    else
     if (!event->preeditString().isEmpty()) {
         const QString preedit_str = event->preeditString();
         const int preedit_str_len = preedit_str.length();
 
-        if (edit_handler_active()) {
+        if (edit_handler_active() || m_ime_preserve_selection) {
             ScintillaQuick_edit_replacement replacement;
             if (!single_stream_replacement({}, replacement)) {
                 dispatch_scintilla_message_raw(
@@ -2199,14 +2301,21 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
                 event->accept();
                 return;
             }
-            if (!m_handler_ime_active) {
+            if (!m_ime_restore_selection) {
                 const SelectionRange& selection = m_core->sel.RangeMain();
-                m_handler_ime_anchor = selection.anchor.Position();
-                m_handler_ime_caret  = selection.caret.Position();
-                m_handler_ime_active = true;
+                m_ime_anchor = selection.anchor.Position();
+                m_ime_caret  = selection.caret.Position();
+                m_ime_restore_selection = true;
             }
             m_core->pdoc->TentativeStart();
-            m_core->ClearBeforeTentativeStart();
+            if (m_ime_preserve_selection) {
+                // A Selection attribute addresses already committed text.
+                // Preedit belongs at its caret; it must not replace that text.
+                m_core->SetEmptySelection(SelectionPosition(m_ime_caret));
+            }
+            else {
+                m_core->ClearBeforeTentativeStart();
+            }
         }
         else {
             if (initial_compose) {
@@ -2217,6 +2326,13 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
 
         std::vector<int> ime_indicator = MapImeIndicators(event);
 
+        const bool was_overstrike = m_core->inOverstrike;
+        const auto overstrike_guard = qScopeGuard([this, was_overstrike] {
+            m_core->inOverstrike = was_overstrike;
+        });
+        if (m_ime_preserve_selection) {
+            m_core->inOverstrike = false;
+        }
         for (int i = 0; i < preedit_str_len;) {
             const int uc_width           = preedit_str.at(i).isHighSurrogate() ? 2 : 1;
             const QString one_char_utf16 = preedit_str.mid(i, uc_width);
@@ -2249,18 +2365,15 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         }
 
         // Set candidate box position for Qt::ImMicroFocus.
+        m_ime_preedit = preedit_str;
         m_preedit_pos = m_core->CurrentPosition();
         m_core->EnsureCaretVisible();
     }
     else {
-        m_handler_ime_active = false;
+        m_ime_restore_selection = false;
+        m_ime_preserve_selection = false;
         m_preedit_pos = -1;
     }
-    m_core->ShowCaretAtCurrentPosition();
-    cursorChangedUpdateMarker();
-    syncQuickViewProperties();
-    request_scene_graph_update(true, true, false);
-    event->accept();
 }
 
 QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const

@@ -67,6 +67,11 @@ ScintillaQuick_edit_result apply_exactly(const ScintillaQuick_edit_transaction& 
             }
             editor.send(SCI_ENDUNDOACTION);
             const ScintillaQuick_edit_replacement& replacement = replacements.back();
+            // Deletions retain the selection translated by Scintilla. An
+            // insertion places the model-owned caret after the inserted text.
+            if (replacement.inserted_text.isEmpty()) {
+                return;
+            }
             const Scintilla::Position caret = replacement.position + replacement.inserted_text.size();
             editor.send(SCI_SETSEL, caret, caret);
         },
@@ -603,6 +608,622 @@ void test_committed_ime_restores_preedit_selection()
     SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
     SQ_EXPECT(editor.send(SCI_GETSELECTIONSTART) == 1);
     SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 3);
+}
+
+struct Ime_edits
+{
+    int calls = 0;
+    std::vector<ScintillaQuick_edit_replacement> replacements;
+};
+
+void observe_ime_edits(Event_editor& editor, Ime_edits& observed)
+{
+    editor.set_edit_handler(
+        [&observed](const ScintillaQuick_edit_transaction& transaction) {
+            ++observed.calls;
+            observed.replacements.assign(transaction.replacements.begin(), transaction.replacements.end());
+            return apply_exactly(transaction);
+        });
+}
+
+void test_ime_replacement_ranges()
+{
+    struct Replacement_case
+    {
+        QString text;
+        Scintilla::Position caret;
+        QString commit;
+        int start;
+        int length;
+        QString expected;
+        Scintilla::Position byte_position;
+        Scintilla::Position deleted_bytes;
+    };
+    const Replacement_case cases[] = {
+        {QStringLiteral("teh"), 3, QStringLiteral("the"), -3, 3, QStringLiteral("the"), 0, 3},
+        {QStringLiteral("abc"), 3, {}, -1, 1, QStringLiteral("ab"), 2, 1},
+        {QStringLiteral("ac"), 0, QStringLiteral("b"), 1, 0, QStringLiteral("abc"), 1, 0},
+        {QStringLiteral("abcd"), 2, QStringLiteral("Z"), -1, 2, QStringLiteral("aZd"), 1, 2},
+        {QString::fromUcs4(U"\u00E9\U0001F600x"), 6, QStringLiteral("Z"), -2, 2,
+            QString::fromUcs4(U"\u00E9Zx"), 2, 4},
+        {QString::fromUcs4(U"\u00E9\U0001F600x"), 2, QStringLiteral("q"), 2, 1,
+            QString::fromUcs4(U"\u00E9\U0001F600q"), 6, 1},
+        {QString::fromUcs4(U"t\u00E9"), 3, QString::fromUcs4(U"\U0001F600"), -1, 1,
+            QString::fromUcs4(U"t\U0001F600"), 1, 2},
+    };
+    // Qt measures replacement offsets in UTF-16 and excludes the old preedit,
+    // even when the IME caret is in the middle of that tentative text.
+    for (const bool handled : {false, true}) {
+        for (const bool composing : {false, true}) {
+            for (const Replacement_case& test : cases) {
+                Event_editor editor;
+                editor.setProperty("text", test.text);
+                editor.send(SCI_SETSEL, test.caret, test.caret);
+                Ime_edits observed;
+                if (handled) {
+                    observe_ime_edits(editor, observed);
+                }
+                if (composing) {
+                    QInputMethodEvent preedit(QStringLiteral("candidate"), {
+                        {QInputMethodEvent::Cursor, 2, 1, {}},
+                    });
+                    editor.deliver_input_method(&preedit);
+                }
+
+                QInputMethodEvent commit;
+                commit.setCommitString(test.commit, test.start, test.length);
+                editor.deliver_input_method(&commit);
+                SQ_EXPECT(commit.isAccepted());
+                SQ_EXPECT(text_of(editor) == test.expected);
+                if (handled) {
+                    SQ_EXPECT(observed.calls == 1);
+                    SQ_EXPECT(observed.replacements.size() == 1);
+                    if (observed.replacements.size() == 1) {
+                        const auto& replacement = observed.replacements.front();
+                        SQ_EXPECT(replacement.position == test.byte_position);
+                        SQ_EXPECT(replacement.deleted_length == test.deleted_bytes);
+                        SQ_EXPECT(replacement.inserted_text == test.commit.toUtf8());
+                    }
+                }
+
+                editor.set_edit_handler({});
+                editor.send(SCI_UNDO);
+                SQ_EXPECT(text_of(editor) == test.text);
+                editor.send(SCI_REDO);
+                SQ_EXPECT(text_of(editor) == test.expected);
+            }
+        }
+    }
+}
+
+void test_ime_selection_and_replacement_are_one_transaction()
+{
+    for (const bool handled : {false, true}) {
+        for (const bool backward_selection : {false, true}) {
+            Event_editor editor;
+            editor.setProperty("text", QStringLiteral("abcdef"));
+            editor.send(SCI_SETSEL, backward_selection ? 4 : 2, backward_selection ? 2 : 4);
+            Ime_edits observed;
+            if (handled) {
+                editor.set_edit_handler(
+                    [&](const ScintillaQuick_edit_transaction& transaction) {
+                        // Selection removal and replacement must both wait for
+                        // the model's decision, with ordered post-edit offsets.
+                        SQ_EXPECT(text_of(editor) == QStringLiteral("abcdef"));
+                        SQ_EXPECT(editor.send(SCI_GETSELECTIONSTART) == 2);
+                        SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 4);
+                        ++observed.calls;
+                        observed.replacements.assign(
+                            transaction.replacements.begin(),
+                            transaction.replacements.end());
+                        return apply_exactly(transaction);
+                    });
+            }
+            QInputMethodEvent commit;
+            commit.setCommitString(QStringLiteral("X"), -1, 2);
+            editor.deliver_input_method(&commit);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("aXf"));
+            if (handled) {
+                SQ_EXPECT(observed.calls == 1);
+                SQ_EXPECT(observed.replacements.size() == 2);
+                if (observed.replacements.size() == 2) {
+                    SQ_EXPECT(observed.replacements[0].position == 2);
+                    SQ_EXPECT(observed.replacements[0].deleted_length == 2);
+                    SQ_EXPECT(observed.replacements[0].inserted_text.isEmpty());
+                    SQ_EXPECT(observed.replacements[1].position == 1);
+                    SQ_EXPECT(observed.replacements[1].deleted_length == 2);
+                    SQ_EXPECT(observed.replacements[1].inserted_text == QByteArray("X"));
+                }
+            }
+            editor.set_edit_handler({});
+            editor.send(SCI_UNDO);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("abcdef"));
+        }
+    }
+}
+
+void test_ime_commit_continues_preedit()
+{
+    const QString next_preedit = QString::fromUcs4(U"\U0001F600Y");
+    for (const bool handled : {false, true}) {
+        for (const bool composing : {false, true}) {
+            Event_editor editor;
+            editor.setProperty("text", QStringLiteral("A"));
+            editor.send(SCI_SETSEL, 1, 1);
+            Ime_edits observed;
+            if (handled) {
+                observe_ime_edits(editor, observed);
+            }
+            if (composing) {
+                QInputMethodEvent preedit(QStringLiteral("old"), {});
+                editor.deliver_input_method(&preedit);
+            }
+            QInputMethodEvent continued(next_preedit, {
+                {QInputMethodEvent::Cursor, 2, 1, {}},
+            });
+            continued.setCommitString(QStringLiteral("B"));
+            editor.deliver_input_method(&continued);
+            SQ_EXPECT(continued.isAccepted());
+            SQ_EXPECT(text_of(editor) == QStringLiteral("AB") + next_preedit);
+            SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 6);
+            SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition).toInt() == 4);
+            if (handled) {
+                SQ_EXPECT(observed.calls == 1);
+                SQ_EXPECT(observed.replacements.size() == 1);
+                if (observed.replacements.size() == 1) {
+                    SQ_EXPECT(observed.replacements.front().inserted_text == QByteArray("B"));
+                }
+            }
+
+            QInputMethodEvent cancel;
+            editor.deliver_input_method(&cancel);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("AB"));
+            SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 2);
+            editor.set_edit_handler({});
+            editor.send(SCI_UNDO);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("A"));
+            editor.send(SCI_REDO);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("AB"));
+        }
+    }
+}
+
+void test_ime_replacement_continues_preedit()
+{
+    for (const bool handled : {false, true}) {
+        for (const bool delete_only : {false, true}) {
+            Event_editor editor;
+            editor.setProperty("text", QStringLiteral("teh!"));
+            editor.send(SCI_SETSEL, 3, 3);
+            Ime_edits observed;
+            if (handled) {
+                observe_ime_edits(editor, observed);
+            }
+            QInputMethodEvent continued(QStringLiteral("next"), {});
+            continued.setCommitString(
+                delete_only ? QString() : QStringLiteral("the"),
+                delete_only ? -1 : -3,
+                delete_only ? 1 : 3);
+            editor.deliver_input_method(&continued);
+            SQ_EXPECT(text_of(editor) == (delete_only ? QStringLiteral("tenext!") : QStringLiteral("thenext!")));
+
+            QInputMethodEvent cancel;
+            editor.deliver_input_method(&cancel);
+            SQ_EXPECT(text_of(editor) == (delete_only ? QStringLiteral("te!") : QStringLiteral("the!")));
+            editor.set_edit_handler({});
+            editor.send(SCI_UNDO);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("teh!"));
+        }
+    }
+}
+
+void test_ime_selection_attribute_follows_commit()
+{
+    struct Selection_case
+    {
+        int start;
+        int length;
+        QString composing_text;
+    };
+    for (const bool handled : {false, true}) {
+        for (const bool unicode : {false, true}) {
+            const QString commit_text = unicode
+                ? QString::fromUcs4(U"\U0001F600")
+                : QStringLiteral("B");
+            const int commit_length      = commit_text.size();
+            const QString committed_text = QStringLiteral("a") + commit_text + QStringLiteral("c");
+            const Selection_case cases[] = {
+                {2 + commit_length, 0, committed_text + QStringLiteral("Y")},
+                {1, commit_length, QStringLiteral("a") + commit_text + QStringLiteral("Yc")},
+                {1 + commit_length, -commit_length, QStringLiteral("aY") + commit_text + QStringLiteral("c")},
+            };
+            for (const Selection_case& test : cases) {
+                for (const bool change_preedit : {false, true}) {
+                    Event_editor editor;
+                    editor.setProperty("text", QStringLiteral("ac"));
+                    editor.send(SCI_SETSEL, 1, 1);
+                    editor.send(SCI_EMPTYUNDOBUFFER);
+                    Ime_edits observed;
+                    if (handled) {
+                        observe_ime_edits(editor, observed);
+                    }
+                    QInputMethodEvent continued(QStringLiteral("Y"), {
+                        {QInputMethodEvent::Selection, test.start, test.length, {}},
+                        {QInputMethodEvent::Cursor, 1, 1, {}},
+                    });
+                    continued.setCommitString(commit_text);
+                    editor.deliver_input_method(&continued);
+                    SQ_EXPECT(text_of(editor) == test.composing_text);
+
+                    // Updating only the preedit cursor must not consume the
+                    // surrounding selection established by the previous event.
+                    QInputMethodEvent unchanged(QStringLiteral("Y"), {
+                        {QInputMethodEvent::Cursor, 0, 1, {}},
+                    });
+                    editor.deliver_input_method(&unchanged);
+                    SQ_EXPECT(text_of(editor) == test.composing_text);
+                    if (handled) {
+                        SQ_EXPECT(observed.calls == 1);
+                    }
+
+                    const bool has_selection = test.length != 0;
+                    if (change_preedit) {
+                        QInputMethodEvent changed(QStringLiteral("Z"), {
+                            {QInputMethodEvent::Cursor, 1, 1, {}},
+                        });
+                        editor.deliver_input_method(&changed);
+                        SQ_EXPECT(text_of(editor) == (has_selection
+                            ? QStringLiteral("aZc")
+                            : committed_text + QStringLiteral("Z")));
+                    }
+
+                    // A changed/cancelled preedit removes the still-active
+                    // surrounding selection as its own committed edit.
+                    QInputMethodEvent cancel;
+                    editor.deliver_input_method(&cancel);
+                    SQ_EXPECT(text_of(editor) == (has_selection ? QStringLiteral("ac") : committed_text));
+                    const int caret = has_selection ? 1 : test.start;
+                    SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition).toInt() == caret);
+                    SQ_EXPECT(editor.query_input_method(Qt::ImAnchorPosition).toInt() == caret);
+                    if (handled) {
+                        SQ_EXPECT(observed.calls == (has_selection ? 2 : 1));
+                        if (has_selection) {
+                            SQ_EXPECT(observed.replacements.size() == 1);
+                            SQ_EXPECT(observed.replacements.front().position == 1);
+                            SQ_EXPECT(observed.replacements.front().deleted_length == commit_text.toUtf8().size());
+                            SQ_EXPECT(observed.replacements.front().inserted_text.isEmpty());
+                        }
+                    }
+                    editor.set_edit_handler({});
+                    if (has_selection) {
+                        editor.send(SCI_UNDO);
+                        SQ_EXPECT(text_of(editor) == committed_text);
+                        SQ_EXPECT(editor.send(SCI_CANUNDO) != 0);
+                    }
+                    editor.send(SCI_UNDO);
+                    SQ_EXPECT(text_of(editor) == QStringLiteral("ac"));
+                    SQ_EXPECT(editor.send(SCI_CANUNDO) == 0);
+                    editor.send(SCI_REDO);
+                    SQ_EXPECT(text_of(editor) == committed_text);
+                    if (has_selection) {
+                        editor.send(SCI_REDO);
+                        SQ_EXPECT(text_of(editor) == QStringLiteral("ac"));
+                    }
+                }
+            }
+        }
+    }
+}
+
+void test_ime_surrounding_selection_handler_dispositions()
+{
+    for (const bool backward : {false, true}) {
+        for (const auto disposition : {
+                ScintillaQuick_edit_disposition::DECLINED,
+                ScintillaQuick_edit_disposition::REJECTED,
+                ScintillaQuick_edit_disposition::HANDLED})
+        {
+            Event_editor editor;
+            editor.setProperty("text", QStringLiteral("ac"));
+            editor.send(SCI_SETSEL, 1, 1);
+            editor.send(SCI_EMPTYUNDOBUFFER);
+            editor.set_edit_handler(apply_exactly);
+            QInputMethodEvent continued(QStringLiteral("Y"), {
+                {QInputMethodEvent::Selection, backward ? 2 : 1, backward ? -1 : 1, {}},
+                {QInputMethodEvent::Cursor, 1, 1, {}},
+            });
+            continued.setCommitString(QStringLiteral("B"));
+            editor.deliver_input_method(&continued);
+            SQ_EXPECT(text_of(editor) == (backward ? QStringLiteral("aYBc") : QStringLiteral("aBYc")));
+
+            int calls = 0;
+            editor.set_edit_handler(
+                [&](const ScintillaQuick_edit_transaction& transaction) {
+                    ++calls;
+                    SQ_EXPECT(text_of(editor) == QStringLiteral("aBc"));
+                    SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == (backward ? 1 : 2));
+                    SQ_EXPECT(editor.send(SCI_GETANCHOR) == (backward ? 2 : 1));
+                    SQ_EXPECT(transaction.replacements.size() == 1);
+                    SQ_EXPECT(transaction.replacements.front().position == 1);
+                    SQ_EXPECT(transaction.replacements.front().deleted_length == 1);
+                    SQ_EXPECT(transaction.replacements.front().inserted_text.isEmpty());
+                    return ScintillaQuick_edit_result{disposition, {}};
+                });
+            QInputMethodEvent cancel;
+            editor.deliver_input_method(&cancel);
+            SQ_EXPECT(cancel.isAccepted());
+            SQ_EXPECT(calls == 1);
+            if (disposition == ScintillaQuick_edit_disposition::DECLINED) {
+                SQ_EXPECT(text_of(editor) == QStringLiteral("ac"));
+                SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 1);
+                SQ_EXPECT(editor.send(SCI_GETANCHOR) == 1);
+            }
+            else {
+                // A rejection or external HANDLED result does not authorize
+                // native deletion of the committed surrounding text.
+                SQ_EXPECT(text_of(editor) == QStringLiteral("aBc"));
+                SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == (backward ? 1 : 2));
+                SQ_EXPECT(editor.send(SCI_GETANCHOR) == (backward ? 2 : 1));
+            }
+            SQ_EXPECT(editor.send(SCI_GETSTATUS) ==
+                (disposition == ScintillaQuick_edit_disposition::REJECTED ? SC_STATUS_FAILURE : SC_STATUS_OK));
+            editor.set_edit_handler({});
+            editor.send(SCI_UNDO);
+            SQ_EXPECT(text_of(editor) == (disposition == ScintillaQuick_edit_disposition::DECLINED
+                ? QStringLiteral("aBc")
+                : QStringLiteral("ac")));
+        }
+    }
+}
+
+void test_ime_changed_preedit_consumes_selection_before_new_selection()
+{
+    // Qt consumes the previous surrounding selection before applying a new
+    // Selection attribute. Both ranges therefore address different documents.
+    for (const int handler_mode : {0, 1, 2}) {
+        for (const bool unicode : {false, true}) {
+            Event_editor editor;
+            editor.setProperty("text", QStringLiteral("AB"));
+            editor.send(SCI_SETSEL, 2, 2);
+            editor.send(SCI_EMPTYUNDOBUFFER);
+            int calls = 0;
+            if (handler_mode != 0) {
+                editor.set_edit_handler(
+                    [&](const ScintillaQuick_edit_transaction& transaction) {
+                        ++calls;
+                        if (handler_mode == 1) {
+                            return apply_exactly(transaction);
+                        }
+                        return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::DECLINED, {}};
+                    });
+            }
+            const QString first_preedit = unicode ? QString::fromUcs4(U"\u00E9") : QStringLiteral("n");
+            const QString next_preedit  = unicode ? QString::fromUcs4(U"\u03BB") : QStringLiteral("nn");
+            QInputMethodEvent first(first_preedit, {{QInputMethodEvent::Selection, 0, 1, {}}});
+            first.setCommitString(QStringLiteral("C"));
+            QCoreApplication::sendEvent(&editor, &first);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("A") + first_preedit + QStringLiteral("BC"));
+
+            QInputMethodEvent next(next_preedit, {{QInputMethodEvent::Selection, 1, 0, {}}});
+            QCoreApplication::sendEvent(&editor, &next);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("B") + next_preedit + QStringLiteral("C"));
+            SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 1);
+            SQ_EXPECT(calls == (handler_mode == 0 ? 0 : 2));
+
+            QInputMethodEvent cancel;
+            QCoreApplication::sendEvent(&editor, &cancel);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("BC"));
+            SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 1);
+            editor.set_edit_handler({});
+            editor.send(SCI_UNDO);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("ABC"));
+            editor.send(SCI_UNDO);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("AB"));
+            SQ_EXPECT(editor.send(SCI_CANUNDO) == 0);
+        }
+    }
+}
+
+void test_ime_deletion_preserves_composition_origin()
+{
+    struct Deletion_case
+    {
+        QString text;
+        Scintilla::Position caret;
+        int start;
+        int length;
+        QString committed_text;
+        QString composing_text;
+        Scintilla::Position origin;
+    };
+    const Deletion_case cases[] = {
+        {QStringLiteral("abcdef"), 6, -4, 1, QStringLiteral("abdef"), QStringLiteral("abdefY"), 5},
+        {QStringLiteral("abcdef"), 1, 2, 1, QStringLiteral("abcef"), QStringLiteral("aYbcef"), 1},
+        {QString::fromUcs4(U"\u00E9\U0001F600abc"), 9, -5, 2,
+            QString::fromUcs4(U"\u00E9abc"), QString::fromUcs4(U"\u00E9abcY"), 5},
+    };
+    // QWidgetLineControl (Qt 6.12) restores the translated original cursor for
+    // an empty commit. It does not retain the deletion cursor as the IME origin.
+    for (const bool handled : {false, true}) {
+        for (const bool composing : {false, true}) {
+            for (const Deletion_case& test : cases) {
+                Event_editor editor;
+                editor.setProperty("text", test.text);
+                editor.send(SCI_SETSEL, test.caret, test.caret);
+                Ime_edits observed;
+                if (handled) {
+                    // The model callback owns the surviving composition origin.
+                    observe_ime_edits(editor, observed);
+                }
+                if (composing) {
+                    QInputMethodEvent previous(QStringLiteral("old"), {});
+                    editor.deliver_input_method(&previous);
+                }
+                QInputMethodEvent continued(QStringLiteral("Y"), {
+                    {QInputMethodEvent::Cursor, 1, 1, {}},
+                });
+                continued.setCommitString({}, test.start, test.length);
+                editor.deliver_input_method(&continued);
+                SQ_EXPECT(text_of(editor) == test.composing_text);
+                SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == test.origin + 1);
+
+                QInputMethodEvent cancel;
+                editor.deliver_input_method(&cancel);
+                SQ_EXPECT(text_of(editor) == test.committed_text);
+                SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == test.origin);
+                if (handled) {
+                    SQ_EXPECT(observed.calls == 1);
+                }
+                editor.set_edit_handler({});
+                editor.send(SCI_UNDO);
+                SQ_EXPECT(text_of(editor) == test.text);
+            }
+        }
+    }
+
+    Event_editor externally_handled;
+    externally_handled.setProperty("text", QStringLiteral("abcdef"));
+    externally_handled.send(SCI_SETSEL, 6, 6);
+    externally_handled.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction&) {
+            return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::HANDLED, {}};
+        });
+    QInputMethodEvent external_commit;
+    external_commit.setCommitString({}, -4, 1);
+    externally_handled.deliver_input_method(&external_commit);
+    SQ_EXPECT(text_of(externally_handled) == QStringLiteral("abcdef"));
+    SQ_EXPECT(externally_handled.send(SCI_GETCURRENTPOS) == 6);
+}
+
+void test_ime_handled_deletion_preserves_projected_selection()
+{
+    // A merge pane retains an alignment row after deleting a source line, so
+    // its callback maps the surviving caret into a different byte layout.
+    Event_editor editor;
+    editor.setProperty("text", QStringLiteral("A\nB\nC"));
+    editor.send(SCI_SETSEL, 5, 5);
+    editor.set_edit_handler(
+        [](const ScintillaQuick_edit_transaction& transaction) {
+            SQ_EXPECT(transaction.replacements.size() == 1);
+            const auto& replacement = transaction.replacements.front();
+            SQ_EXPECT(replacement.position == 2);
+            SQ_EXPECT(replacement.deleted_length == 2);
+            SQ_EXPECT(replacement.inserted_text.isEmpty());
+            return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::HANDLED,
+                [](ScintillaQuick_item& target) {
+                    target.setProperty("text", QStringLiteral("A\n\nC"));
+                    target.send(SCI_SETSEL, 4, 4);
+                }};
+        });
+    QInputMethodEvent deletion(QStringLiteral("Y"), {});
+    deletion.setCommitString({}, -3, 2);
+    QCoreApplication::sendEvent(&editor, &deletion);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("A\n\nCY"));
+    SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 4);
+
+    QInputMethodEvent cancel;
+    QCoreApplication::sendEvent(&editor, &cancel);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("A\n\nC"));
+    SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 4);
+}
+
+void test_ime_selection_attribute_preserves_direction()
+{
+    for (const bool handled : {false, true}) {
+        for (const bool unicode : {false, true}) {
+            for (const bool backward : {false, true}) {
+                Event_editor editor;
+                editor.setProperty("text", unicode
+                    ? QString::fromUcs4(U"\u00E9\U0001F600x")
+                    : QStringLiteral("abcd"));
+                Ime_edits observed;
+                if (handled) {
+                    observe_ime_edits(editor, observed);
+                }
+                QInputMethodEvent selection({}, {
+                    {QInputMethodEvent::Selection, backward ? 3 : 1, backward ? -2 : 2, {}},
+                });
+                editor.deliver_input_method(&selection);
+                SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition).toInt() == (backward ? 1 : 3));
+                SQ_EXPECT(editor.query_input_method(Qt::ImAnchorPosition).toInt() == (backward ? 3 : 1));
+                SQ_EXPECT(observed.calls == 0);
+            }
+        }
+    }
+}
+
+void test_ime_explicit_replacement_handler_dispositions()
+{
+    for (const auto disposition : {
+            ScintillaQuick_edit_disposition::DECLINED,
+            ScintillaQuick_edit_disposition::REJECTED})
+    {
+        Event_editor editor;
+        editor.setProperty("text", QStringLiteral("abcdef"));
+        editor.send(SCI_SETSEL, 2, 4);
+        editor.send(SCI_SETOVERTYPE, 1);
+        int calls = 0;
+        editor.set_edit_handler(
+            [&](const ScintillaQuick_edit_transaction& transaction) {
+                ++calls;
+                SQ_EXPECT(text_of(editor) == QStringLiteral("abcdef"));
+                SQ_EXPECT(transaction.replacements.size() == 2);
+                return ScintillaQuick_edit_result{disposition, {}};
+            });
+        QInputMethodEvent commit;
+        commit.setCommitString(QStringLiteral("X"), -1, 2);
+        editor.deliver_input_method(&commit);
+        SQ_EXPECT(commit.isAccepted());
+        SQ_EXPECT(calls == 1);
+        SQ_EXPECT(editor.send(SCI_GETOVERTYPE) == 1);
+        if (disposition == ScintillaQuick_edit_disposition::REJECTED) {
+            SQ_EXPECT(text_of(editor) == QStringLiteral("abcdef"));
+            SQ_EXPECT(editor.send(SCI_GETSELECTIONSTART) == 2);
+            SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 4);
+            SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+        }
+        else {
+            SQ_EXPECT(text_of(editor) == QStringLiteral("aXf"));
+            editor.set_edit_handler({});
+            editor.send(SCI_UNDO);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("abcdef"));
+        }
+    }
+}
+
+void test_ime_replacement_respects_readonly_and_protected_text()
+{
+    for (const bool handled : {false, true}) {
+        for (const bool readonly : {false, true}) {
+            Event_editor editor;
+            editor.setProperty("text", QStringLiteral("abcd"));
+            editor.send(SCI_SETSEL, 3, 3);
+            if (readonly) {
+                editor.setProperty("readonly", true);
+            }
+            else {
+                // The replacement reaches protected text outside the caret's
+                // empty selection, so checking only the selection is insufficient.
+                editor.send(SCI_STYLESETCHANGEABLE, 1, 0);
+                editor.send(SCI_STARTSTYLING, 1);
+                editor.send(SCI_SETSTYLING, 1, 1);
+                editor.query_input_method(Qt::ImFont);
+            }
+            Ime_edits observed;
+            if (handled) {
+                observe_ime_edits(editor, observed);
+            }
+            QInputMethodEvent commit;
+            commit.setCommitString(QStringLiteral("X"), -2, 1);
+            editor.deliver_input_method(&commit);
+            SQ_EXPECT(commit.isAccepted());
+            SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+            SQ_EXPECT(observed.calls == 0);
+            if (!readonly) {
+                SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+            }
+        }
+    }
 }
 
 void test_clipboard_and_drop_ingress()
@@ -1380,6 +2001,18 @@ int main(int argc, char** argv)
     test_keyboard_backspace_unindents_only_blocks_unindent();
     test_direct_delete_back_normalization();
     test_committed_ime_restores_preedit_selection();
+    test_ime_replacement_ranges();
+    test_ime_selection_and_replacement_are_one_transaction();
+    test_ime_commit_continues_preedit();
+    test_ime_replacement_continues_preedit();
+    test_ime_selection_attribute_follows_commit();
+    test_ime_surrounding_selection_handler_dispositions();
+    test_ime_changed_preedit_consumes_selection_before_new_selection();
+    test_ime_deletion_preserves_composition_origin();
+    test_ime_handled_deletion_preserves_projected_selection();
+    test_ime_selection_attribute_preserves_direction();
+    test_ime_explicit_replacement_handler_dispositions();
+    test_ime_replacement_respects_readonly_and_protected_text();
     test_clipboard_and_drop_ingress();
     test_unsupported_multi_selection_fails_closed();
     test_native_edit_commands_obey_edit_handler_boundary();

@@ -15,6 +15,10 @@ jobs:
     name: Ubuntu / Qt 6.12.0 / shared=${{ matrix.build-shared }}
     runs-on: ubuntu-latest
 
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+
     strategy:
       fail-fast: false
       matrix:
@@ -22,6 +26,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -80,3 +87,7 @@ jobs:
           cmake --build build/_consumer/_build --config Release
           export PATH="$PWD/build/_install/bin:$PATH"
           ./build/_consumer/_build/consumer_smoke
+
+      - name: Report compiler cache use
+        if: always()
+        run: sccache --show-stats
