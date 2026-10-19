@@ -19,6 +19,7 @@
 #include "Geometry.h"
 #include "Platform.h"
 #include "Position.h"
+#include "Selection.h"
 
 #include <QClipboard>
 #include <QCoreApplication>
@@ -80,6 +81,7 @@ class ScintillaQuick_item::Ime_query_context
 public:
     Ime_query_context(ScintillaQuick_core& core, Sci::Position caret, Sci::Position anchor);
     bool matches(const Document* document) const;
+    void restore_native_selection(ScintillaQuick_core& core) const;
     void capture_deletion(Sci::Position position, Sci::Position length);
     void record_mutation(Sci::Position position, std::string_view text, bool insertion);
     void set_preedit_range(Sci::Position start, Sci::Position end);
@@ -99,6 +101,7 @@ private:
     Sci::Position utf16_delta(Sci::Position position) const;
 
     const Document* m_document;
+    Selection m_native_selection;
     QString m_surrounding;
     QString m_selection;
     int m_cursor;
@@ -2091,6 +2094,7 @@ ScintillaQuick_item::Ime_query_context::Ime_query_context(
 
 :
     m_document(core.pdoc),
+    m_native_selection(core.sel),
     m_document_start(core.pdoc->ParaUp(caret)),
     m_document_anchor(anchor)
 {
@@ -2104,6 +2108,13 @@ ScintillaQuick_item::Ime_query_context::Ime_query_context(
 bool ScintillaQuick_item::Ime_query_context::matches(const Document* document) const
 {
     return m_document == document && document->TentativeActive();
+}
+
+void ScintillaQuick_item::Ime_query_context::restore_native_selection(ScintillaQuick_core& core) const
+{
+    if (m_document == core.pdoc) {
+        core.sel = m_native_selection;
+    }
 }
 
 void ScintillaQuick_item::Ime_query_context::capture_deletion(Sci::Position position, Sci::Position length)
@@ -2332,6 +2343,12 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
             m_core->SetSelection(
                 SelectionPosition(m_ime_caret),
                 SelectionPosition(m_ime_anchor));
+        }
+        else
+        if (m_ime_query_context) {
+            // Inverse text edits can collapse adjacent carets. Recover the
+            // complete native selection before the next event applies edits.
+            m_ime_query_context->restore_native_selection(*m_core);
         }
     }
     else {

@@ -12,6 +12,7 @@
 #include <QImage>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
+#include <QList>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QObject>
@@ -20,6 +21,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -644,6 +646,26 @@ void expect_ime_context(
     SQ_EXPECT(editor.query_input_method(Qt::ImCurrentSelection).toString() == selection);
 }
 
+void expect_ime_carets(const Event_editor& editor, std::initializer_list<int> carets, int main)
+{
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONS) == (int)carets.size());
+    SQ_EXPECT(editor.send(SCI_GETMAINSELECTION) == main);
+    int range = 0;
+    for (const int caret : carets) {
+        const auto actual_caret  = editor.send(SCI_GETSELECTIONNCARET,  range);
+        const auto actual_anchor = editor.send(SCI_GETSELECTIONNANCHOR, range);
+        SQ_EXPECT(actual_caret == caret);
+        SQ_EXPECT(actual_anchor == caret);
+        SQ_EXPECT(editor.send(SCI_GETSELECTIONNCARETVIRTUALSPACE,  range) == 0);
+        SQ_EXPECT(editor.send(SCI_GETSELECTIONNANCHORVIRTUALSPACE, range) == 0);
+        if (actual_caret != caret || actual_anchor != caret) {
+            std::fprintf(stderr, "IME range=%d expected caret/anchor=%d actual=%lld/%lld main=%d\n",
+                range, caret, (long long)actual_caret, (long long)actual_anchor, main);
+        }
+        ++range;
+    }
+}
+
 void test_ime_queries_exclude_preedit()
 {
     // Qt's logical queries exclude preedit, including its Cursor offset.
@@ -777,6 +799,120 @@ void test_ime_queries_with_adjacent_overtype_carets()
             QInputMethodEvent cancel;
             editor.deliver_input_method(&cancel);
             SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+            expect_ime_context(editor, QStringLiteral("abcd"), 2, 2, 2);
+            if (secondary < 0) {
+                expect_ime_carets(editor, {2}, 0);
+            }
+            else {
+                expect_ime_carets(editor, {secondary, 2}, 1);
+            }
+        }
+    }
+}
+
+void test_ime_native_selection_restored_before_next_event()
+{
+    struct native_ime_case_t
+    {
+        const char* name;
+        const char* text;
+        const char* committed;
+        const char* continued;
+        const char* commit;
+        const char* commit_continued;
+        int first_anchor;
+        int first_caret;
+        int second_anchor;
+        int second_caret;
+        int first_virtual;
+        int second_virtual;
+        int first_restored;
+        int second_restored;
+    };
+    // Native selection removal and virtual-space realization precede the
+    // tentative boundary, so cancellation keeps those committed edits.
+    const native_ime_case_t cases[] = {
+        {"carets", "abcd", "abcd", "aYYd", "aZZd", "aZYY",
+            1, 1, 2, 2, 0, 0, 1, 2},
+        {"selected text", "abcdef", "acef", "aYYf", "aZZf", "aZYY",
+            1, 2, 3, 4, 0, 0, 1, 2},
+        {"virtual space", "a", "a  ", "a YY", "a ZZ", "a ZYY",
+            1, 1, 1, 1, 1, 2, 2, 3},
+    };
+    struct next_event_t
+    {
+        bool commit;
+        bool preedit;
+        bool selection;
+    };
+    const next_event_t next_events[] = {
+        {false, false, false},
+        {false, true,  false},
+        {true,  false, false},
+        {true,  true,  false},
+        {true,  false, true},
+    };
+    for (const native_ime_case_t& test : cases) {
+        for (const int main : {0, 1}) {
+            for (const next_event_t& next : next_events) {
+                const int failures_before = g_failures;
+                Event_editor editor;
+                editor.setWidth(640);
+                editor.setHeight(240);
+                editor.setProperty("text", QString::fromLatin1(test.text));
+                editor.send(SCI_SETOVERTYPE,                  1);
+                editor.send(SCI_SETMULTIPLESELECTION,         1);
+                editor.send(SCI_SETADDITIONALSELECTIONTYPING, 1);
+                editor.send(SCI_SETVIRTUALSPACEOPTIONS,       SCVS_USERACCESSIBLE);
+                editor.send(SCI_SETSEL, test.first_anchor, test.first_caret);
+                editor.send(SCI_SETSELECTIONNCARETVIRTUALSPACE,  0, test.first_virtual);
+                editor.send(SCI_SETSELECTIONNANCHORVIRTUALSPACE, 0, test.first_virtual);
+                editor.send(SCI_ADDSELECTION, test.second_caret, test.second_anchor);
+                editor.send(SCI_SETSELECTIONNCARETVIRTUALSPACE,  1, test.second_virtual);
+                editor.send(SCI_SETSELECTIONNANCHORVIRTUALSPACE, 1, test.second_virtual);
+                editor.send(SCI_SETMAINSELECTION, main);
+
+                QInputMethodEvent composing(QStringLiteral("X"), {
+                    {QInputMethodEvent::Cursor, 0, 1, {}},
+                });
+                editor.deliver_input_method(&composing);
+                const int original_main = main == 0 ? test.first_restored : test.second_restored;
+                expect_ime_context(
+                    editor, QString::fromLatin1(test.committed), original_main, original_main, original_main);
+
+                QList<QInputMethodEvent::Attribute> attributes;
+                if (next.preedit) {
+                    attributes.append({QInputMethodEvent::Cursor, 0, 1, {}});
+                }
+                if (next.selection) {
+                    attributes.append({QInputMethodEvent::Selection, 0, 0, {}});
+                }
+                QInputMethodEvent continued(next.preedit ? QStringLiteral("Y") : QString(), attributes);
+                if (next.commit) {
+                    continued.setCommitString(QStringLiteral("Z"));
+                }
+                editor.deliver_input_method(&continued);
+                SQ_EXPECT(continued.isAccepted());
+                const QString committed = QString::fromLatin1(next.commit ? test.commit : test.committed);
+                const QString visible = next.preedit
+                    ? QString::fromLatin1(next.commit ? test.commit_continued : test.continued)
+                    : committed;
+                SQ_EXPECT(text_of(editor) == visible);
+                const int first_caret  = next.selection && main == 0 ? 0 : test.first_restored + next.commit;
+                const int second_caret = next.selection && main == 1 ? 0 : test.second_restored + next.commit;
+                const int main_caret   = main == 0 ? first_caret : second_caret;
+                expect_ime_context(editor, committed, main_caret, main_caret, main_caret);
+
+                QInputMethodEvent cancel;
+                editor.deliver_input_method(&cancel);
+                SQ_EXPECT(text_of(editor) == committed);
+                expect_ime_context(editor, committed, main_caret, main_caret, main_caret);
+                expect_ime_carets(editor, {first_caret, second_caret}, main);
+                if (g_failures != failures_before) {
+                    std::fprintf(stderr, "IME restoration case=%s main=%d commit=%d preedit=%d selection=%d\n",
+                        test.name, main, next.commit, next.preedit, next.selection);
+                }
+            }
         }
     }
 }
@@ -2232,6 +2368,7 @@ int main(int argc, char** argv)
     test_ime_point_queries_exclude_preedit();
     test_ime_queries_with_multiple_carets();
     test_ime_queries_with_adjacent_overtype_carets();
+    test_ime_native_selection_restored_before_next_event();
     test_ime_replacement_ranges();
     test_ime_selection_and_replacement_are_one_transaction();
     test_ime_commit_continues_preedit();

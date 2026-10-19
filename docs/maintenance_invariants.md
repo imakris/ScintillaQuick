@@ -269,8 +269,13 @@ indicators.
 Maintenance rules:
 
 - Inline IME is the supported mode.
-- `m_preedit_pos` identifies the Scintilla position where the current preedit
-  text starts.
+- `m_preedit_pos` identifies the visible caret within the current preedit.
+- Logical input-method queries during composition use the committed snapshot;
+  cursor geometry follows the visible preedit caret.
+- Native composition snapshots the full selection after committed selection
+  removal and virtual-space realization. Restore it after tentative undo,
+  before handling the next event's commit, Selection attributes, or preedit.
+  Handler-owned composition retains its selection before tentative removal.
 - Preedit replacement, commit, and cancel paths must keep Scintilla text,
   Scintilla indicators, Qt input-method cursor/anchor rectangles, and render
   invalidation in sync.
