@@ -1585,6 +1585,129 @@ void test_clipboard_and_drop_ingress()
     SQ_EXPECT(text_of(eol_editor) == QStringLiteral("x"));
 }
 
+void test_cut_clipboard_projection()
+{
+    enum class Cut_route
+    {
+        COMMAND,
+        KEYBOARD,
+        CONTEXT_MENU,
+    };
+    enum class Handler_mode
+    {
+        ABSENT,
+        HANDLED,
+        DECLINED,
+        REJECTED,
+    };
+    using Disposition = ScintillaQuick_edit_disposition;
+
+    for (const auto route : {Cut_route::COMMAND, Cut_route::KEYBOARD, Cut_route::CONTEXT_MENU}) {
+        for (const auto mode : {
+                 Handler_mode::ABSENT, Handler_mode::HANDLED,
+                 Handler_mode::DECLINED, Handler_mode::REJECTED})
+        {
+            for (const bool reverse_selection : {false, true}) {
+                ScintillaQuick_item editor;
+                editor.setProperty("text", QStringLiteral("a\n"));
+                editor.send(SCI_EMPTYUNDOBUFFER);
+                editor.sends(SCI_APPENDTEXT, 3, "foo");
+                editor.send(SCI_SETSEL, reverse_selection ? 5 : 2, reverse_selection ? 2 : 5);
+                QClipboard* clipboard = QGuiApplication::clipboard();
+                clipboard->setText(QStringLiteral("previous clipboard"));
+
+                int copy_callbacks = 0;
+                QObject::connect(&editor, &ScintillaQuick_item::aboutToCopy, &editor, [
+                        &editor,
+                        &copy_callbacks
+                    ](
+                        QMimeData* data)
+                    {
+                        ++copy_callbacks;
+                        SQ_EXPECT(text_of(editor) == QStringLiteral("a\nfoo"));
+                        SQ_EXPECT(editor.send(SCI_GETSELECTIONSTART) == 2);
+                        SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 5);
+                        SQ_EXPECT(data->text() == QStringLiteral("foo"));
+                        data->setText(QStringLiteral("source:") + data->text());
+                        data->setData(QStringLiteral("application/x-cut-source"), QByteArray("source metadata"));
+                    });
+
+                if (mode != Handler_mode::ABSENT) {
+                    editor.set_edit_handler([
+                            mode,
+                            clipboard
+                        ](
+                            const ScintillaQuick_edit_transaction& transaction)
+                        {
+                            SQ_EXPECT(transaction.replacements.size() == 1);
+                            SQ_EXPECT(transaction.replacements.front().position == 2);
+                            SQ_EXPECT(transaction.replacements.front().deleted_length == 3);
+                            SQ_EXPECT(transaction.replacements.front().inserted_text.isEmpty());
+                            if (mode != Handler_mode::HANDLED) {
+                                return ScintillaQuick_edit_result{
+                                    mode == Handler_mode::REJECTED ? Disposition::REJECTED : Disposition::DECLINED,
+                                    {}};
+                            }
+                            auto result = apply_exactly(transaction);
+                            result.apply = [
+                                    clipboard,
+                                    apply = std::move(result.apply)
+                                ](
+                                    ScintillaQuick_item& target)
+                                {
+                                    SQ_EXPECT(clipboard->text() == QStringLiteral("previous clipboard"));
+                                    apply(target);
+                                };
+                            return result;
+                        });
+                }
+
+                switch (route) {
+                    case Cut_route::KEYBOARD: {
+                        // Qt Quick delivers key events in their accepted state.
+                        QKeyEvent event(QEvent::KeyPress, Qt::Key_X, Qt::ControlModifier);
+                        QGuiApplication::sendEvent(&editor, &event);
+                        SQ_EXPECT(event.isAccepted());
+                        break;
+                    }
+                    case Cut_route::CONTEXT_MENU:
+                        editor.cmdContextMenu(12); // Scintilla's Cut menu command ID.
+                        break;
+                    default:
+                        editor.send(SCI_CUT);
+                        break;
+                }
+
+                const bool rejected = mode == Handler_mode::REJECTED;
+                SQ_EXPECT(text_of(editor) == (rejected ? QStringLiteral("a\nfoo") : QStringLiteral("a\n")));
+                SQ_EXPECT(copy_callbacks == (rejected ? 0 : 1));
+                SQ_EXPECT(clipboard->text() == (rejected ?
+                    QStringLiteral("previous clipboard") : QStringLiteral("source:foo")));
+                SQ_EXPECT(editor.send(SCI_GETANCHOR) == (rejected && reverse_selection ? 5 : 2));
+                SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == (rejected && !reverse_selection ? 5 : 2));
+                if (rejected) {
+                    SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+                }
+                else {
+                    SQ_EXPECT(clipboard->mimeData()->data(QStringLiteral("application/x-cut-source")) ==
+                        QByteArray("source metadata"));
+                }
+
+                // Native undo must retain the preceding insertion on rejection,
+                // and an accepted Cut must undo separately from that insertion.
+                editor.set_edit_handler({});
+                SQ_EXPECT(editor.send(SCI_CANUNDO) != 0);
+                editor.send(SCI_UNDO);
+                SQ_EXPECT(text_of(editor) == (rejected ? QStringLiteral("a\n") : QStringLiteral("a\nfoo")));
+                editor.send(SCI_REDO);
+                SQ_EXPECT(text_of(editor) == (rejected ? QStringLiteral("a\nfoo") : QStringLiteral("a\n")));
+                SQ_EXPECT(clipboard->text() == (rejected ?
+                    QStringLiteral("previous clipboard") : QStringLiteral("source:foo")));
+            }
+        }
+    }
+}
+
 void test_unsupported_multi_selection_fails_closed()
 {
     ScintillaQuick_item editor;
@@ -2348,6 +2471,10 @@ int main(int argc, char** argv)
         test_horizontal_scroll_survives_edit_and_margin_update();
         return g_failures ? 1 : 0;
     }
+    if (app.arguments().contains(QStringLiteral("--clipboard-contracts"))) {
+        test_cut_clipboard_projection();
+        return g_failures ? 1 : 0;
+    }
 
 
     test_handler_absent_preserves_direct_edit();
@@ -2382,6 +2509,7 @@ int main(int argc, char** argv)
     test_ime_explicit_replacement_handler_dispositions();
     test_ime_replacement_respects_readonly_and_protected_text();
     test_clipboard_and_drop_ingress();
+    test_cut_clipboard_projection();
     test_unsupported_multi_selection_fails_closed();
     test_native_edit_commands_obey_edit_handler_boundary();
     test_anchor_queries_track_selection_anchor();

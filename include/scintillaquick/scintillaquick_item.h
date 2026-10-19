@@ -434,6 +434,8 @@ signals:
 
     // Clients can use this hook to add additional
     // formats (e.g. rich text) to the MIME data.
+    // Synchronous MIME preparation. For a handled Cut, observers may query the
+    // pre-edit document and selection; publication follows the apply callback.
     void aboutToCopy(QMimeData* data);
 
     // Scintilla Notifications
@@ -636,7 +638,8 @@ private:
     ScintillaQuick_edit_disposition dispatch_edits(
         std::vector<ScintillaQuick_edit_replacement> replacements);
     ScintillaQuick_edit_disposition dispatch_edit_span(
-        std::span<const ScintillaQuick_edit_replacement> replacements);
+        std::span<const ScintillaQuick_edit_replacement> replacements,
+        bool copy_selection = false);
     enum class Delete_key_replacement_result
     {
         UNSUPPORTED,

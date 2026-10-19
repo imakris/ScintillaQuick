@@ -777,17 +777,12 @@ bool ScintillaQuick_core::ModifyScrollBars(Sci::Line nMax, Sci::Line nPage)
     return modified;
 }
 
-void ScintillaQuick_core::CopyToModeClipboard(const SelectionText& selected_text, QClipboard::Mode clipboard_mode)
+std::unique_ptr<QMimeData> ScintillaQuick_core::prepare_clipboard_data(const SelectionText& selected_text)
 {
-    QClipboard* clipboard = QGuiApplication::clipboard();
-    QString su            = string_from_selected_text(selected_text);
+    const QString su = string_from_selected_text(selected_text);
 
-    // Owned by this function until the final hand-off to
-    // QClipboard::setMimeData (which takes ownership of the raw
-    // pointer). If any of the helper calls below throws - unlikely
-    // with pure Qt data types, but reachable through the
-    // `aboutToCopy` signal, which QML/C++ client code may connect to -
-    // the unique_ptr will free the mime data instead of leaking it.
+    // Client MIME enrichment may throw; retain ownership until preparation
+    // succeeds and the caller can hand the data to QClipboard.
     std::unique_ptr<QMimeData> mime_data = std::make_unique<QMimeData>();
     mime_data->setText(su);
     if (selected_text.rectangular) {
@@ -801,7 +796,13 @@ void ScintillaQuick_core::CopyToModeClipboard(const SelectionText& selected_text
     // Allow client code to add additional data (e.g rich text).
     emit aboutToCopy(mime_data.get());
 
-    clipboard->setMimeData(mime_data.release(), clipboard_mode);
+    return mime_data;
+}
+
+void ScintillaQuick_core::CopyToModeClipboard(const SelectionText& selected_text, QClipboard::Mode clipboard_mode)
+{
+    auto mime_data = prepare_clipboard_data(selected_text);
+    QGuiApplication::clipboard()->setMimeData(mime_data.release(), clipboard_mode);
 }
 
 void ScintillaQuick_core::Copy()

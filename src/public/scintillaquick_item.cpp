@@ -743,7 +743,8 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edits(
 }
 
 ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
-    std::span<const ScintillaQuick_edit_replacement> replacements)
+    std::span<const ScintillaQuick_edit_replacement> replacements,
+    bool copy_selection)
 {
     if (!m_edit_handler) {
         return ScintillaQuick_edit_disposition::DECLINED;
@@ -775,9 +776,17 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
     }
 
     ScintillaQuick_edit_result result;
+    std::unique_ptr<QMimeData> clipboard_data;
     ++m_evaluating_edit_handler;
     try {
         result = active_handler(transaction);
+        if (result.disposition == ScintillaQuick_edit_disposition::HANDLED && copy_selection) {
+            // Observers need the selection's pre-edit projection. Keep their
+            // editor queries in the evaluation phase, then publish after apply.
+            SelectionText selected_text;
+            m_core->CopySelectionRange(&selected_text);
+            clipboard_data = m_core->prepare_clipboard_data(selected_text);
+        }
     }
     catch (...) {
         result.disposition = ScintillaQuick_edit_disposition::REJECTED;
@@ -818,6 +827,9 @@ ScintillaQuick_edit_disposition ScintillaQuick_item::dispatch_edit_span(
             std::terminate();
         }
         --m_applying_handled_edit;
+    }
+    if (clipboard_data) {
+        QGuiApplication::clipboard()->setMimeData(clipboard_data.release());
     }
 
     return result.disposition;
@@ -1070,9 +1082,7 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
     outcome.intercepted = true;
 
     ScintillaQuick_edit_replacement replacement;
-    SelectionText cut_text;
     sptr_t handled_result = 0;
-    bool copy_cut_text = false;
     bool normalized = false;
 
     switch (i_message) {
@@ -1167,10 +1177,6 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
         case SCI_CLEAR:
             normalized = single_stream_replacement({}, replacement) &&
                 replacement.deleted_length > 0;
-            if (normalized && i_message == SCI_CUT) {
-                m_core->CopySelectionRange(&cut_text);
-                copy_cut_text = true;
-            }
             break;
 
         case SCI_PASTE:
@@ -1244,7 +1250,7 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
 
     const std::uint64_t generation_before_apply = m_mutation_generation;
     const ScintillaQuick_edit_disposition disposition =
-        dispatch_edit_span({&replacement, 1});
+        dispatch_edit_span({&replacement, 1}, i_message == SCI_CUT);
     if (disposition == ScintillaQuick_edit_disposition::DECLINED) {
         return false;
     }
@@ -1252,9 +1258,6 @@ bool ScintillaQuick_item::dispatch_direct_edit_message(
     if (disposition == ScintillaQuick_edit_disposition::REJECTED) {
         outcome.message_result = 0;
         return true;
-    }
-    if (disposition == ScintillaQuick_edit_disposition::HANDLED && copy_cut_text) {
-        m_core->CopyToClipboard(cut_text);
     }
     if ((i_message == SCI_REPLACETARGET || i_message == SCI_REPLACETARGETRE) &&
         m_mutation_generation != generation_before_apply)
@@ -1579,8 +1582,6 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
 
         if (edit_command) {
             ScintillaQuick_edit_replacement replacement;
-            SelectionText cut_text;
-            bool copy_cut_text = false;
             bool normalized = false;
             if (inserts_printable) {
                 normalized = single_stream_replacement(
@@ -1616,10 +1617,6 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
             if (mapped_command == Message::Cut) {
                 normalized = single_stream_replacement({}, replacement) &&
                     replacement.deleted_length > 0;
-                if (normalized) {
-                    m_core->CopySelectionRange(&cut_text);
-                    copy_cut_text = true;
-                }
             }
             else
             if (mapped_command == Message::Paste) {
@@ -1639,13 +1636,8 @@ void ScintillaQuick_item::keyPressEvent(QKeyEvent * event)
             }
 
             const ScintillaQuick_edit_disposition disposition =
-                dispatch_edit(std::move(replacement));
+                dispatch_edit_span({&replacement, 1}, mapped_command == Message::Cut);
             if (disposition != ScintillaQuick_edit_disposition::DECLINED) {
-                if (disposition == ScintillaQuick_edit_disposition::HANDLED &&
-                    copy_cut_text)
-                {
-                    m_core->CopyToClipboard(cut_text);
-                }
                 if (disposition == ScintillaQuick_edit_disposition::HANDLED) {
                     cursorChangedUpdateMarker();
                     request_scene_graph_update(false, false, false);
