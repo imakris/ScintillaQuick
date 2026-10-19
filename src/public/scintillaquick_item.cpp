@@ -32,7 +32,6 @@
 #include <QScreen>
 #include <QSGNode>
 #include <QTextFormat>
-#include <QVarLengthArray>
 #include <QTimer>
 #include <qqml.h>
 #include <QtGlobal>
@@ -74,6 +73,42 @@ public:
     int previous_x_offset               = -1;
     bool caret_capture_valid             = false;
     std::vector<Caret_primitive> captured_caret_primitives;
+};
+
+class ScintillaQuick_item::Ime_query_context
+{
+public:
+    Ime_query_context(ScintillaQuick_core& core, Sci::Position caret, Sci::Position anchor);
+    bool matches(const Document* document) const;
+    void capture_deletion(Sci::Position position, Sci::Position length);
+    void record_mutation(Sci::Position position, std::string_view text, bool insertion);
+    void set_preedit_range(Sci::Position start, Sci::Position end);
+    QVariant query(Qt::InputMethodQuery query, const Document* document) const;
+    int position_at(const Document* document, Sci::Position position) const;
+    bool has_selection() const { return !m_selection.isEmpty(); }
+    Sci::Position anchor_position() const { return m_document_anchor; }
+
+private:
+    struct Mutation
+    {
+        Sci::Position position;
+        QByteArray text;
+        bool insertion;
+    };
+
+    Sci::Position utf16_delta(Sci::Position position) const;
+
+    const Document* m_document;
+    QString m_surrounding;
+    QString m_selection;
+    int m_cursor;
+    int m_anchor;
+    Sci::Position m_document_start;
+    Sci::Position m_document_anchor;
+    Sci::Position m_preedit_start = Sci::invalidPosition;
+    Sci::Position m_preedit_end = Sci::invalidPosition;
+    std::vector<Mutation> m_mutations;
+    QByteArray m_deleted_text;
 };
 
 namespace
@@ -2034,6 +2069,140 @@ static int utf16_offset_from(const Document* pdoc, Sci::Position base, Sci::Posi
     return -bounded_ime_length(pdoc->CountUTF16(position, base));
 }
 
+namespace
+{
+
+QByteArray ime_bytes_in_range(const Document* document, Sci::Position start, Sci::Position end)
+{
+    QByteArray text(end - start, Qt::Uninitialized);
+    document->GetCharRange(text.data(), start, end - start);
+    return text;
+}
+
+QString ime_text_in_range(const Document* document, Sci::Position start, Sci::Position end)
+{
+    return scintillaquick::decode_utf8_body(ime_bytes_in_range(document, start, end));
+}
+
+}
+
+ScintillaQuick_item::Ime_query_context::Ime_query_context(
+    ScintillaQuick_core& core, Sci::Position caret, Sci::Position anchor)
+
+:
+    m_document(core.pdoc),
+    m_document_start(core.pdoc->ParaUp(caret)),
+    m_document_anchor(anchor)
+{
+    const Sci::Position end = core.pdoc->ParaDown(caret);
+    m_surrounding = ime_text_in_range(core.pdoc, m_document_start, end);
+    m_selection  = ime_text_in_range(core.pdoc, std::min(caret, anchor), std::max(caret, anchor));
+    m_cursor     = utf16_offset_from(core.pdoc, m_document_start, caret);
+    m_anchor     = utf16_offset_from(core.pdoc, m_document_start, anchor);
+}
+
+bool ScintillaQuick_item::Ime_query_context::matches(const Document* document) const
+{
+    return m_document == document && document->TentativeActive();
+}
+
+void ScintillaQuick_item::Ime_query_context::capture_deletion(Sci::Position position, Sci::Position length)
+{
+    // Scintilla's post-delete payload can be null when undo collection is off.
+    m_deleted_text = ime_bytes_in_range(m_document, position, position + length);
+}
+
+void ScintillaQuick_item::Ime_query_context::record_mutation(
+    Sci::Position position, std::string_view text, bool insertion)
+{
+    QByteArray bytes = insertion
+        ? QByteArray(text.data(), (qsizetype)text.size())
+        : std::move(m_deleted_text);
+    const auto length = (Sci::Position)bytes.size();
+    m_mutations.push_back({position, std::move(bytes), insertion});
+    if (insertion) {
+        // The committed paragraph begins before preedit inserted at its
+        // first character; a surrounding selection's anchor follows it.
+        if (m_document_start > position) {
+            m_document_start += length;
+        }
+        if (m_document_anchor >= position) {
+            m_document_anchor += length;
+        }
+    }
+    else {
+        m_document_start -= std::clamp(m_document_start - position, Sci::Position(0), length);
+        m_document_anchor -= std::clamp(m_document_anchor - position, Sci::Position(0), length);
+    }
+}
+
+void ScintillaQuick_item::Ime_query_context::set_preedit_range(Sci::Position start, Sci::Position end)
+{
+    m_preedit_start = start;
+    m_preedit_end = end;
+}
+
+Sci::Position ScintillaQuick_item::Ime_query_context::utf16_delta(Sci::Position position) const
+{
+    // Undo only the coordinate effect of tentative edits. This also accounts
+    // for overtype and additional carets without copying the whole document
+    // or mutating Scintilla while Qt is querying it.
+    Sci::Position delta = 0;
+    for (auto it = m_mutations.rbegin(); it != m_mutations.rend(); ++it) {
+        if (position <= it->position) {
+            continue;
+        }
+        const Sci::Position length = it->insertion
+            ? std::min(position - it->position, (Sci::Position)it->text.size())
+            : (Sci::Position)it->text.size();
+        const auto units = scintillaquick::decode_utf8_body(QByteArrayView(it->text).first(length)).size();
+        position += it->insertion ? -length : length;
+        delta    += it->insertion ? -units  : units;
+    }
+    return delta;
+}
+
+QVariant ScintillaQuick_item::Ime_query_context::query(
+    Qt::InputMethodQuery query, const Document* document) const
+{
+    switch (query) {
+        case Qt::ImCursorPosition:   return m_cursor;
+        case Qt::ImAnchorPosition:   return m_anchor;
+        case Qt::ImSurroundingText:  return m_surrounding;
+        case Qt::ImCurrentSelection: return m_selection;
+        case Qt::ImTextBeforeCursor: return m_surrounding.left(m_cursor);
+        case Qt::ImTextAfterCursor:  return m_surrounding.mid(m_cursor);
+        case Qt::ImAbsolutePosition:
+            // Overtype at an adjacent caret can delete through the original
+            // composition boundary. The paragraph start remains unambiguous.
+            return bounded_ime_length(
+                document->CountUTF16(0, m_document_start) + utf16_delta(m_document_start) + m_cursor);
+        default:
+            return {};
+    }
+}
+
+int ScintillaQuick_item::Ime_query_context::position_at(
+    const Document* document, Sci::Position position) const
+{
+    // All points in the main preedit represent its logical origin, including
+    // an endpoint shared with an adjacent secondary preedit.
+    if (m_preedit_start >= 0 && position >= m_preedit_start && position <= m_preedit_end) {
+        return m_cursor;
+    }
+    const Sci::Position offset =
+        utf16_offset_from(document, m_document_start, position) +
+        utf16_delta(position) - utf16_delta(m_document_start);
+    return offset >= 0 ? bounded_ime_length(offset) : -bounded_ime_length(-offset);
+}
+
+const ScintillaQuick_item::Ime_query_context* ScintillaQuick_item::ime_query_context() const
+{
+    return m_ime_query_context && m_ime_query_context->matches(m_core->pdoc)
+        ? m_ime_query_context.get()
+        : nullptr;
+}
+
 static std::pair<int, int> clamped_ime_attribute_range(int start, int length, int limit)
 {
     const long long bounded_limit = std::max(0, limit);
@@ -2171,6 +2340,8 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         initial_compose = true;
     }
 
+    m_ime_query_context.reset();
+    m_preedit_pos = -1;
     m_core->view.imeCaretBlockOverride = false;
 
     const bool has_replacement = event->replacementStart() != 0 || event->replacementLength() != 0;
@@ -2184,7 +2355,6 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
 
         m_ime_restore_selection = false;
         m_ime_preserve_selection = false;
-        m_preedit_pos = -1;
 
         std::vector<ScintillaQuick_edit_replacement> replacements;
         if ((apply_replacements || edit_handler_active()) &&
@@ -2324,6 +2494,14 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
             m_core->pdoc->TentativeStart(); // TentativeActive() from now on.
         }
 
+        // Qt queries the committed paragraph and selection while Scintilla
+        // renders preedit as tentative document edits. Capture that context
+        // after the commit/selection removal and before any preedit mutation.
+        m_ime_query_context = std::make_unique<Ime_query_context>(
+            *m_core,
+            m_ime_preserve_selection ? m_ime_caret : m_core->CurrentPosition(),
+            m_ime_preserve_selection ? m_ime_anchor : m_core->sel.RangeMain().anchor.Position());
+
         std::vector<int> ime_indicator = MapImeIndicators(event);
 
         const bool was_overstrike = m_core->inOverstrike;
@@ -2345,6 +2523,11 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
             DrawImeIndicator(ime_indicator[i], one_char_len);
             i += uc_width;
         }
+
+        const Sci::Position preedit_end = m_core->CurrentPosition();
+        m_ime_query_context->set_preedit_range(
+            m_core->pdoc->GetRelativePositionUTF16(preedit_end, -preedit_str_len),
+            preedit_end);
 
         // Move IME carets.
         int ime_caret_pos            = GetImeCaretPos(event, preedit_str_len);
@@ -2372,7 +2555,6 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
     else {
         m_ime_restore_selection = false;
         m_ime_preserve_selection = false;
-        m_preedit_pos = -1;
     }
 }
 
@@ -2383,6 +2565,9 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery property, QV
         if (!pt.isNull()) {
             Point scintilla_point   = PointFromQPointF(pt);
             Sci::Position point_pos = m_core->PositionFromLocation(scintilla_point);
+            if (const Ime_query_context* context = ime_query_context()) {
+                return context->position_at(m_core->pdoc, point_pos);
+            }
             const Sci::Position pos        = send(SCI_GETCURRENTPOS);
             const Sci::Position para_start = m_core->pdoc->ParaUp(pos);
             return QVariant(utf16_offset_from(m_core->pdoc, para_start, point_pos));
@@ -2395,6 +2580,13 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery property, QV
 
 QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
 {
+    const Ime_query_context* context = ime_query_context();
+    if (context) {
+        const QVariant value = context->query(query, m_core->pdoc);
+        if (value.isValid()) {
+            return value;
+        }
+    }
     const Scintilla::Position pos  = send(SCI_GETCURRENTPOS);
     const Scintilla::Position line = send(SCI_LINEFROMPOSITION, pos);
 
@@ -2412,7 +2604,9 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
         case Qt::ImMaximumTextLength:
             return QVariant(); // No limit.
         case Qt::ImAnchorRectangle: {
-            const SelectionPosition anchor = m_core->sel.RangeMain().anchor;
+            const SelectionPosition anchor = context && context->has_selection()
+                ? SelectionPosition(context->anchor_position())
+                : m_core->sel.RangeMain().anchor;
             const Point pt_anchor          = m_core->LocationFromPosition(anchor);
 
             const int width  = static_cast<int>(send(SCI_GETCARETWIDTH));
@@ -2431,40 +2625,10 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
             return QVariant(bounded_ime_length(m_core->pdoc->CountUTF16(0, pos)));
         }
         case Qt::ImTextAfterCursor: {
-            // from Qt::ImSurroundingText:
-            int para_start = m_core->pdoc->ParaUp(pos);
-            int para_end   = m_core->pdoc->ParaDown(pos);
-            QVarLengthArray<char, 1024> buffer(para_end - para_start + 1);
-
-            Sci_CharacterRange charRange;
-            charRange.cpMin = pos;
-            charRange.cpMax = para_end;
-
-            Sci_TextRange textRange;
-            textRange.chrg      = charRange;
-            textRange.lpstrText = buffer.data();
-
-            send(SCI_GETTEXTRANGE, 0, (sptr_t)&textRange);
-
-            return m_core->StringFromDocument(buffer.constData());
+            return ime_text_in_range(m_core->pdoc, pos, m_core->pdoc->ParaDown(pos));
         }
         case Qt::ImTextBeforeCursor: {
-            // from Qt::ImSurroundingText:
-            int para_start = m_core->pdoc->ParaUp(pos);
-            int para_end   = m_core->pdoc->ParaDown(pos);
-            QVarLengthArray<char, 1024> buffer(para_end - para_start + 1);
-
-            Sci_CharacterRange charRange;
-            charRange.cpMin = para_start;
-            charRange.cpMax = pos;
-
-            Sci_TextRange textRange;
-            textRange.chrg      = charRange;
-            textRange.lpstrText = buffer.data();
-
-            send(SCI_GETTEXTRANGE, 0, (sptr_t)&textRange);
-
-            return m_core->StringFromDocument(buffer.constData());
+            return ime_text_in_range(m_core->pdoc, m_core->pdoc->ParaUp(pos), pos);
         }
         case Qt::ImCursorRectangle: {
             const Scintilla::Position start_pos = (m_preedit_pos >= 0) ? m_preedit_pos : pos;
@@ -2491,8 +2655,7 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
         case Qt::ImSurroundingText: {
             const Scintilla::Position para_start = m_core->pdoc->ParaUp(pos);
             const Scintilla::Position para_end   = m_core->pdoc->ParaDown(pos);
-            const std::string buffer             = m_core->RangeText(para_start, para_end);
-            return m_core->StringFromDocument(buffer.c_str());
+            return ime_text_in_range(m_core->pdoc, para_start, para_end);
         }
 
         case Qt::ImCurrentSelection: {
@@ -2502,10 +2665,7 @@ QVariant ScintillaQuick_item::inputMethodQuery(Qt::InputMethodQuery query) const
             // for clipboard safety, and a NUL-terminated conversion would
             // truncate at the first NUL.
             const SelectionRange& range = m_core->sel.RangeMain();
-            const std::string text =
-                m_core->RangeText(range.Start().Position(), range.End().Position());
-            return scintillaquick::decode_utf8_body(
-                QByteArrayView(text.data(), static_cast<qsizetype>(text.size())));
+            return ime_text_in_range(m_core->pdoc, range.Start().Position(), range.End().Position());
         }
 
         default:
@@ -2885,11 +3045,27 @@ void ScintillaQuick_item::publish_save_point(NotificationData notification,
     }
 }
 
-void ScintillaQuick_item::record_actual_text_mutation()
+void ScintillaQuick_item::capture_ime_deletion(Scintilla::Position position, Scintilla::Position length)
+{
+    if (ime_query_context()) {
+        m_ime_query_context->capture_deletion(position, length);
+    }
+}
+
+void ScintillaQuick_item::record_actual_text_mutation(
+    Scintilla::Position position, std::string_view text, bool insertion)
 {
     // Called from ScintillaQuick_core::NotifyModified() for an observed
     // InsertText/DeleteText, before any public notification filtering.
     invalidate_save_fences();
+    if (m_ime_query_context) {
+        if (m_ime_query_context->matches(m_core->pdoc)) {
+            m_ime_query_context->record_mutation(position, text, insertion);
+        }
+        else {
+            m_ime_query_context.reset();
+        }
+    }
     ++m_mutation_generation;
     m_last_find_start = -1;
     m_last_find_end   = -1;

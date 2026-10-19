@@ -902,10 +902,17 @@ void ScintillaQuick_core::NotifyModified(Document* document, DocModification mh,
         {
             m_owner->invalidate_save_fences();
         }
+        if (FlagSet(mh.modificationType, ModificationFlags::BeforeDelete)) {
+            m_owner->capture_ime_deletion(mh.position, mh.length);
+        }
         if (FlagSet(mh.modificationType, ModificationFlags::InsertText) ||
             FlagSet(mh.modificationType, ModificationFlags::DeleteText))
         {
-            m_owner->record_actual_text_mutation();
+            const bool insertion = FlagSet(mh.modificationType, ModificationFlags::InsertText);
+            const std::string_view text = insertion
+                ? std::string_view(mh.text, (size_t)mh.length)
+                : std::string_view();
+            m_owner->record_actual_text_mutation(mh.position, text, insertion);
         }
     }
     Editor::NotifyModified(document, mh, user_data);

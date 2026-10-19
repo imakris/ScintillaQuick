@@ -561,6 +561,8 @@ private:
 
     class Render_data;
     class Find_panel;
+    class Ime_query_context;
+    const Ime_query_context* ime_query_context() const;
     QString getText() const;
     void setText(const QString& txt);
     QFont getFont() const { return m_font; }
@@ -717,6 +719,7 @@ private:
     // A post-commit Selection locates preedit at its caret without replacing it.
     bool m_ime_preserve_selection = false;
     QString m_ime_preedit;
+    std::unique_ptr<Ime_query_context> m_ime_query_context;
     // Owned text payload of the notification currently being delivered by
     // `notifyParent()`, and the target of `replace_notification_text()`. Points into the
     // active `notifyParent()` frame while `notify()` is being emitted and is null at all
@@ -752,7 +755,8 @@ private:
     std::uint64_t m_native_binding_revision = 0;
     std::vector<std::weak_ptr<Save_fence>> m_save_fences;
     mutable int m_property_publication_depth = 0;
-    void record_actual_text_mutation();
+    void capture_ime_deletion(Scintilla::Position position, Scintilla::Position length);
+    void record_actual_text_mutation(Scintilla::Position position, std::string_view text, bool insertion);
     void begin_property_batch() const;
     void end_property_batch() const;
     void flush_property_changes() const;

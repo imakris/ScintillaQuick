@@ -626,6 +626,160 @@ void observe_ime_edits(Event_editor& editor, Ime_edits& observed)
         });
 }
 
+void expect_ime_context(
+    const Event_editor& editor,
+    const QString& surrounding,
+    int cursor,
+    int anchor,
+    int absolute,
+    const QString& selection = {})
+{
+    SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition).toInt() == cursor);
+    SQ_EXPECT(editor.query_input_method(Qt::ImAnchorPosition).toInt() == anchor);
+    SQ_EXPECT(editor.query_input_method(Qt::ImAbsolutePosition).toInt() == absolute);
+    SQ_EXPECT(editor.query_input_method(Qt::ImSurroundingText).toString() == surrounding);
+    SQ_EXPECT(editor.query_input_method(Qt::ImTextBeforeCursor).toString() == surrounding.left(cursor));
+    SQ_EXPECT(editor.query_input_method(Qt::ImTextAfterCursor).toString() == surrounding.mid(cursor));
+    SQ_EXPECT(editor.query_input_method(Qt::ImCurrentSelection).toString() == selection);
+}
+
+void test_ime_queries_exclude_preedit()
+{
+    // Qt's logical queries exclude preedit, including its Cursor offset.
+    // Newlines and overtype must not change the committed paragraph either.
+    const QString surrounding = QString::fromUcs4(U"\u00E9\U0001F600xyz");
+    const QString committed   = QStringLiteral("prefix\n\n") + surrounding;
+    const QString preedits[] = {
+        QString::fromUcs4(U"\U0001F600Y"),
+        QStringLiteral("x\n\nY"),
+        QString::fromUcs4(U"\uAC00Y"),
+    };
+    for (const bool handled : {false, true}) {
+        for (const bool overtype : {false, true}) {
+            for (const QString& preedit : preedits) {
+                Event_editor editor;
+                editor.setWidth(640);
+                editor.setHeight(240);
+                editor.setProperty("text", committed);
+                editor.send(SCI_SETSEL,      14, 14);
+                editor.send(SCI_SETOVERTYPE, overtype);
+                if (handled) {
+                    editor.set_edit_handler(apply_exactly);
+                }
+                for (const int cursor : {0, (int)preedit.size()}) {
+                    QInputMethodEvent composing(preedit, {
+                        {QInputMethodEvent::Cursor, cursor, 1, {}},
+                    });
+                    editor.deliver_input_method(&composing);
+                    expect_ime_context(editor, surrounding, 3, 3, 11);
+
+                    const auto visual_caret = editor.send(SCI_GETCURRENTPOS);
+                    const QRectF rectangle  = editor.query_input_method(Qt::ImCursorRectangle).toRectF();
+                    SQ_EXPECT(qAbs(rectangle.x() - editor.send(SCI_POINTXFROMPOSITION, 0, visual_caret)) <= 1);
+                    SQ_EXPECT(rectangle.y() == editor.send(SCI_POINTYFROMPOSITION, 0, visual_caret));
+                    SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition, rectangle.center()).toInt() == 3);
+                }
+                QInputMethodEvent cancel;
+                editor.deliver_input_method(&cancel);
+                SQ_EXPECT(text_of(editor) == committed);
+                expect_ime_context(editor, surrounding, 3, 3, 11);
+            }
+        }
+    }
+}
+
+void test_ime_point_queries_exclude_preedit()
+{
+    Event_editor editor;
+    editor.setWidth(640);
+    editor.setHeight(240);
+    editor.setProperty("text", QString::fromUcs4(U"\u00E9\U0001F600xy"));
+    editor.send(SCI_SETSEL, 6, 6);
+    QInputMethodEvent composing(QString::fromUcs4(U"\U0001F600Y"), {
+        {QInputMethodEvent::Cursor, 2, 1, {}},
+    });
+    editor.deliver_input_method(&composing);
+
+    const std::pair<Scintilla::Position, int> positions[] = {
+        {2, 1}, {6, 3}, {10, 3}, {11, 3}, {12, 4}, {13, 5},
+    };
+    for (const auto& [byte_position, logical_position] : positions) {
+        const QPointF point(
+            editor.send(SCI_POINTXFROMPOSITION, 0, byte_position),
+            editor.send(SCI_POINTYFROMPOSITION, 0, byte_position) + 1);
+        SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition, point).toInt() == logical_position);
+    }
+}
+
+void test_ime_queries_with_multiple_carets()
+{
+    Event_editor editor;
+    editor.setProperty("text", QStringLiteral("ab cd"));
+    editor.send(SCI_SETMULTIPLESELECTION,         1);
+    editor.send(SCI_SETADDITIONALSELECTIONTYPING, 1);
+    editor.send(SCI_SETSEL,                      1, 1);
+    editor.send(SCI_ADDSELECTION,                4, 4);
+    editor.send(SCI_SETMAINSELECTION,            1);
+    QInputMethodEvent composing(QStringLiteral("XY"), {
+        {QInputMethodEvent::Cursor, 1, 1, {}},
+    });
+    editor.deliver_input_method(&composing);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("aXYb cXYd"));
+    expect_ime_context(editor, QStringLiteral("ab cd"), 4, 4, 4);
+
+    QInputMethodEvent cancel;
+    editor.deliver_input_method(&cancel);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("ab cd"));
+    expect_ime_context(editor, QStringLiteral("ab cd"), 4, 4, 4);
+}
+
+void test_ime_queries_with_adjacent_overtype_carets()
+{
+    for (const int secondary : {-1, 0, 1}) {
+        for (const int cursor : {0, 1}) {
+            Event_editor editor;
+            editor.setWidth(640);
+            editor.setHeight(240);
+            editor.setProperty("text", QStringLiteral("abcd"));
+            editor.send(SCI_SETOVERTYPE, 1);
+            if (secondary < 0) {
+                editor.send(SCI_SETSEL, 2, 2);
+            }
+            else {
+                editor.send(SCI_SETMULTIPLESELECTION,         1);
+                editor.send(SCI_SETADDITIONALSELECTIONTYPING, 1);
+                editor.send(SCI_SETSEL,                      secondary, secondary);
+                editor.send(SCI_ADDSELECTION,                2, 2);
+                editor.send(SCI_SETMAINSELECTION,            1);
+            }
+            QInputMethodEvent composing(QStringLiteral("X"), {
+                {QInputMethodEvent::Cursor, cursor, 1, {}},
+            });
+            editor.deliver_input_method(&composing);
+            expect_ime_context(editor, QStringLiteral("abcd"), 2, 2, 2);
+
+            // Both ends of the main preedit map to its logical origin,
+            // even when the start also ends a secondary overtype preedit.
+            for (const Scintilla::Position position : {2, 3}) {
+                const QPointF point(
+                    editor.send(SCI_POINTXFROMPOSITION, 0, position),
+                    editor.send(SCI_POINTYFROMPOSITION, 0, position) + 1);
+                SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition, point).toInt() == 2);
+            }
+            const QRectF caret = editor.query_input_method(Qt::ImCursorRectangle).toRectF();
+            SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition, caret.center()).toInt() == 2);
+            const QPointF end_point(
+                editor.send(SCI_POINTXFROMPOSITION, 0, 4),
+                editor.send(SCI_POINTYFROMPOSITION, 0, 4) + 1);
+            SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition, end_point).toInt() == 4);
+
+            QInputMethodEvent cancel;
+            editor.deliver_input_method(&cancel);
+            SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+        }
+    }
+}
+
 void test_ime_replacement_ranges()
 {
     struct Replacement_case
@@ -766,7 +920,7 @@ void test_ime_commit_continues_preedit()
             SQ_EXPECT(continued.isAccepted());
             SQ_EXPECT(text_of(editor) == QStringLiteral("AB") + next_preedit);
             SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 6);
-            SQ_EXPECT(editor.query_input_method(Qt::ImCursorPosition).toInt() == 4);
+            expect_ime_context(editor, QStringLiteral("AB"), 2, 2, 2);
             if (handled) {
                 SQ_EXPECT(observed.calls == 1);
                 SQ_EXPECT(observed.replacements.size() == 1);
@@ -854,6 +1008,10 @@ void test_ime_selection_attribute_follows_commit()
                     continued.setCommitString(commit_text);
                     editor.deliver_input_method(&continued);
                     SQ_EXPECT(text_of(editor) == test.composing_text);
+                    const int logical_caret = test.start + test.length;
+                    const QString selected  = test.length != 0 ? commit_text : QString();
+                    expect_ime_context(
+                        editor, committed_text, logical_caret, test.start, logical_caret, selected);
 
                     // Updating only the preedit cursor must not consume the
                     // surrounding selection established by the previous event.
@@ -862,6 +1020,8 @@ void test_ime_selection_attribute_follows_commit()
                     });
                     editor.deliver_input_method(&unchanged);
                     SQ_EXPECT(text_of(editor) == test.composing_text);
+                    expect_ime_context(
+                        editor, committed_text, logical_caret, test.start, logical_caret, selected);
                     if (handled) {
                         SQ_EXPECT(observed.calls == 1);
                     }
@@ -2001,6 +2161,10 @@ int main(int argc, char** argv)
     test_keyboard_backspace_unindents_only_blocks_unindent();
     test_direct_delete_back_normalization();
     test_committed_ime_restores_preedit_selection();
+    test_ime_queries_exclude_preedit();
+    test_ime_point_queries_exclude_preedit();
+    test_ime_queries_with_multiple_carets();
+    test_ime_queries_with_adjacent_overtype_carets();
     test_ime_replacement_ranges();
     test_ime_selection_and_replacement_are_one_transaction();
     test_ime_commit_continues_preedit();
