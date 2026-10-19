@@ -101,16 +101,13 @@ bool selection_is_find_match(ScintillaQuick_item& editor, const QByteArray& need
 {
     const Scintilla::Position selection_start = static_cast<Scintilla::Position>(editor.send(SCI_GETSELECTIONSTART));
     const Scintilla::Position selection_end = static_cast<Scintilla::Position>(editor.send(SCI_GETSELECTIONEND));
-    if (selection_start == selection_end) {
-        if (!allow_empty) {
-            return false;
-        }
-        const Scintilla::Position match = search_range(editor, needle, selection_start, document_length(editor));
-        return match == selection_start &&
-               static_cast<Scintilla::Position>(editor.send(SCI_GETTARGETEND)) == selection_end;
+    if (selection_start == selection_end && !allow_empty) {
+        return false;
     }
 
-    const Scintilla::Position match = search_range(editor, needle, selection_start, selection_end);
+    // Lookahead and end anchors need the same context used by Find Next.
+    // Match bounds, rather than a truncated search range, validate the selection.
+    const Scintilla::Position match = search_range(editor, needle, selection_start, document_length(editor));
     return match == selection_start && static_cast<Scintilla::Position>(editor.send(SCI_GETTARGETEND)) == selection_end;
 }
 

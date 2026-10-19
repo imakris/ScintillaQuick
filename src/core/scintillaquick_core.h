@@ -171,6 +171,7 @@ private:
     void CopyToClipboard(const SelectionText& selected_text) override;
     void PasteFromMode(QClipboard::Mode clipboard_mode);
     void Paste() override;
+    bool CanPaste() override;
     void ClaimSelection() override;
     void NotifyChange() override;
     void NotifyFocus(bool focus) override;

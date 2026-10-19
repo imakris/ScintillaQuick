@@ -822,6 +822,10 @@ void ScintillaQuick_core::PasteFromMode(QClipboard::Mode clipboard_mode)
 {
     QClipboard* clipboard      = QGuiApplication::clipboard();
     const QMimeData* mime_data = clipboard->mimeData(clipboard_mode);
+    // An unsupported clipboard must not turn paste into selection deletion.
+    if (!mime_data || !mime_data->hasText()) {
+        return;
+    }
     bool is_rectangular        = is_rectangular_in_mime(mime_data);
     bool is_line               = SelectionEmpty() && is_line_cut_copy_in_mime(mime_data);
     QString text               = clipboard->text(clipboard_mode);
@@ -840,6 +844,12 @@ void ScintillaQuick_core::PasteFromMode(QClipboard::Mode clipboard_mode)
 void ScintillaQuick_core::Paste()
 {
     PasteFromMode(QClipboard::Clipboard);
+}
+
+bool ScintillaQuick_core::CanPaste()
+{
+    const QMimeData* mime_data = QGuiApplication::clipboard()->mimeData();
+    return ScintillaBase::CanPaste() && mime_data && mime_data->hasText();
 }
 
 void ScintillaQuick_core::ClaimSelection()

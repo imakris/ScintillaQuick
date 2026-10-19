@@ -9,6 +9,7 @@
 #include <QDropEvent>
 #include <QGuiApplication>
 #include <QEventLoop>
+#include <QImage>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMimeData>
@@ -1679,6 +1680,72 @@ void test_find_replace_edit_boundary_outcomes()
     SQ_EXPECT(text_of(native_editor) == QStringLiteral("baz baz baz"));
 }
 
+void test_native_paste_requires_text_clipboard()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("selected text"));
+    editor.send(SCI_EMPTYUNDOBUFFER);
+    editor.send(SCI_SETSAVEPOINT);
+    editor.send(SCI_SETSEL, 8, 0);
+
+    auto* image_mime = new QMimeData;
+    QImage image(2, 2, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    image_mime->setImageData(image);
+    SQ_EXPECT(!image_mime->hasText());
+    QGuiApplication::clipboard()->setMimeData(image_mime);
+
+    SQ_EXPECT(editor.send(SCI_CANPASTE) == 0);
+    editor.send(SCI_PASTE);
+    QKeyEvent paste(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+    QGuiApplication::sendEvent(&editor, &paste);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("selected text"));
+    SQ_EXPECT(editor.send(SCI_GETANCHOR) == 8);
+    SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 0);
+    SQ_EXPECT(editor.send(SCI_CANUNDO) == 0);
+    SQ_EXPECT(editor.send(SCI_GETMODIFY) == 0);
+
+    QGuiApplication::clipboard()->setText(QStringLiteral("pasted"));
+    SQ_EXPECT(editor.send(SCI_CANPASTE) != 0);
+    editor.send(SCI_PASTE);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("pasted text"));
+    editor.send(SCI_UNDO);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("selected text"));
+    editor.setProperty("readonly", true);
+    SQ_EXPECT(editor.send(SCI_CANPASTE) == 0);
+}
+
+void test_regex_selection_keeps_document_context()
+{
+    ScintillaQuick_item editor;
+    editor.setProperty("text", QStringLiteral("CD"));
+    editor.setFindOptions(SCFIND_MATCHCASE | SCFIND_REGEXP | SCFIND_CXX11REGEX);
+    editor.setFindText(QStringLiteral("(C)(?=D)"));
+    editor.setReplacementText(QStringLiteral("\\1X"));
+    SQ_EXPECT(editor.findNext());
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONSTART) == 0);
+    SQ_EXPECT(editor.send(SCI_GETSELECTIONEND) == 1);
+    SQ_EXPECT(editor.replaceSelection());
+    SQ_EXPECT(text_of(editor) == QStringLiteral("CXD"));
+
+    editor.setProperty("text", QStringLiteral("CD"));
+    editor.setFindText(QStringLiteral("C(?!D)"));
+    editor.setReplacementText(QStringLiteral("X"));
+    editor.send(SCI_SETSEL, 0, 1);
+    SQ_EXPECT(!editor.replaceSelection());
+    SQ_EXPECT(text_of(editor) == QStringLiteral("CD"));
+
+    editor.setFindText(QStringLiteral("C$"));
+    editor.send(SCI_SETSEL, 0, 1);
+    SQ_EXPECT(!editor.replaceSelection());
+    SQ_EXPECT(text_of(editor) == QStringLiteral("CD"));
+
+    editor.setFindText(QStringLiteral("C.*"));
+    editor.send(SCI_SETSEL, 0, 1);
+    SQ_EXPECT(!editor.replaceSelection());
+    SQ_EXPECT(text_of(editor) == QStringLiteral("CD"));
+}
+
 void test_readonly_notification_covers_direct_messages()
 {
     ScintillaQuick_item editor;
@@ -2185,6 +2252,8 @@ int main(int argc, char** argv)
     test_text_changed_notification_coalescing();
     test_rejected_settext_skips_post_actions();
     test_find_replace_edit_boundary_outcomes();
+    test_native_paste_requires_text_clipboard();
+    test_regex_selection_keeps_document_context();
     test_readonly_notification_covers_direct_messages();
     test_transaction_tracking_survives_unhandled_nested_undo_groups();
     test_native_readonly_settext_preserves_undo();
