@@ -300,12 +300,10 @@ std::optional<Correctness_issue> verify_visible_rows(
     return std::nullopt;
 }
 
-// Per-step paint-latency timeout. Kept tight (25 ms) so a stalled step
-// is classified as a timeout rather than silently inflating the
-// measured latency. The shared wait_for_next_paint() helper defaults to
-// a more lenient 50 ms for correctness tests; benchmarks pass this
-// constant explicitly to preserve the original measurement contract.
+// Keep late paints out of the latency samples, but allow correctness checks
+// to observe their frame on busy machines.
 constexpr int k_paint_latency_timeout_ms = 25;
+constexpr int k_correctness_paint_timeout_ms = 2000;
 
 template <typename StepFn>
 QJsonObject measure_paint_latency_scenario(
@@ -331,16 +329,28 @@ QJsonObject measure_paint_latency_scenario(
 
         step_fn(i);
 
-        if (wait_for_next_paint(editor, paint_counter, previous_paint_counter, k_paint_latency_timeout_ms)) {
+        bool painted = wait_for_next_paint(
+            editor, paint_counter, previous_paint_counter, k_paint_latency_timeout_ms);
+        if (painted) {
             latencies_ms.push_back(step_timer.nsecsElapsed() / 1'000'000.0);
-            if (verify_step) {
-                if (const auto issue = verify_step(editor, i); issue.has_value()) {
-                    correctness_issues.push_back(*issue);
-                }
-            }
         }
         else {
             ++timeout_count;
+            if (verify_step) {
+                painted = wait_for_next_paint(
+                    editor, paint_counter, previous_paint_counter, k_correctness_paint_timeout_ms);
+            }
+        }
+
+        if (verify_step) {
+            if (!painted) {
+                correctness_issues.push_back({
+                    i, QStringLiteral("paint did not complete; step correctness could not be checked")});
+                break;
+            }
+            if (const auto issue = verify_step(editor, i); issue.has_value()) {
+                correctness_issues.push_back(*issue);
+            }
         }
     }
 
