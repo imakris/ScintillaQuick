@@ -1287,6 +1287,24 @@ void sync_keyed_text_nodes(
 
     const size_t new_count = items.size();
 
+    bool matching_order = nodes.size() == new_count;
+    uint64_t previous_key = 0;
+    for (size_t i = 0; matching_order && i < new_count; ++i) {
+        const uint64_t key = pack_visual_line_key(key_of(items[i]));
+        matching_order = nodes[i]->has_valid_key() &&
+            pack_visual_line_key(nodes[i]->cached_key()) == key &&
+            (i == 0 || previous_key < key);
+        previous_key = key;
+    }
+    if (matching_order) {
+        // Strict key order excludes duplicate margin keys, whose existing
+        // reconciliation below deliberately reuses the last matching node.
+        for (size_t i = 0; i < new_count; ++i) {
+            update(nodes[i], items[i]);
+        }
+        return;
+    }
+
     std::unordered_map<uint64_t, size_t> key_to_old_index;
     key_to_old_index.reserve(nodes.size());
     for (size_t i = 0; i < nodes.size(); ++i) {
