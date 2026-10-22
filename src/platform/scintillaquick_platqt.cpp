@@ -138,7 +138,7 @@ public:
     // m_advance_cache_state values:
     //   0 = uninitialized (take the slow path and try to populate)
     //   1 = fixed-pitch (fast path uses m_fixed_advance)
-    //   2 = known not fixed-pitch (skip the fast path permanently)
+    //   2 = ineligible for a fixed advance (skip the fast path permanently)
     //
     // Access is serialised by the fact that MeasureWidths is only ever
     // called from the GUI thread.
@@ -177,7 +177,7 @@ public:
 
     // Attempts to fill `positions` for printable-ASCII `text` using the
     // cached fixed-pitch advance. Returns false if the cache is not yet
-    // ready or the font is known not to be fixed-pitch, in which case
+    // ready or the font cannot use a fixed advance, in which case
     // the caller must fall through to the slow QTextLayout-based path.
     bool try_fill_ascii_positions_from_cache(
         std::string_view    text,
@@ -198,7 +198,7 @@ public:
     // has already been performed through the slow path. If the observed
     // advances match and QFontInfo agrees the font is fixed-pitch, the
     // cache switches to the fast path for all subsequent calls. If the
-    // font is known not to be fixed-pitch the state is frozen so we do
+    // font is ineligible for a fixed advance the state is frozen so we do
     // not keep re-running the detection.
     void populate_ascii_cache_from_measurement(
         std::string_view    text,
@@ -239,7 +239,11 @@ public:
             }
         }
 
-        if (uniform && first_adv > 0.0 && QFontInfo(*m_font).fixedPitch()) {
+        // A sample without spaces can be uniform even though word spacing
+        // changes the advances of spaces in later text.
+        if (uniform && first_adv > 0.0 && m_font->wordSpacing() == 0.0 &&
+            QFontInfo(*m_font).fixedPitch())
+        {
             m_fixed_advance             = first_adv;
             m_cached_font_dpi           = QFontMetricsF(*m_font, device).fontDpi();
             m_cached_device_pixel_ratio = device ? device->devicePixelRatioF() : 1.0;
@@ -1019,33 +1023,12 @@ void Surface_impl::MeasureWidthsUTF8(
     std::string_view text,
     XYPOSITION*      positions)
 {
-    QFont* qfont = font_pointer(font);
-    if (!qfont || !positions) {
-        return;
-    }
-    QString su = scintillaquick::decode_utf8_body(QByteArrayView(text.data(), static_cast<qsizetype>(text.length())));
-    QTextLayout tlay(su, *qfont, GetPaintDevice());
-    tlay.beginLayout();
-    QTextLine tl = tlay.createLine();
-    tlay.endLayout();
-    fill_utf8_cursor_positions_from_cursor(
-        text,
-        su.size(),
-        positions,
-        [&tl](int cursor_position) {
-            return tl.cursorToX(cursor_position);
-        });
+    MeasureWidths(font, text, positions);
 }
 
 XYPOSITION Surface_impl::WidthTextUTF8(const Font* font, std::string_view text)
 {
-    QFont* qfont = font_pointer(font);
-    if (!qfont) {
-        return 0;
-    }
-    QFontMetricsF metrics(*qfont, GetPaintDevice());
-    QString su = scintillaquick::decode_utf8_body(QByteArrayView(text.data(), static_cast<qsizetype>(text.length())));
-    return metrics.horizontalAdvance(su);
+    return WidthText(font, text);
 }
 
 XYPOSITION Surface_impl::Ascent(const Font* font)
