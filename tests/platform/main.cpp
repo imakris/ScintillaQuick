@@ -22,7 +22,10 @@ int g_failures = 0;
 void test_utf8_body_prefix_measurement()
 {
     const QString marker(QChar(0xFEFF));
-    for (const QString& body : {marker + QStringLiteral("body"),
+    for (const QString& body : {QString(),
+                               QStringLiteral("plain ASCII"),
+                               QStringLiteral("e\u0301 \u03b1"),
+                               marker + QStringLiteral("body"),
                                marker + marker + QStringLiteral("body"),
                                QStringLiteral("prefix") + marker + QStringLiteral("body")})
     {
@@ -35,19 +38,28 @@ void test_utf8_body_prefix_measurement()
         Scintilla::Internal::Surface_impl surface;
         surface.Init(static_cast<Scintilla::Internal::SurfaceID>(&image), nullptr);
         std::vector<Scintilla::Internal::XYPOSITION> positions(static_cast<size_t>(bytes.size()));
-        surface.MeasureWidths(font.get(), std::string_view(bytes.constData(), bytes.size()), positions.data());
+        const std::string_view text(bytes.constData(), bytes.size());
         QTextLayout layout(body, qt_font, &image);
         layout.beginLayout();
         const QTextLine line = layout.createLine();
         layout.endLayout();
-        size_t byte_index = 0;
-        for (qsizetype character = 0; character < body.size(); ++character) {
-            const qreal expected = line.cursorToX(static_cast<int>(character + 1));
-            const QByteArray character_bytes = body.mid(character, 1).toUtf8();
-            for (qsizetype byte = 0; byte < character_bytes.size(); ++byte) {
-                SQ_EXPECT(std::abs(positions[byte_index++] - expected) < 0.01);
+        for (const auto measure_widths : {
+                &Scintilla::Internal::Surface_impl::MeasureWidthsUTF8,
+                &Scintilla::Internal::Surface_impl::MeasureWidths})
+        {
+            (surface.*measure_widths)(font.get(), text, positions.data());
+            size_t byte_index = 0;
+            for (qsizetype character = 0; character < body.size(); ++character) {
+                const qreal expected = line.cursorToX(static_cast<int>(character + 1));
+                const QByteArray character_bytes = body.mid(character, 1).toUtf8();
+                for (qsizetype byte = 0; byte < character_bytes.size(); ++byte) {
+                    SQ_EXPECT(std::abs(positions[byte_index++] - expected) < 0.01);
+                }
             }
         }
+        const qreal expected_width = QFontMetricsF(qt_font, &image).horizontalAdvance(body);
+        SQ_EXPECT(std::abs(surface.WidthText(font.get(), text) - expected_width) < 0.01);
+        SQ_EXPECT(std::abs(surface.WidthTextUTF8(font.get(), text) - expected_width) < 0.01);
     }
 }
 
@@ -78,19 +90,25 @@ void test_surface_measurement_tracks_device_dpi()
                 const QTextLine line = layout.createLine();
                 layout.endLayout();
                 for (int repeat = 0; repeat < 2; ++repeat) {
-                    surface.MeasureWidths(font.get(), text, positions.data());
-                    for (size_t i = 0; i < text.size(); ++i) {
-                        const qreal expected = line.cursorToX(static_cast<int>(i + 1));
-                        if (std::abs(positions[i] - expected) >= 0.01) {
-                            std::fprintf(stderr,
-                                "font=%s dpm=%d dpr=%.2f repeat=%d byte=%zu actual=%.9f expected=%.9f\n",
-                                family_utf8.constData(), dots_per_meter, device_pixel_ratio,
-                                repeat, i, positions[i], expected);
+                    for (const auto measure_widths : {
+                            &Surface_impl::MeasureWidthsUTF8,
+                            &Surface_impl::MeasureWidths})
+                    {
+                        (surface.*measure_widths)(font.get(), text, positions.data());
+                        for (size_t i = 0; i < text.size(); ++i) {
+                            const qreal expected = line.cursorToX(static_cast<int>(i + 1));
+                            if (std::abs(positions[i] - expected) >= 0.01) {
+                                std::fprintf(stderr,
+                                    "font=%s dpm=%d dpr=%.2f repeat=%d byte=%zu actual=%.9f expected=%.9f\n",
+                                    family_utf8.constData(), dots_per_meter, device_pixel_ratio,
+                                    repeat, i, positions[i], expected);
+                            }
+                            SQ_EXPECT(std::abs(positions[i] - expected) < 0.01);
                         }
-                        SQ_EXPECT(std::abs(positions[i] - expected) < 0.01);
+                        const qreal expected_width = QFontMetricsF(qt_font, &image).horizontalAdvance(qt_text);
+                        SQ_EXPECT(std::abs(positions.back() - expected_width) < 0.01);
+                        SQ_EXPECT(std::abs(surface.WidthTextUTF8(font.get(), text) - expected_width) < 0.01);
                     }
-                    const qreal expected_width = QFontMetricsF(qt_font, &image).horizontalAdvance(qt_text);
-                    SQ_EXPECT(std::abs(positions.back() - expected_width) < 0.01);
                 }
             }
         }
@@ -116,6 +134,40 @@ void test_font_stretch_matches_qt()
     }
 }
 
+void test_surface_measurement_preserves_word_spacing()
+{
+    using namespace Scintilla::Internal;
+    for (const QString& family : {QStringLiteral("Cascadia Code"), QStringLiteral("Cousine")}) {
+        QFont qt_font(family, 11);
+        qt_font.setWordSpacing(4);
+        const auto font = font_from_qfont(qt_font);
+        QImage image(1, 1, QImage::Format_ARGB32_Premultiplied);
+        Surface_impl surface;
+        surface.Init(static_cast<SurfaceID>(&image), nullptr);
+
+        for (const auto measure_widths : {
+                &Surface_impl::MeasureWidthsUTF8,
+                &Surface_impl::MeasureWidths})
+        {
+            // Warm the cache with text that has no spaces before measuring
+            // text whose space advances include the font's word spacing.
+            for (const std::string_view text : {"abcdefgh", "a a", " != "}) {
+                std::vector<XYPOSITION> positions(text.size());
+                (surface.*measure_widths)(font.get(), text, positions.data());
+                const QString qt_text = QString::fromLatin1(text.data(), text.size());
+                QTextLayout layout(qt_text, qt_font, &image);
+                layout.beginLayout();
+                const QTextLine line = layout.createLine();
+                layout.endLayout();
+                for (size_t i = 0; i < text.size(); ++i) {
+                    SQ_EXPECT(std::abs(positions[i] -
+                        line.cursorToX(static_cast<int>(i + 1))) < 0.01);
+                }
+            }
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -127,6 +179,7 @@ int main(int argc, char** argv)
     }
     test_utf8_body_prefix_measurement();
     test_surface_measurement_tracks_device_dpi();
+    test_surface_measurement_preserves_word_spacing();
     test_font_stretch_matches_qt();
     return g_failures == 0 ? 0 : 1;
 }
