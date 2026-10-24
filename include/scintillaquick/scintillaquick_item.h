@@ -343,16 +343,6 @@ public:
         bool needs_style_sync     = false,
         bool scrolling            = false);
 
-    // Replace the text payload that the typed notification signals - `modified`,
-    // `uriDropped` and `autoCompleteSelection` - deliver for the notification currently
-    // being dispatched. Only meaningful from a slot connected to `notify()`; the bytes
-    // are copied here, so this item never reads caller storage after the slot returns.
-    // Assigning `Scintilla::NotificationData::text` from such a slot does not change
-    // what the typed signals deliver, because this item must not dereference a pointer
-    // whose lifetime and extent it does not own. The scalar fields of the notification,
-    // including `length`, stay caller-mutable and are forwarded as written.
-    void replace_notification_text(const QByteArray& text);
-
     std::uint64_t native_binding_revision() const { return m_native_binding_revision; }
     std::uint64_t native_content_revision() const { return m_mutation_generation; }
 
@@ -476,8 +466,7 @@ signals:
     void autoCompleteCancelled();
     void focusChanged(bool focused);
 
-    // Base Scintilla notifications exposed by this item.
-    void notify(Scintilla::NotificationData* pscn);
+    // Scintilla command notifications.
     void command(Scintilla::uptr_t w_param, Scintilla::sptr_t l_param);
 
     // GUI event notifications needed under Qt
@@ -723,12 +712,6 @@ private:
     bool m_ime_preserve_selection = false;
     QString m_ime_preedit;
     std::unique_ptr<Ime_query_context> m_ime_query_context;
-    // Owned text payload of the notification currently being delivered by
-    // `notifyParent()`, and the target of `replace_notification_text()`. Points into the
-    // active `notifyParent()` frame while `notify()` is being emitted and is null at all
-    // other times; saved and restored around that emission so a slot that re-enters
-    // Scintilla and triggers a nested notification cannot steal the outer delivery.
-    QByteArray* m_delivered_notification_text = nullptr;
     std::unique_ptr<Render_data> m_render_data;
     bool m_properties_sync_pending = false;
     bool m_in_sync_quick_view_properties = false;
@@ -744,7 +727,7 @@ private:
     // `readonly` properties. `ScintillaQuick_core::NotifyModified()` calls
     // `record_actual_text_mutation()` for every actual InsertText/DeleteText,
     // before public notification filtering, so `SCI_SETMODEVENTMASK` and
-    // forged or mutated `notify()` data cannot suppress or counterfeit the
+    // synthesized public notifications cannot suppress or counterfeit the
     // property signal. Dirty flags are coalesced by a nestable batch: a batch
     // is entered by `send_with_outcome()` for messages that can mutate, and
     // by logical operations (property setters, event dispatch, find/replace)

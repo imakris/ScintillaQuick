@@ -307,25 +307,22 @@ virtual/interface requirement.
 Signals that expose owned Qt values, such as `QByteArray` copied from
 notification text, are safe to retain after delivery.
 
-Signals that expose raw Scintilla notification pointers are only valid during
-direct synchronous delivery unless an additive value-based API explicitly says
-otherwise. Do not store such pointers, do not rely on queued delivery for them,
-and do not expose new pointer-bearing notification APIs without API review.
+`notificationReceived()` delivers an owned snapshot before the corresponding
+event-specific signal. Copy text and text-bearing parameters before either
+signal can re-enter the editor and invalidate Scintilla's original buffer.
+Each nested notification owns its payload independently; retained and queued
+snapshots must remain valid after the original delivery returns.
 
-Keep the compatibility rule here: value-based notification signals must own
-copied payloads, and raw pointer signals remain direct-only.
+Direct notification delivery remains synchronous. An insertion-check receiver
+connected to `notificationReceived()` or `modified()` may send
+`SCI_CHANGEINSERTION` while handling `SC_MOD_INSERTCHECK`, before Scintilla
+applies the pending insertion. A queued observer cannot participate in that
+synchronous decision.
 
-The same rule binds the write side of `notify(Scintilla::NotificationData*)`.
-`notifyParent()` copies the notification's text payload before it emits
-`notify()`, and every signal emitted afterwards reads that owned copy. A slot may
-still adjust the notification's scalar fields, including `length`, and those are
-forwarded as written; assigning `NotificationData::text` has no effect and is
-reported with a warning. A slot that needs to change the delivered text calls
-`ScintillaQuick_item::replace_notification_text()`, which copies the bytes.
-Never reintroduce a post-`notify()` read of `NotificationData::text` or a
-`NotificationData::length`-sized copy out of it: the item owns neither the
-buffer a slot may install nor any guarantee that a slot-supplied length still
-describes Scintilla's buffer.
+Save-point acknowledgements retain their document fences and check recipient
+lifetime and revision between snapshot and event-specific delivery. Reentrant
+mutation or destruction must stop stale clean notifications, and completion
+must wait for the captured native and property frames to unwind.
 
 ## Test And Benchmark Playbook
 
