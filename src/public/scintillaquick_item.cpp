@@ -2893,17 +2893,6 @@ const Render_frame& ScintillaQuick_item::rendered_frame_for_test() const
     return m_render_data ? m_render_data->frame : empty_frame;
 }
 
-void ScintillaQuick_item::replace_notification_text(const QByteArray& text)
-{
-    if (!m_delivered_notification_text) {
-        qWarning("ScintillaQuick: replace_notification_text() is only meaningful from a slot "
-            "connected to ScintillaQuick_item::notify()");
-        return;
-    }
-
-    *m_delivered_notification_text = text;
-}
-
 std::shared_ptr<ScintillaQuick_item::Save_fence> ScintillaQuick_item::capture_save_fence()
 {
     std::erase_if(m_save_fences, [](const auto& fence) { return fence.expired(); });
@@ -3019,24 +3008,10 @@ void ScintillaQuick_item::publish_save_point(NotificationData notification,
     static const QMetaMethod typed_signal = QMetaMethod::fromSignal(&ScintillaQuick_item::notificationReceived);
     const bool typed_connected = isSignalConnected(typed_signal);
     const auto payload = notification_text_payload(notification);
-    QByteArray delivered_text = payload.bytes;
     const auto snapshot = typed_connected ? notification_snapshot_from(notification, payload)
                                           : ScintillaQuick_notification();
-    const char* const original_text = notification.text;
-    {
-        auto* previous = m_delivered_notification_text;
-        const auto restore = qScopeGuard([alive, previous] {
-            if (alive) { alive->m_delivered_notification_text = previous; }
-        });
-        m_delivered_notification_text = &delivered_text;
-        emit notify(&notification);
-    }
     if (!current()) {
         return;
-    }
-    if (notification.text != original_text) {
-        qWarning("ScintillaQuick: assigning NotificationData::text from a notify() slot has no "
-            "effect; call ScintillaQuick_item::replace_notification_text() instead");
     }
     if (typed_connected) {
         emit notificationReceived(snapshot);
@@ -3044,8 +3019,8 @@ void ScintillaQuick_item::publish_save_point(NotificationData notification,
             return;
         }
     }
-    // Preserve the raw scalar contract, without replaying a clean notification
-    // after an earlier channel or watcher invalidated the captured document.
+    // Do not replay a clean notification after an earlier signal or watcher
+    // invalidated the captured document.
     if (notification.nmhdr.code == Notification::SavePointReached) {
         emit savePointChanged(false);
     }
@@ -3139,40 +3114,14 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
         QMetaMethod::fromSignal(&ScintillaQuick_item::notificationReceived);
     const bool safe_notification_connected = isSignalConnected(notification_received_signal);
 
-    // Copy the payload while `scn.text` and `scn.length` still describe Scintilla's own
-    // buffer. Everything below the `notify()` emission reads `delivered_text` instead:
-    // a legacy slot can repoint `scn.text` at storage that dies when the slot returns,
-    // and can widen `scn.length` past the end of Scintilla's buffer, so neither field is
-    // safe to dereference once a slot has seen them.
+    // Own the payload before a synchronous receiver can re-enter Scintilla
+    // and invalidate the original buffer. Each nested delivery owns its copy.
     const notification_text_t notification_text = notification_text_payload(scn);
-    QByteArray delivered_text                   = notification_text.bytes;
+    const QByteArray& delivered_text            = notification_text.bytes;
 
     const ScintillaQuick_notification snapshot = safe_notification_connected
         ? notification_snapshot_from(scn, notification_text)
         : ScintillaQuick_notification();
-
-    const char* const pre_notify_text = scn.text;
-
-    // Scope the swap so the outer pointer is restored on every exit path. The
-    // swap carries reentrancy (a nested notifyParent() hands this frame's pointer
-    // back when its own emission returns), and it has to survive a slot that
-    // leaves through an exception too: `delivered_text` dies with this frame, so
-    // a member left pointing at it would pass the null check in
-    // replace_notification_text() and write through a dangling pointer.
-    {
-        QByteArray* const outer_delivered_text = m_delivered_notification_text;
-        const auto restore_delivered_text = qScopeGuard([this, outer_delivered_text] {
-            m_delivered_notification_text = outer_delivered_text;
-        });
-
-        m_delivered_notification_text = &delivered_text;
-        emit notify(&scn);
-    }
-
-    if (scn.text != pre_notify_text) {
-        qWarning("ScintillaQuick: assigning NotificationData::text from a notify() slot has no "
-            "effect; call ScintillaQuick_item::replace_notification_text() instead");
-    }
 
     if (safe_notification_connected) {
         emit notificationReceived(snapshot);
@@ -3221,8 +3170,7 @@ void ScintillaQuick_item::notifyParent(NotificationData scn)
             }
             request_scene_graph_update(true, true, false);
             // `textChanged()` is not derived from this public notification:
-            // SCI_SETMODEVENTMASK can suppress it and notify() slots can
-            // rewrite it. Actual mutations are observed through
+            // SCI_SETMODEVENTMASK can suppress it. Actual mutations are observed through
             // ScintillaQuick_core::NotifyModified() instead.
             break;
         }
