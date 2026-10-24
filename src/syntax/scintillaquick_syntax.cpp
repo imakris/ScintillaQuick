@@ -27,7 +27,8 @@ enum class Syntax_family
 
 struct Lexer_configuration
 {
-    QByteArray lexer_name;
+    // Plain text must finish styling after edits, including in shared views.
+    QByteArray lexer_name = "null";
     Syntax_family family = Syntax_family::PlainText;
     std::array<QByteArray, 8> keyword_sets {};
 };
@@ -409,9 +410,6 @@ void scintillaquick::configure_default_syntax(ScintillaQuick_item& pane, const Q
         break;
 
     case Syntax_family::PlainText:
-        // Removing a lexer leaves the document's existing style bytes intact.
-        pane.send(SCI_STARTSTYLING, 0);
-        pane.send(SCI_SETSTYLING, static_cast<uptr_t>(pane.send(SCI_GETLENGTH)), 0);
         break;
     }
 

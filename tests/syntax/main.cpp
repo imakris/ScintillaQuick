@@ -78,6 +78,14 @@ int main(int argc, char** argv)
 
     scintillaquick::configure_default_syntax(pane, QStringLiteral("notes.txt"), false);
     require(pane.send(SCI_GETSTYLEAT, 0) == 0, "unknown paths return to plain text");
+    const QByteArray addition(" More plain text");
+    pane.send(SCI_APPENDTEXT, static_cast<uptr_t>(addition.size()),
+        reinterpret_cast<sptr_t>(addition.constData()));
+    pane.send(SCI_COLOURISE, 0, -1);
+    require(pane.send(SCI_GETENDSTYLED) == pane.send(SCI_GETLENGTH),
+        "plain-text edits complete styling without a container callback");
+    require(pane.send(SCI_GETSTYLEAT, pane.send(SCI_GETLENGTH) - 1) == 0,
+        "new plain text retains the default style");
     pane.send(SCI_SETTEXT, 0, reinterpret_cast<sptr_t>("def function(): pass"));
     scintillaquick::configure_default_syntax(pane, QStringLiteral("module.py"), false);
     require(pane.send(SCI_GETSTYLEAT, 0) == SCE_P_WORD, "switching out of plain text restores keywords");
