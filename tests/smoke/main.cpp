@@ -140,6 +140,39 @@ void test_property_roundtrip(ScintillaQuick_item& editor)
     SQ_EXPECT(editor.property("text").toString() == text);
 }
 
+void test_empty_line_layout_after_text_reset()
+{
+    ScintillaQuick_item editor;
+    editor.setWidth(640);
+    editor.setHeight(480);
+    editor.setProperty("font", scintillaquick::shared::deterministic_test_font(11));
+
+    for (const int italic : {0, 1}) {
+        editor.send(SCI_STYLESETITALIC, STYLE_DEFAULT, italic);
+        editor.send(SCI_STYLECLEARALL);
+        for (const int view_eol : {0, 1}) {
+            editor.send(SCI_SETVIEWEOL, view_eol);
+            for (const char* text : {"", "\n", "\r\n", "\n\n", "\r\n\r\n"}) {
+                editor.sends(SCI_SETTEXT, 0, "content");
+                editor.send(SCI_SETSEL, 7, 7);
+                editor.send(SCI_SCROLLCARET);
+                const sptr_t line_origin = editor.send(SCI_POINTXFROMPOSITION, 0, 0);
+
+                editor.sends(SCI_SETTEXT, 0, text);
+                const sptr_t line_count = editor.send(SCI_GETLINECOUNT);
+                for (sptr_t line = 0; line < line_count; ++line) {
+                    const sptr_t position = editor.send(SCI_POSITIONFROMLINE, line);
+                    SQ_EXPECT(editor.send(SCI_GETLINEENDPOSITION, line) == position);
+                    editor.send(SCI_SETSEL, position, position);
+                    editor.send(SCI_SCROLLCARET);
+                    SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == position);
+                    SQ_EXPECT(editor.send(SCI_POINTXFROMPOSITION, 0, position) == line_origin);
+                }
+            }
+        }
+    }
+}
+
 class Body_getter_probe_editor final : public ScintillaQuick_item
 {
 public:
@@ -1606,6 +1639,7 @@ int main(int argc, char** argv)
 
     test_editor_scroll_and_margin_helpers();
     test_property_roundtrip(editor);
+    test_empty_line_layout_after_text_reset();
     test_utf8_body_prefix_getters();
     test_save_point_acknowledgement_scopes();
     test_pixel_sized_font(editor);
