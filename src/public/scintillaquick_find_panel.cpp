@@ -2,6 +2,7 @@
 // Licensed under the BSD 2-Clause License, see LICENSE file for details.
 
 #include <scintillaquick/scintillaquick_item.h>
+#include "scintillaquick_find_range_p.h"
 #include "scintillaquick_text_encoding.h"
 
 #include <QFontMetricsF>
@@ -61,10 +62,7 @@ void clear_children(QSGNode* node)
 Scintilla::Position search_range(
     ScintillaQuick_item& editor, const QByteArray& needle, Scintilla::Position start, Scintilla::Position end)
 {
-    editor.send(SCI_SETTARGETRANGE, start, end);
-    editor.send(SCI_SETSEARCHFLAGS, static_cast<Scintilla::uptr_t>(editor.findOptions()));
-    return static_cast<Scintilla::Position>(
-        editor.sends(SCI_SEARCHINTARGET, static_cast<Scintilla::uptr_t>(needle.size()), needle.constData()));
+    return scintillaquick::search_range(editor, needle, start, end, editor.findOptions()).start;
 }
 
 std::vector<std::pair<Scintilla::Position, Scintilla::Position>> all_matches(

@@ -36,6 +36,7 @@
 #include <QColor>
 #include <QFont>
 #include <QElapsedTimer>
+#include <QList>
 #include <QMimeData>
 #include <QPoint>
 #include <QPointer>
@@ -345,6 +346,23 @@ public:
 
     std::uint64_t native_binding_revision() const { return m_native_binding_revision; }
     std::uint64_t native_content_revision() const { return m_mutation_generation; }
+    // Primitive line movement/deletion and explicit marker changes are observed
+    // before public notification coalescing and do not include lexer fold repair.
+    std::uint64_t native_line_revision() const { return m_native_line_revision; }
+    std::uint64_t native_marker_revision() const { return m_native_marker_revision; }
+    struct Marker_line_scan
+    {
+        QList<int> lines;
+        int next_line = -1;
+        int scanned_lines = 0;
+    };
+    // For documents whose explicit markers all use marker_number. The first
+    // native handle then proves presence in constant work, even after merging.
+    // Bounds are zero-based/inclusive, in either direction; each call inspects
+    // at most 4096 lines. next_line is the first unscanned line, or -1 at end.
+    Marker_line_scan scan_exclusive_marker_lines(int marker_number, int first_line,
+        int last_line, int max_lines, int max_results) const;
+    bool input_method_composing() const { return !m_ime_preedit.isEmpty(); }
 
     struct Save_fence
     {
@@ -739,10 +757,13 @@ private:
     mutable bool          m_readonly_dirty       = false;
     mutable std::uint64_t m_mutation_generation  = 0;
     std::uint64_t m_native_binding_revision = 0;
+    std::uint64_t m_native_line_revision = 0;
+    std::uint64_t m_native_marker_revision = 0;
     std::vector<std::weak_ptr<Save_fence>> m_save_fences;
     mutable int m_property_publication_depth = 0;
     void capture_ime_deletion(Scintilla::Position position, Scintilla::Position length);
-    void record_actual_text_mutation(Scintilla::Position position, std::string_view text, bool insertion);
+    void record_actual_text_mutation(Scintilla::Position position, std::string_view text,
+        bool insertion, bool lines_changed);
     void begin_property_batch() const;
     void end_property_batch() const;
     void flush_property_changes() const;

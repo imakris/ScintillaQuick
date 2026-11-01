@@ -2462,11 +2462,133 @@ void test_readonly_drop_preserves_modify_attempt_notification()
     SQ_EXPECT(modify_attempt_count == 1);
 }
 
+void test_native_bookmark_revisions(int notification_mask)
+{
+    {
+        ScintillaQuick_item editor;
+        editor.setProperty("text", QStringLiteral("one line"));
+        editor.send(SCI_SETMODEVENTMASK, notification_mask);
+        editor.send(SCI_MARKERADD, 0, 0);
+        const auto lines = editor.native_line_revision();
+        bool observed = false;
+        QObject::connect(&editor, &ScintillaQuick_item::textChanged, [&] {
+            observed = true;
+            SQ_EXPECT(editor.send(SCI_GETLENGTH) == 0);
+            SQ_EXPECT(editor.send(SCI_GETLINECOUNT) == 1);
+            SQ_EXPECT((editor.send(SCI_MARKERGET, 0) & 1) == 0);
+            SQ_EXPECT(editor.native_line_revision() != lines);
+        });
+        editor.send(SCI_DELETERANGE, 0, editor.send(SCI_GETLENGTH));
+        SQ_EXPECT(observed);
+    }
+    {
+        ScintillaQuick_item editor;
+        editor.setProperty("text", QStringLiteral("old\nbody\nend"));
+        editor.send(SCI_SETMODEVENTMASK, notification_mask);
+        editor.send(SCI_MARKERADD, 1, 0);
+        const auto lines = editor.native_line_revision();
+        const auto count = editor.send(SCI_GETLINECOUNT);
+        bool observed = false;
+        QObject::connect(&editor, &ScintillaQuick_item::textChanged, [&] {
+            observed = true;
+            SQ_EXPECT(text_of(editor) == QStringLiteral("new\nline\nfin"));
+            SQ_EXPECT(editor.send(SCI_GETLINECOUNT) == count);
+            SQ_EXPECT(editor.native_line_revision() != lines);
+            SQ_EXPECT(editor.send(SCI_MARKERNEXT, 0, 1) == -1);
+        });
+        editor.send(SCI_SETTARGETRANGE, 0, editor.send(SCI_GETLENGTH));
+        editor.sends(SCI_REPLACETARGET, 12, "new\nline\nfin");
+        SQ_EXPECT(observed);
+    }
+    {
+        ScintillaQuick_item editor;
+        editor.setProperty("text", QStringLiteral("abc"));
+        editor.send(SCI_SETMODEVENTMASK, notification_mask);
+        editor.send(SCI_MARKERADD, 0, 0);
+        const auto lines = editor.native_line_revision();
+        const auto markers = editor.native_marker_revision();
+        bool observed = false;
+        QObject::connect(&editor, &ScintillaQuick_item::textChanged, [&] {
+            observed = true;
+            SQ_EXPECT(text_of(editor) == QStringLiteral("aQbc"));
+            SQ_EXPECT((editor.send(SCI_MARKERGET, 0) & 1) != 0);
+            SQ_EXPECT(editor.native_line_revision() == lines);
+            SQ_EXPECT(editor.native_marker_revision() == markers);
+        });
+        editor.sends(SCI_INSERTTEXT, 1, "Q");
+        SQ_EXPECT(observed);
+
+        editor.send(SCI_SETFOLDLEVEL, 0, SC_FOLDLEVELBASE | SC_FOLDLEVELHEADERFLAG);
+        SQ_EXPECT(editor.native_marker_revision() == markers);
+        SQ_EXPECT((editor.send(SCI_MARKERGET, 0) & 1) != 0);
+        editor.send(SCI_MARKERDELETE, 0, 0);
+        SQ_EXPECT(editor.native_marker_revision() != markers);
+        SQ_EXPECT((editor.send(SCI_MARKERGET, 0) & 1) == 0);
+        SQ_EXPECT(editor.native_line_revision() == lines);
+    }
+}
+
+void test_minimal_replace_shared_view_coordinates()
+{
+    Event_editor first;
+    Event_editor second;
+    QByteArray original;
+    for (int line = 0; line < 100; ++line) {
+        original += QByteArray("line ") + QByteArray::number(line) + " middle();\n";
+    }
+    first.setProperty("text", QString::fromUtf8(original));
+    second.send(SCI_SETDOCPOINTER, 0, first.send(SCI_GETDOCPOINTER));
+    for (auto* editor : {&first, &second}) {
+        editor->setSize(QSizeF(640, 160));
+        editor->send(SCI_SETWRAPMODE, SC_WRAP_NONE);
+        editor->capture();
+    }
+    const auto suffix_caret = second.send(SCI_POSITIONFROMLINE, 80) + 2;
+    first.send(SCI_SETSEL, 5, 5);
+    second.send(SCI_SETSEL, suffix_caret, suffix_caret);
+    first.send(SCI_SETFIRSTVISIBLELINE, 10);
+    second.send(SCI_SETFIRSTVISIBLELINE, 60);
+    const auto first_top = first.send(SCI_GETFIRSTVISIBLELINE);
+    const auto second_top = second.send(SCI_GETFIRSTVISIBLELINE);
+    SQ_EXPECT(first_top == 10);
+    SQ_EXPECT(second_top == 60);
+    first.send(SCI_EMPTYUNDOBUFFER);
+
+    QByteArray replacement = original;
+    const auto changed_at = first.send(SCI_POSITIONFROMLINE, 50) + 8;
+    replacement.insert(changed_at, "expanded_");
+    const auto delta = replacement.size() - original.size();
+    first.send(SCI_SETTARGETRANGE, 0, original.size());
+    first.send(SCI_REPLACETARGETMINIMAL, replacement.size(),
+        reinterpret_cast<Scintilla::sptr_t>(replacement.constData()));
+
+    SQ_EXPECT(text_of(first).toUtf8() == replacement);
+    SQ_EXPECT(text_of(second).toUtf8() == replacement);
+    SQ_EXPECT(first.send(SCI_GETCURRENTPOS) == 5);
+    SQ_EXPECT(second.send(SCI_GETCURRENTPOS) == suffix_caret + delta);
+    SQ_EXPECT(first.send(SCI_GETFIRSTVISIBLELINE) == first_top);
+    SQ_EXPECT(second.send(SCI_GETFIRSTVISIBLELINE) == second_top);
+    SQ_EXPECT(first.send(SCI_CANUNDO));
+    first.send(SCI_UNDO);
+    SQ_EXPECT(text_of(first).toUtf8() == original);
+    SQ_EXPECT(text_of(second).toUtf8() == original);
+    SQ_EXPECT(first.send(SCI_CANREDO));
+    first.send(SCI_REDO);
+    SQ_EXPECT(text_of(first).toUtf8() == replacement);
+    SQ_EXPECT(text_of(second).toUtf8() == replacement);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
     QGuiApplication app(argc, argv);
+    if (app.arguments().contains(QStringLiteral("--bookmark-revisions"))) {
+        test_native_bookmark_revisions(SC_MODEVENTMASKALL);
+        test_native_bookmark_revisions(0);
+        test_minimal_replace_shared_view_coordinates();
+        return g_failures ? 1 : 0;
+    }
     if (app.arguments().contains(QStringLiteral("--horizontal-scroll-contract"))) {
         test_horizontal_scroll_survives_edit_and_margin_update();
         return g_failures ? 1 : 0;

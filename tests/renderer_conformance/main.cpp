@@ -684,9 +684,14 @@ bool check_folding_margin(const QString& backend, qreal dpr)
 
 } // namespace
 
+int run_source_preview_scene_graph(int argc, char** argv);
+
 int main(int argc, char* argv[])
 {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    if (argc == 3 && QByteArray(argv[1]) == "--source-preview") {
+        return run_source_preview_scene_graph(argc, argv);
+    }
     if (argc != 3) {
         std::fprintf(stderr, "usage: renderer_conformance <software|rhi> <device-pixel-ratio>\n");
         return 2;

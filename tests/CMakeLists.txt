@@ -135,6 +135,11 @@ scintillaquick_register_validation_test(
     scintillaquick_edit_boundary_test
     "")
 
+add_test(NAME scintillaquick_bookmark_revision_test
+    COMMAND scintillaquick_edit_boundary_test --bookmark-revisions)
+scintillaquick_set_test_environment(scintillaquick_bookmark_revision_test
+    scintillaquick_edit_boundary_test "")
+
 # --- Dispatch table unit tests -------------------------------------------
 #
 # Pure-function tests against the scene-graph update dispatch table at
@@ -230,11 +235,24 @@ scintillaquick_register_validation_test(
 
 # Compare scene-graph output with Scintilla's drawing contract, independently
 # of the human-reviewed visual baselines. Native Windows also exercises RHI.
+find_package(Qt6GuiPrivate CONFIG REQUIRED)
 scintillaquick_add_private_quick_test_target(
     scintillaquick_renderer_conformance_test
     renderer_conformance/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/platform
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/render)
+target_sources(scintillaquick_renderer_conformance_test PRIVATE renderer_conformance/source_preview.cpp)
+target_include_directories(scintillaquick_renderer_conformance_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/core)
+target_link_libraries(scintillaquick_renderer_conformance_test PRIVATE Qt6::GuiPrivate)
+
+foreach(backend IN ITEMS software rhi)
+    set(test_name scintillaquick_preview_${backend}_test)
+    add_test(NAME ${test_name}
+        COMMAND scintillaquick_renderer_conformance_test --source-preview ${backend})
+    set_tests_properties(${test_name} PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
+    scintillaquick_set_test_environment(${test_name}
+        scintillaquick_renderer_conformance_test ";QT_FONT_DPI=96;QT_SCALE_FACTOR=1")
+endforeach()
 
 set(scintillaquick_conformance_backends software)
 if(WIN32)

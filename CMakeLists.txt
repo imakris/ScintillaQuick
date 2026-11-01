@@ -104,6 +104,14 @@ endif()
 
 set(scintillaquick_sources
     include/scintillaquick/scintillaquick_item.h
+    include/scintillaquick/scintillaquick_occurrences.h
+    src/public/scintillaquick_occurrences.cpp
+    src/public/scintillaquick_find_range_p.h
+    src/public/scintillaquick_find_range_p.cpp
+    include/scintillaquick/scintillaquick_source_preview.h
+    src/public/scintillaquick_source_preview.cpp
+    src/render/scintillaquick_source_preview_raster_p.h
+    src/render/scintillaquick_source_preview_raster.cpp
     src/core/scintillaquick_core.cpp
     src/core/scintillaquick_dispatch_table.h
     src/core/scintillaquick_core.h

@@ -3037,7 +3037,7 @@ void ScintillaQuick_item::capture_ime_deletion(Scintilla::Position position, Sci
 }
 
 void ScintillaQuick_item::record_actual_text_mutation(
-    Scintilla::Position position, std::string_view text, bool insertion)
+    Scintilla::Position position, std::string_view text, bool insertion, bool lines_changed)
 {
     // Called from ScintillaQuick_core::NotifyModified() for an observed
     // InsertText/DeleteText, before any public notification filtering.
@@ -3051,6 +3051,9 @@ void ScintillaQuick_item::record_actual_text_mutation(
         }
     }
     ++m_mutation_generation;
+    if (lines_changed) {
+        ++m_native_line_revision;
+    }
     m_last_find_start = -1;
     m_last_find_end   = -1;
     m_last_find_text.clear();
@@ -3061,6 +3064,37 @@ void ScintillaQuick_item::record_actual_text_mutation(
         // event()); flush immediately rather than losing the signal.
         flush_property_changes();
     }
+}
+
+ScintillaQuick_item::Marker_line_scan ScintillaQuick_item::scan_exclusive_marker_lines(
+    int marker_number, int first_line, int last_line, int max_lines, int max_results) const
+{
+    Marker_line_scan result;
+    if (!m_core || !m_core->pdoc || marker_number < 0 || marker_number > 31 ||
+        first_line < 0 || max_lines <= 0 || max_results <= 0)
+    {
+        return result;
+    }
+    const auto count = m_core->pdoc->LinesTotal();
+    if (first_line >= count || last_line < 0) {
+        return result;
+    }
+    const int direction = first_line <= last_line ? 1 : -1;
+    const auto end = std::min<Scintilla::Line>(last_line, count - 1);
+    auto line = Scintilla::Line(first_line);
+    const auto in_range = [&] { return direction > 0 ? line <= end : line >= end; };
+    for (int inspected = 0; in_range() && inspected < std::min(max_lines, 4096) &&
+         result.lines.size() < std::min(max_results, 4096); ++inspected, line += direction)
+    {
+        ++result.scanned_lines;
+        if (m_core->pdoc->MarkerNumberFromLine(line, 0) == marker_number) {
+            result.lines.append(int(line));
+        }
+    }
+    if (in_range()) {
+        result.next_line = int(line);
+    }
+    return result;
 }
 
 void ScintillaQuick_item::begin_property_batch() const

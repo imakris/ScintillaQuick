@@ -6,6 +6,7 @@
 #define SCINTILLAQUICK_ENABLE_TEST_ACCESS
 
 #include <scintillaquick/scintillaquick_item.h>
+#include <scintillaquick/scintillaquick_source_preview.h>
 #include "scintillaquick_core.h"
 #include "render_frame.h"
 #include <QTimerEvent>
@@ -18,6 +19,16 @@ namespace Scintilla::Internal
 class ScintillaQuick_validation_access
 {
 public:
+    static quint64 preview_image_serial(const ScintillaQuick_source_preview& item)
+    {
+        return item.published_image_serial_for_test();
+    }
+
+    static void request_preview_line(ScintillaQuick_source_preview& item, qreal y)
+    {
+        item.request_line(y);
+    }
+
     static void run_idle(ScintillaQuick_item& item) { item.m_core->onIdle(); }
 
     static void complete_drag(ScintillaQuick_item& item, Qt::DropAction action, bool outside)

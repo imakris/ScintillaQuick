@@ -903,6 +903,13 @@ void ScintillaQuick_core::NotifyParent(NotificationData scn)
 
 void ScintillaQuick_core::NotifyModified(Document* document, DocModification mh, void* user_data)
 {
+    // Fold-level notifications also carry ChangeMarker, but do not modify the
+    // explicit marker set. Keep its revision independent of lexer fold repair.
+    if (m_owner && FlagSet(mh.modificationType, ModificationFlags::ChangeMarker) &&
+        !FlagSet(mh.modificationType, ModificationFlags::ChangeFold))
+    {
+        ++m_owner->m_native_marker_revision;
+    }
     // Invalidate before an accepted mutation can reach another watcher's
     // callback. Count only actual positive-length text changes below the
     // public notification mask, without emitting Qt signals mid-edit.
@@ -923,7 +930,8 @@ void ScintillaQuick_core::NotifyModified(Document* document, DocModification mh,
             const std::string_view text = insertion
                 ? std::string_view(mh.text, (size_t)mh.length)
                 : std::string_view();
-            m_owner->record_actual_text_mutation(mh.position, text, insertion);
+            const bool lines_changed = mh.linesAdded != 0 || (!insertion && document->Length() == 0);
+            m_owner->record_actual_text_mutation(mh.position, text, insertion, lines_changed);
         }
     }
     Editor::NotifyModified(document, mh, user_data);
