@@ -12,15 +12,19 @@
 
 #include <memory>
 
+class QWheelEvent;
+
 /** A bounded, asynchronously rasterized source overview of an existing editor.
  * Native document access stays on the editor thread. Scroll and bookmark
- * overlays do not invalidate the source image. Lines in the public API are
- * one-based logical lines; the host retains its display-line scrollbar.
+ * overlays do not invalidate the source image. Compact presentation keeps the
+ * navigation and overlays without capturing text. Public lines are one-based
+ * logical lines.
  */
 class SCINTILLAQUICK_EXPORT ScintillaQuick_source_preview : public QQuickItem
 {
     Q_OBJECT
     Q_PROPERTY(ScintillaQuick_item* editor READ editor WRITE set_editor NOTIFY editor_changed)
+    Q_PROPERTY(bool detailed_view READ detailed_view WRITE set_detailed_view NOTIFY detailed_view_changed)
     Q_PROPERTY(QVariantMap bookmark_projection
                READ bookmark_projection WRITE set_bookmark_projection NOTIFY bookmark_projection_changed)
     Q_PROPERTY(QColor bookmark_color
@@ -38,6 +42,8 @@ public:
 
     ScintillaQuick_item* editor() const;
     void set_editor(ScintillaQuick_item* editor);
+    bool detailed_view() const;
+    void set_detailed_view(bool detailed);
     // Atomic presentation snapshot: lines/valid, a guarded native source, and
     // that same source's binding/line/marker revision strings.
     QVariantMap bookmark_projection() const;
@@ -58,6 +64,7 @@ public:
 
 signals:
     void editor_changed();
+    void detailed_view_changed();
     void bookmark_projection_changed();
     void bookmark_color_changed();
     void viewport_color_changed();
@@ -70,6 +77,7 @@ protected:
     void itemChange(ItemChange change, const ItemChangeData& data) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
     QSGNode* updatePaintNode(QSGNode* old_node, UpdatePaintNodeData* data) override;
 
 private:

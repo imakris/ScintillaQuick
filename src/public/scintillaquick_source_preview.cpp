@@ -19,6 +19,7 @@
 #include <QSGTexture>
 #include <QThread>
 #include <QTimer>
+#include <QWheelEvent>
 
 #include <algorithm>
 #include <cmath>
@@ -30,8 +31,10 @@ namespace preview = ScintillaQuick_preview;
 
 namespace {
 
-constexpr qreal k_bookmark_lane = 4;
-constexpr qreal k_min_viewport_height = 3;
+constexpr qreal k_bookmark_lane        = 4;
+constexpr qreal k_detailed_width       = 96;
+constexpr qreal k_compact_width        = 16;
+constexpr qreal k_min_viewport_height  = 3;
 constexpr qreal k_viewport_fade_height = 12;
 constexpr qint64 k_capture_slice_ns = 1000000;
 constexpr int k_max_image_width = 1024;
@@ -119,7 +122,8 @@ class Tick_strip : public QSGNode
 public:
     ~Tick_strip() override { delete m_image; }
 
-    void update(QQuickWindow* window, const QBitArray& rows, const QColor& color, const QRectF& rect)
+    void update(QQuickWindow* window, const QBitArray& rows, const QColor& color, const QRectF& rect,
+        QSGTexture::Filtering filtering = QSGTexture::Nearest)
     {
         if (rows != m_rows || color != m_color) {
             m_rows = rows;
@@ -149,7 +153,7 @@ public:
                 }
                 if (!m_image) {
                     m_image = window->createImageNode();
-                    m_image->setFiltering(QSGTexture::Nearest);
+                    m_image->setFiltering(filtering);
                     m_image->setTexture(texture.get());
                     m_image->setRect(rect);
                     // An attached software scene inspects a child immediately.
@@ -163,6 +167,7 @@ public:
             }
         }
         if (m_image) {
+            m_image->setFiltering(filtering);
             m_image->setRect(rect);
         }
     }
@@ -188,6 +193,8 @@ public:
     {
         appendChildNode(m_background = new QSGSimpleRectNode);
         appendChildNode(m_viewport = new QSGSimpleRectNode);
+        appendChildNode(m_viewport_top = new Tick_strip);
+        appendChildNode(m_viewport_bottom = new Tick_strip);
         appendChildNode(m_bookmarks = new Tick_strip);
         appendChildNode(m_occurrences = new Tick_strip);
     }
@@ -196,6 +203,8 @@ public:
 
     QSGSimpleRectNode* m_background = nullptr;
     QSGSimpleRectNode* m_viewport = nullptr;
+    Tick_strip* m_viewport_top = nullptr;
+    Tick_strip* m_viewport_bottom = nullptr;
     Tick_strip* m_bookmarks = nullptr;
     Tick_strip* m_occurrences = nullptr;
     QSGImageNode* m_image = nullptr;
@@ -404,6 +413,7 @@ public:
 
     ScintillaQuick_source_preview* m_owner;
     QPointer<ScintillaQuick_item> m_editor;
+    bool m_detailed_view = true;
     QVector<QMetaObject::Connection> m_editor_connections;
     QTimer m_timer;
     QTimer m_bookmark_timer;
@@ -471,7 +481,7 @@ ScintillaQuick_source_preview::ScintillaQuick_source_preview(QQuickItem* parent)
     setFlag(ItemHasContents);
     setClip(true);
     setAcceptedMouseButtons(Qt::LeftButton);
-    setImplicitWidth(96);
+    setImplicitWidth(k_detailed_width);
     connect(&m_state->m_timer, &QTimer::timeout, this, &ScintillaQuick_source_preview::capture_next_chunk);
     connect(this, &QQuickItem::visibleChanged, this, &ScintillaQuick_source_preview::visibility_changed);
     connect(this, &QQuickItem::windowChanged, this, &ScintillaQuick_source_preview::visibility_changed);
@@ -486,7 +496,9 @@ ScintillaQuick_source_preview::ScintillaQuick_source_preview(QQuickItem* parent)
                 QMetaObject::invokeMethod(state.m_worker,
                     [worker = state.m_worker] { worker->clear(); }, Qt::QueuedConnection);
                 state.m_worker_has_storage = false;
-                if (state.active() && !state.m_timer.isActive() && !state.published_image_is_current()) {
+                if (state.m_detailed_view && state.active() &&
+                    !state.m_timer.isActive() && !state.published_image_is_current())
+                {
                     state.m_timer.start(0);
                 }
                 return;
@@ -544,6 +556,7 @@ ScintillaQuick_source_preview::~ScintillaQuick_source_preview()
 }
 
 ScintillaQuick_item* ScintillaQuick_source_preview::editor() const { return m_state->m_editor; }
+bool ScintillaQuick_source_preview::detailed_view() const { return m_state->m_detailed_view; }
 QVariantMap ScintillaQuick_source_preview::bookmark_projection() const { return m_state->m_bookmark_projection; }
 QColor ScintillaQuick_source_preview::bookmark_color() const { return m_state->m_bookmark_color; }
 QColor ScintillaQuick_source_preview::viewport_color() const { return m_state->m_viewport_color; }
@@ -600,6 +613,22 @@ void ScintillaQuick_source_preview::set_editor(ScintillaQuick_item* editor)
     hidden_previews().remove(reinterpret_cast<quintptr>(this));
     invalidate_source();
     emit editor_changed();
+}
+
+void ScintillaQuick_source_preview::set_detailed_view(bool detailed)
+{
+    auto& state = *m_state;
+    if (state.m_detailed_view == detailed) {
+        return;
+    }
+    state.m_detailed_view = detailed;
+    cancel_capture();
+    state.m_published.reset();
+    state.m_unpublished_projection = {};
+    hidden_previews().remove(reinterpret_cast<quintptr>(this));
+    setImplicitWidth(detailed ? k_detailed_width : k_compact_width);
+    invalidate_source();
+    emit detailed_view_changed();
 }
 
 void ScintillaQuick_source_preview::set_bookmark_projection(const QVariantMap& projection)
@@ -772,7 +801,9 @@ void ScintillaQuick_source_preview::invalidate_source()
     }
     // Compatible geometry keeps completed and in-progress annotations intact
     // during ordinary same-line typing; only the source image is debounced.
-    state.m_timer.start(20);
+    if (state.m_detailed_view) {
+        state.m_timer.start(20);
+    }
     update_viewport();
     update();
 }
@@ -780,7 +811,7 @@ void ScintillaQuick_source_preview::invalidate_source()
 void ScintillaQuick_source_preview::capture_next_chunk()
 {
     auto& state = *m_state;
-    if (!state.active() || state.m_chunk_pending) {
+    if (!state.m_detailed_view || !state.active() || state.m_chunk_pending) {
         return;
     }
     QElapsedTimer slice;
@@ -938,6 +969,29 @@ void ScintillaQuick_source_preview::mouseMoveEvent(QMouseEvent* event)
     event->accept();
 }
 
+void ScintillaQuick_source_preview::wheelEvent(QWheelEvent* event)
+{
+    auto* editor = m_state->m_editor.data();
+    if (!editor) {
+        QQuickItem::wheelEvent(event);
+        return;
+    }
+    QWheelEvent forwarded(
+        editor->mapFromItem(this, event->position()),
+        event->globalPosition(),
+        event->pixelDelta(),
+        event->angleDelta(),
+        event->buttons(),
+        event->modifiers(),
+        event->phase(),
+        event->inverted(),
+        event->source(),
+        event->pointingDevice());
+    forwarded.setTimestamp(event->timestamp());
+    QCoreApplication::sendEvent(editor, &forwarded);
+    event->setAccepted(forwarded.isAccepted());
+}
+
 QSGNode* ScintillaQuick_source_preview::updatePaintNode(QSGNode* old_node, UpdatePaintNodeData*)
 {
     auto& state = *m_state;
@@ -992,11 +1046,30 @@ QSGNode* ScintillaQuick_source_preview::updatePaintNode(QSGNode* old_node, Updat
         (k_viewport_fade_height - natural_height) / (k_viewport_fade_height - k_min_viewport_height),
         qreal(0), qreal(1));
     QColor viewport_color = state.m_viewport_color;
-    viewport_color.setAlphaF(viewport_color.alphaF() * (0.16 + 0.84 * opacity_boost));
+    const qreal base_opacity = state.m_detailed_view ? 0.16 : 0.45;
+    viewport_color.setAlphaF(viewport_color.alphaF() * (base_opacity + (1 - base_opacity) * opacity_boost));
     const bool current = state.overlay_source_is_current();
-    node->m_viewport->setRect(current
-        ? QRectF(0, viewport_top, width(), viewport_height) : QRectF());
+    const QRectF viewport_rect = current
+        ? QRectF(0, viewport_top, width(), viewport_height) : QRectF();
+    // Two texels give a one-device-pixel transition at each logical edge.
+    // Keep their positions fractional; only the frame and marker rails snap.
+    const qreal edge_span = std::min(viewport_rect.height(), 2.0 / window()->effectiveDevicePixelRatio());
+    const qreal half_edge = edge_span / 2;
+    node->m_viewport->setRect(QRectF(viewport_rect.x(), viewport_rect.y() + half_edge,
+        viewport_rect.width(), std::max(qreal(0), viewport_rect.height() - edge_span)));
     node->m_viewport->setColor(viewport_color);
+    QBitArray top_rows(current ? 2 : 0);
+    QBitArray bottom_rows(current ? 2 : 0);
+    if (current) {
+        top_rows.setBit(1);
+        bottom_rows.setBit(0);
+    }
+    node->m_viewport_top->update(window(), top_rows, viewport_color,
+        QRectF(viewport_rect.x(), viewport_rect.top() - half_edge, viewport_rect.width(), edge_span),
+        QSGTexture::Linear);
+    node->m_viewport_bottom->update(window(), bottom_rows, viewport_color,
+        QRectF(viewport_rect.x(), viewport_rect.bottom() - half_edge, viewport_rect.width(), edge_span),
+        QSGTexture::Linear);
     const bool geometry_changed = node->m_geometry_size != size();
     node->m_geometry_size = size();
     const bool bookmarks_current = current && state.bookmark_projection_is_current();

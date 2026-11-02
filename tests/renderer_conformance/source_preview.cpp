@@ -14,6 +14,7 @@
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QThread>
+#include <QWheelEvent>
 #include <rhi/qrhi.h>
 
 #include <cstdio>
@@ -381,7 +382,78 @@ int run_source_preview_scene_graph(int argc, char** argv)
         std::fprintf(stderr, "FAIL source preview: foreign/expired authority was accepted\n");
         return 1;
     }
-    std::printf("PASS source preview ticks+clear (%s, API %d); native API to offscreen readback %lld ms; no input/GPU timing claim\n",
+
+    if (!preview.detailed_view() || preview.implicitWidth() != k_width) {
+        std::fprintf(stderr, "FAIL source preview: detailed presentation was not the default\n");
+        return 1;
+    }
+    view.setSize(QSizeF(180, 80));
+    occurrences = QByteArray(250, '\0');
+    occurrences[125] = 1;
+    preview.set_occurrence_rows(occurrences);
+    preview.set_bookmark_projection(bookmark_projection(editor, {91}));
+    for (int mode = 0; mode < 4; ++mode) {
+        const bool detailed = mode % 2 != 0;
+        preview.set_detailed_view(detailed);
+        preview.setWidth(preview.implicitWidth());
+        const int rail_width = detailed ? k_width : 16;
+        const QImage mode_frame = wait_for_frame(scene, [&](const QImage& image) {
+            return near_color(image, 1, 57, qRgb(0, 0, 255)) &&
+                near_color(image, rail_width - 2, 80, qRgb(0, 255, 0)) &&
+                (Access::preview_image_serial(preview) != 0) == detailed;
+        });
+        bool glyphs = false;
+        for (int y = 0; y < mode_frame.height(); ++y) {
+            for (int x = 4; x < rail_width - 4; ++x) {
+                glyphs |= mode_frame.pixel(x, y) != qRgb(32, 33, 36);
+            }
+        }
+        requested_line = 0;
+        Access::request_preview_line(preview, k_height / 2);
+        if (mode_frame.isNull() || preview.width() != rail_width ||
+            glyphs != detailed || requested_line != 126)
+        {
+            std::fprintf(stderr, "FAIL source preview: mode switch lost text policy, markers or navigation\n");
+            return 1;
+        }
+        view.scrollVertical(20);
+        const int before_wheel = view.vertical_scroll_value();
+        QWheelEvent wheel(QPointF(8, 80), QPointF(8, 80), QPoint(), QPoint(0, -120),
+            Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(&preview, &wheel);
+        if (!wheel.isAccepted() || view.vertical_scroll_value() <= before_wheel) {
+            std::fprintf(stderr, "FAIL source preview: wheel did not scroll the editor in either mode\n");
+            return 1;
+        }
+    }
+
+    // A one-line scroll moves the handle by 0.2 logical pixels. Three
+    // distinct intermediate coverages distinguish smooth edges from a
+    // hard edge that remains fixed and then jumps a whole device pixel.
+    view.setHeight(640);
+    editor.setProperty("text", QString(799, QLatin1Char('\n')));
+    preview.set_bookmark_projection({});
+    preview.set_occurrence_rows({});
+    preview.set_viewport_color(Qt::white);
+    for (int mode = 0; mode < 2; ++mode) {
+        preview.set_detailed_view(mode != 0);
+        preview.setWidth(preview.implicitWidth());
+        int previous_coverage = 255;
+        for (int first = 42; first < 45; ++first) {
+            view.scrollVertical(first);
+            QCoreApplication::processEvents();
+            const QImage frame = scene.frame();
+            const int coverage = frame.isNull() ? 0 : qRed(frame.pixel(8, 8));
+            const int solid = frame.isNull() ? 0 : qRed(frame.pixel(8, 12));
+            if (coverage <= 34 || coverage >= solid - 2 || coverage >= previous_coverage - 3) {
+                std::fprintf(stderr, "FAIL source preview: fractional handle edge coverage did not progress (%d, %d)\n",
+                    first, coverage);
+                return 1;
+            }
+            previous_coverage = coverage;
+        }
+    }
+    std::printf("PASS source preview ticks+clear+modes+wheel+smooth-edge (%s, API %d); native API to offscreen readback %lld ms; no input/GPU timing claim\n",
         backend.constData(), int(scene.window().rendererInterface()->graphicsApi()), (long long)api_to_readback_ms);
     return 0;
 }
