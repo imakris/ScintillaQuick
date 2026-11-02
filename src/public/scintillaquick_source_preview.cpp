@@ -1042,12 +1042,11 @@ QSGNode* ScintillaQuick_source_preview::updatePaintNode(QSGNode* old_node, Updat
     const qreal viewport_height = std::min(height(), std::max(k_min_viewport_height, natural_height));
     const qreal viewport_top = std::clamp(
         top - (viewport_height - natural_height) / 2, qreal(0), height() - viewport_height);
-    const qreal opacity_boost = std::clamp(
-        (k_viewport_fade_height - natural_height) / (k_viewport_fade_height - k_min_viewport_height),
-        qreal(0), qreal(1));
+    const qreal viewport_opacity = 0.4 + 0.3 * std::log2(
+        k_viewport_fade_height /
+        std::clamp(natural_height, k_min_viewport_height, k_viewport_fade_height));
     QColor viewport_color = state.m_viewport_color;
-    const qreal base_opacity = state.m_detailed_view ? 0.16 : 0.45;
-    viewport_color.setAlphaF(viewport_color.alphaF() * (base_opacity + (1 - base_opacity) * opacity_boost));
+    viewport_color.setAlphaF(viewport_color.alphaF() * viewport_opacity);
     const bool current = state.overlay_source_is_current();
     const QRectF viewport_rect = current
         ? QRectF(0, viewport_top, width(), viewport_height) : QRectF();
