@@ -31,6 +31,8 @@ namespace preview = ScintillaQuick_preview;
 namespace {
 
 constexpr qreal k_bookmark_lane = 4;
+constexpr qreal k_min_viewport_height = 3;
+constexpr qreal k_viewport_fade_height = 12;
 constexpr qint64 k_capture_slice_ns = 1000000;
 constexpr int k_max_image_width = 1024;
 constexpr int k_max_image_height = 8192;
@@ -982,11 +984,18 @@ QSGNode* ScintillaQuick_source_preview::updatePaintNode(QSGNode* old_node, Updat
     const qreal advance = projection.line_advance * logical_pixel;
     const qreal top = std::clamp(state.m_first_visible_line * advance, qreal(0), height());
     const qreal bottom = std::clamp(state.m_last_visible_line * advance, top, height());
+    const qreal natural_height = std::max(logical_pixel, bottom - top);
+    const qreal viewport_height = std::min(height(), std::max(k_min_viewport_height, natural_height));
+    const qreal viewport_top = std::clamp(
+        top - (viewport_height - natural_height) / 2, qreal(0), height() - viewport_height);
+    const qreal opacity_boost = std::clamp(
+        (k_viewport_fade_height - natural_height) / (k_viewport_fade_height - k_min_viewport_height),
+        qreal(0), qreal(1));
     QColor viewport_color = state.m_viewport_color;
-    viewport_color.setAlphaF(viewport_color.alphaF() * 0.16);
+    viewport_color.setAlphaF(viewport_color.alphaF() * (0.16 + 0.84 * opacity_boost));
     const bool current = state.overlay_source_is_current();
     node->m_viewport->setRect(current
-        ? QRectF(0, top, width(), std::max(logical_pixel, bottom - top)) : QRectF());
+        ? QRectF(0, viewport_top, width(), viewport_height) : QRectF());
     node->m_viewport->setColor(viewport_color);
     const bool geometry_changed = node->m_geometry_size != size();
     node->m_geometry_size = size();
