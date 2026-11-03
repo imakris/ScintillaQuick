@@ -152,6 +152,18 @@ void check_raster_contract()
     require(fresh(config, {styled_line("text\r\n", 0)}) == fresh(config, {styled_line("text", 0)}),
         "line endings changed visible glyph coverage");
 
+    const std::pair<const char*, const char*> decoding_cases[] = {
+        {"80", "efbfbd"},                 // Isolated continuation byte.
+        {"e228a1", "efbfbd28efbfbd"},     // Invalid continuation around '('.
+        {"c0af", "efbfbdefbfbd"},         // Overlong encoding, one replacement per byte.
+        {"efbbbf", ""}                    // The existing fragment decoder skips a BOM.
+    };
+    for (const auto& [bytes, expected] : decoding_cases) {
+        require(fresh(config, {styled_line(QByteArray("A") + QByteArray::fromHex(bytes) + "B", 0)}) ==
+            fresh(config, {styled_line(QByteArray("A") + QByteArray::fromHex(expected) + "B", 0)}),
+            "malformed UTF-8 or embedded BOM changed decoding");
+    }
+
     for (int change = 0; change < 5; ++change) {
         if (change == 0) { config.styles[1].foreground = Qt::blue; }
         if (change == 1) {

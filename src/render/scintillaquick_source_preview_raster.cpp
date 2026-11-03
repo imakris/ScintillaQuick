@@ -5,6 +5,7 @@
 
 #include <Scintilla.h>
 
+#include <QCache>
 #include <QFontMetricsF>
 #include <QPainter>
 #include <QTextCharFormat>
@@ -19,6 +20,8 @@ namespace ScintillaQuick_preview {
 namespace {
 
 constexpr int k_supersampling = 4;
+constexpr int k_row_cache_bytes = 256 * 1024;
+constexpr int k_row_cache_minimum_cost = 512;
 struct Styled_text
 {
     QString text;
@@ -121,6 +124,13 @@ public:
 
     void raster_line(const Line& source, QTextLayout& layout, Style_formats& formats)
     {
+        const bool dense = m_configuration.line_advance < 1;
+        if (dense) {
+            if (const auto* row = m_rows.object(source.styled_bytes)) {
+                composite_row(*row, source.number);
+                return;
+            }
+        }
         const Styled_text decoded = decode_line(source.styled_bytes, m_configuration, formats);
         if (decoded.text.isEmpty()) {
             return;
@@ -142,16 +152,20 @@ public:
         }
 
         const qreal y = source.number * m_configuration.line_advance;
-        if (m_configuration.line_advance < 1) {
+        if (dense) {
             // Every line contributes actual glyph coverage to its physical
             // row. Source-over accumulation retains tiny isolated blocks among
             // blank lines instead of sampling one line from the bucket.
             const QImage row = m_strip.scaled(
                 m_configuration.pixels.width(), 1, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-            auto* destination = reinterpret_cast<QRgb*>(m_image.scanLine((int)y));
-            const auto* pixels = reinterpret_cast<const QRgb*>(row.constScanLine(0));
-            for (int x = 0; x < row.width(); ++x) {
-                destination[x] = source_over(pixels[x], destination[x]);
+            composite_row(row, source.number);
+            // Exact styled bytes and this generation's immutable configuration
+            // determine the transparent row. Charge both pixels and retained
+            // input, with a minimum cost bounding the number of small entries.
+            if (!row.isNull()) {
+                const int cost = (int)std::max<qsizetype>(k_row_cache_minimum_cost,
+                    row.sizeInBytes() + source.styled_bytes.capacity() + sizeof(QImage) + 128);
+                m_rows.insert(source.styled_bytes, new QImage(row), cost);
             }
         }
         else {
@@ -162,10 +176,21 @@ public:
         }
     }
 
+    void composite_row(const QImage& row, int line_number)
+    {
+        const int y = (int)(line_number * m_configuration.line_advance);
+        auto* destination = reinterpret_cast<QRgb*>(m_image.scanLine(y));
+        const auto* pixels = reinterpret_cast<const QRgb*>(row.constScanLine(0));
+        for (int x = 0; x < row.width(); ++x) {
+            destination[x] = source_over(pixels[x], destination[x]);
+        }
+    }
+
     std::shared_ptr<std::atomic<quint64>> m_generation;
     Configuration m_configuration;
     QImage m_image;
     QImage m_strip;
+    QCache<QByteArray, QImage> m_rows{k_row_cache_bytes};
     quint64 m_serial = 0;
     qreal m_scale_x = 1;
     qreal m_scale_y = 1;
@@ -183,6 +208,7 @@ Raster_worker::~Raster_worker() = default;
 void Raster_worker::begin(Configuration configuration, quint64 serial)
 {
     auto& state = *m_state;
+    state.m_rows.clear();
     state.m_configuration = std::move(configuration);
     state.m_serial = serial;
     state.m_image = QImage(state.m_configuration.pixels, QImage::Format_ARGB32_Premultiplied);
@@ -206,7 +232,7 @@ void Raster_worker::consume(Chunk chunk)
         // Keep format/font setup and shaping storage for this bounded chunk.
         // setText replaces each line's layout; caching retains that layout
         // through draw instead of discarding it at endLayout and shaping again.
-        // All additional storage is released before acknowledging the chunk.
+        // Layout and format storage is released before acknowledging the chunk.
         QTextLayout layout(QString(), state.m_configuration.styles[STYLE_DEFAULT].font, &state.m_strip);
         layout.setCacheEnabled(true);
         QTextOption options;
@@ -232,6 +258,7 @@ void Raster_worker::consume(Chunk chunk)
 
 void Raster_worker::clear()
 {
+    m_state->m_rows.clear();
     m_state->m_image = {};
     m_state->m_strip = {};
 }
