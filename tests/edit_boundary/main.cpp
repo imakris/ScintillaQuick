@@ -2323,6 +2323,45 @@ void test_horizontal_scroll_survives_edit_and_margin_update()
     SQ_EXPECT(editor.send(SCI_GETXOFFSET) == offset);
 }
 
+void test_horizontal_scroll_range_tracks_viewport()
+{
+    Event_editor editor;
+    editor.setSize(QSizeF(1200, 240));
+    editor.setProperty("text", QStringLiteral("A short line with room to spare."));
+    editor.capture();
+    SQ_EXPECT(editor.horizontal_scroll_max() == 0);
+    const int original_page = editor.horizontal_scroll_page();
+    editor.setWidth(editor.width() - 96);
+    editor.capture();
+    SQ_EXPECT(editor.horizontal_scroll_page() == original_page - 96);
+    SQ_EXPECT(editor.horizontal_scroll_max() == 0);
+    SQ_EXPECT(editor.send(SCI_GETXOFFSET) == 0);
+
+    editor.setWidth(320);
+    editor.setProperty("text", QString(400, QLatin1Char('x')) +
+        QStringLiteral("\nshort").repeated(100));
+    editor.capture();
+    const int long_width = editor.send(SCI_GETSCROLLWIDTH);
+    SQ_EXPECT(editor.horizontal_scroll_max() > 0);
+    editor.scrollHorizontal(editor.horizontal_scroll_max() / 2);
+    editor.capture();
+    SQ_EXPECT(editor.send(SCI_GETXOFFSET) > 0);
+    editor.scrollVertical(50);
+    editor.capture();
+    editor.setWidth(416);
+    editor.capture();
+    SQ_EXPECT(editor.send(SCI_GETSCROLLWIDTH) == long_width);
+    SQ_EXPECT(editor.horizontal_scroll_max() > 0);
+    editor.setHeight(320);
+    editor.capture();
+    SQ_EXPECT(editor.send(SCI_GETSCROLLWIDTH) == long_width);
+
+    editor.setWidth(long_width + 200);
+    editor.capture();
+    SQ_EXPECT(editor.horizontal_scroll_max() == 0);
+    SQ_EXPECT(editor.send(SCI_GETXOFFSET) == 0);
+}
+
 void test_ui_and_capture_notifications()
 {
     Event_editor editor;
@@ -2591,6 +2630,7 @@ int main(int argc, char** argv)
     }
     if (app.arguments().contains(QStringLiteral("--horizontal-scroll-contract"))) {
         test_horizontal_scroll_survives_edit_and_margin_update();
+        test_horizontal_scroll_range_tracks_viewport();
         return g_failures ? 1 : 0;
     }
     if (app.arguments().contains(QStringLiteral("--clipboard-contracts"))) {
@@ -2653,6 +2693,7 @@ int main(int argc, char** argv)
     test_input_method_offsets_use_utf16_units();
     test_ui_and_capture_notifications();
     test_horizontal_scroll_survives_edit_and_margin_update();
+    test_horizontal_scroll_range_tracks_viewport();
     test_input_method_geometry_after_composition();
     test_hidden_property_sync_and_observer_edits();
     test_current_selection_preserves_embedded_nul();

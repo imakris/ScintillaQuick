@@ -107,6 +107,32 @@ QColor native_color(sptr_t value)
     return QColor(value & 255, (value >> 8) & 255, (value >> 16) & 255);
 }
 
+preview::Style capture_style(ScintillaQuick_item& editor, const QFont& base_font, int zoom, int index)
+{
+    preview::Style style;
+    style.font = base_font;
+    const int family_length = editor.send(SCI_STYLEGETFONT, index);
+    if (family_length > 0 && family_length <= 1024) {
+        QByteArray family(family_length + 1, '\0');
+        editor.send(SCI_STYLEGETFONT, index, reinterpret_cast<sptr_t>(family.data()));
+        style.font.setFamily(QString::fromUtf8(family.constData(), family_length));
+    }
+    const int hundredths = editor.send(SCI_STYLEGETSIZEFRACTIONAL, index);
+    style.font.setPointSizeF(std::max<qreal>(1, hundredths / 100.0 + zoom));
+    style.font.setBold(editor.send(SCI_STYLEGETBOLD, index) != 0);
+    style.font.setItalic(editor.send(SCI_STYLEGETITALIC, index) != 0);
+    style.foreground = native_color(editor.send(SCI_STYLEGETFORE, index));
+    return style;
+}
+
+qreal detailed_line_advance(const QFont& font, const QSize& pixels, int columns, int line_count)
+{
+    const QFontMetricsF metrics(font);
+    const qreal column_width = std::max<qreal>(1, metrics.horizontalAdvance(QLatin1Char('M')));
+    const qreal natural_advance = metrics.height() * pixels.width() / (column_width * columns);
+    return std::min(natural_advance, (qreal)pixels.height() / line_count);
+}
+
 QSize image_size(qreal width, qreal height, qreal dpr)
 {
     qreal pixel_width = std::clamp(width * dpr, qreal(1), qreal(k_max_image_width));
@@ -246,7 +272,7 @@ public:
 
     const Projection& projection() const
     {
-        return m_published ? m_published->projection : m_unpublished_projection;
+        return published_mapping_is_current() ? m_published->projection : m_unpublished_projection;
     }
 
     bool published_source_is_current() const
@@ -283,8 +309,8 @@ public:
 
     bool overlay_source_is_current() const
     {
-        if (m_published) {
-            return published_mapping_is_current();
+        if (published_mapping_is_current()) {
+            return true;
         }
         return m_editor && !m_unpublished_projection.pixels.isEmpty() &&
             m_unpublished_binding == m_editor->native_binding_revision() &&
@@ -776,18 +802,25 @@ void ScintillaQuick_source_preview::invalidate_source()
     }
     cancel_capture();
     const bool navigation_current = state.overlay_source_is_current();
-    if (state.m_published && !state.published_mapping_is_current()) {
-        // An image with different logical rows must not masquerade as the
-        // current click/annotation map. Same-line stale images remain useful.
+    if (state.m_published && state.m_published->binding != state.m_editor->native_binding_revision()) {
         state.m_published.reset();
     }
-    if (!state.m_published) {
+    // Keep this document's last completed raster while its replacement is
+    // captured. Only a current projection owns navigation and annotations.
+    if (!state.published_mapping_is_current()) {
         const int count = std::max(1, (int)state.m_editor->send(SCI_GETLINECOUNT));
         const qreal dpr = window()->effectiveDevicePixelRatio();
         const QSize pixels = image_size(width() - k_bookmark_lane, height(), dpr);
+        qreal advance = (qreal)pixels.height() / count;
+        if (state.m_detailed_view) {
+            const auto style = capture_style(*state.m_editor,
+                state.m_editor->property("font").value<QFont>(),
+                state.m_editor->send(SCI_GETZOOM), STYLE_DEFAULT);
+            advance = detailed_line_advance(style.font, pixels, preview::k_columns, count);
+        }
         state.m_unpublished_projection = {
             pixels, native_color(state.m_editor->send(SCI_STYLEGETBACK, STYLE_DEFAULT)),
-            count, (qreal)pixels.height() / count
+            count, advance
         };
         state.m_unpublished_binding = state.m_editor->native_binding_revision();
         state.m_unpublished_line_revision = state.m_editor->native_line_revision();
@@ -844,19 +877,8 @@ void ScintillaQuick_source_preview::capture_next_chunk()
 
     while (state.m_style_index < preview::k_style_count) {
         const int index = state.m_style_index++;
-        auto& style = state.m_configuration.styles[index];
-        style.font = state.m_base_font;
-        const int family_length = state.m_editor->send(SCI_STYLEGETFONT, index);
-        if (family_length > 0 && family_length <= 1024) {
-            QByteArray family(family_length + 1, '\0');
-            state.m_editor->send(SCI_STYLEGETFONT, index, reinterpret_cast<sptr_t>(family.data()));
-            style.font.setFamily(QString::fromUtf8(family.constData(), family_length));
-        }
-        const int hundredths = state.m_editor->send(SCI_STYLEGETSIZEFRACTIONAL, index);
-        style.font.setPointSizeF(std::max<qreal>(1, hundredths / 100.0 + state.m_zoom));
-        style.font.setBold(state.m_editor->send(SCI_STYLEGETBOLD, index) != 0);
-        style.font.setItalic(state.m_editor->send(SCI_STYLEGETITALIC, index) != 0);
-        style.foreground = native_color(state.m_editor->send(SCI_STYLEGETFORE, index));
+        state.m_configuration.styles[index] = capture_style(
+            *state.m_editor, state.m_base_font, state.m_zoom, index);
         if (slice.nsecsElapsed() >= k_capture_slice_ns) {
             state.m_timer.start(0);
             return;
@@ -864,12 +886,9 @@ void ScintillaQuick_source_preview::capture_next_chunk()
     }
 
     if (!state.m_worker_started) {
-        const QFontMetricsF metrics(state.m_configuration.styles[STYLE_DEFAULT].font);
-        const qreal column_width = std::max<qreal>(1, metrics.horizontalAdvance(QLatin1Char('M')));
-        const qreal natural_advance = metrics.height() * state.m_configuration.pixels.width() /
-            (column_width * state.m_configuration.columns);
-        state.m_configuration.line_advance = std::min(
-            natural_advance, (qreal)state.m_configuration.pixels.height() / state.m_configuration.line_count);
+        state.m_configuration.line_advance = detailed_line_advance(
+            state.m_configuration.styles[STYLE_DEFAULT].font, state.m_configuration.pixels,
+            state.m_configuration.columns, state.m_configuration.line_count);
     }
 
     preview::Chunk chunk;

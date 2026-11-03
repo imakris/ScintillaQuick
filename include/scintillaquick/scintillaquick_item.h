@@ -600,7 +600,7 @@ private:
     void build_render_snapshot();
     std::vector<Scintilla::Internal::Displayed_row_for_test> displayed_rows_for_test() const;
     const Scintilla::Internal::Render_frame& rendered_frame_for_test() const;
-    void reset_tracked_scroll_width();
+    void reset_tracked_scroll_width(bool discard_measurements = true);
     void apply_scene_graph_update_request(
         bool scroll_width_reset,
         bool needed,

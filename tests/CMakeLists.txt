@@ -140,6 +140,11 @@ add_test(NAME scintillaquick_bookmark_revision_test
 scintillaquick_set_test_environment(scintillaquick_bookmark_revision_test
     scintillaquick_edit_boundary_test "")
 
+add_test(NAME scintillaquick_horizontal_scroll_test
+    COMMAND scintillaquick_edit_boundary_test --horizontal-scroll-contract)
+scintillaquick_set_test_environment(scintillaquick_horizontal_scroll_test
+    scintillaquick_edit_boundary_test ";QT_QPA_PLATFORM=offscreen")
+
 # --- Dispatch table unit tests -------------------------------------------
 #
 # Pure-function tests against the scene-graph update dispatch table at

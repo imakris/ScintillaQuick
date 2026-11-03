@@ -744,11 +744,13 @@ void ScintillaQuick_core::SetHorizontalScrollPos()
     emit horizontalScrolled(xOffset);
 }
 
-void ScintillaQuick_core::invalidate_tracked_scroll_width()
+void ScintillaQuick_core::invalidate_tracked_scroll_width(bool discard_measurements)
 {
     // Keep the current range and offset usable during an edit. Capture will
     // measure the new extent before publishing a smaller scrollbar range.
-    view.lineWidthMaxSeen = 0;
+    if (discard_measurements) {
+        view.lineWidthMaxSeen = 0;
+    }
     m_tracked_scroll_width_dirty = true;
 }
 

@@ -20,6 +20,7 @@ namespace ScintillaQuick_preview {
 constexpr int k_style_count = 256;
 constexpr int k_prefix_bytes = 1024;
 constexpr int k_chunk_lines = 128;
+constexpr int k_columns = 120;
 
 struct Style
 {
@@ -34,7 +35,7 @@ struct Configuration
     QColor background;
     qreal line_advance = 1;
     int line_count = 1;
-    int columns = 120;
+    int columns = k_columns;
     int tab_width = 4;
 };
 

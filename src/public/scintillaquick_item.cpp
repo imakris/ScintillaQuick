@@ -1463,6 +1463,10 @@ void ScintillaQuick_item::geometryChange(const QRectF& newGeometry, const QRectF
     if (newGeometry.width()  != oldGeometry.width() ||
         newGeometry.height() != oldGeometry.height())
     {
+        if (newGeometry.width() != oldGeometry.width()) {
+            // Resizing changes the viewport floor, not measured line widths.
+            reset_tracked_scroll_width(false);
+        }
         m_core->ChangeSize();
         emit resized();
 
@@ -3634,7 +3638,7 @@ void ScintillaQuick_item::update_auto_line_number_margin()
     }
 }
 
-void ScintillaQuick_item::reset_tracked_scroll_width()
+void ScintillaQuick_item::reset_tracked_scroll_width(bool discard_measurements)
 {
     if (!m_core) {
         return;
@@ -3644,7 +3648,7 @@ void ScintillaQuick_item::reset_tracked_scroll_width()
         return;
     }
 
-    m_core->invalidate_tracked_scroll_width();
+    m_core->invalidate_tracked_scroll_width(discard_measurements);
 }
 
 // taken from QScintilla

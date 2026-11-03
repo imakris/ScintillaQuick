@@ -102,7 +102,7 @@ public:
     explicit ScintillaQuick_core(::ScintillaQuick_item* parent);
     void ensure_visible_range_styled(bool scrolling);
     void selectCurrentWord();
-    void invalidate_tracked_scroll_width();
+    void invalidate_tracked_scroll_width(bool discard_measurements);
     Render_frame current_render_frame(
         bool static_content_dirty = true,
         bool ensure_styled        = true,

@@ -316,10 +316,10 @@ int run_source_preview_scene_graph(int argc, char** argv)
     const QByteArray inserted_lines(50, '\n');
     editor.sends(SCI_INSERTTEXT, 0, inserted_lines.constData());
     Access::request_preview_line(preview, k_height);
-    if (Access::preview_image_serial(preview) != 0 || requested_line != 250 ||
+    if (Access::preview_image_serial(preview) != before_resize || requested_line != 250 ||
         editor.send(SCI_MARKERNEXT, 0, 1) != 90)
     {
-        std::fprintf(stderr, "FAIL source preview: current proportional navigation was withheld or image not retired\n");
+        std::fprintf(stderr, "FAIL source preview: topology edit lost the raster or current navigation\n");
         return 1;
     }
     preview.set_bookmark_projection(original_projection);
@@ -348,6 +348,7 @@ int run_source_preview_scene_graph(int argc, char** argv)
 
     // A whole-buffer replacement may keep the count but invalidate every row.
     const QVariantMap before_replacement = bookmark_projection(editor, {91});
+    const auto replacement_serial = Access::preview_image_serial(preview);
     const QByteArray replacement = QByteArray("replacement\n").repeated(249) + "end";
     editor.send(SCI_SETTARGETRANGE, 0, editor.send(SCI_GETLENGTH));
     editor.sends(SCI_REPLACETARGET, replacement.size(), replacement.constData());
@@ -355,13 +356,14 @@ int run_source_preview_scene_graph(int argc, char** argv)
     requested_line = 0;
     Access::request_preview_line(preview, k_height);
     if (editor.send(SCI_GETLINECOUNT) != 250 || requested_line != 250 ||
-        Access::preview_image_serial(preview) != 0)
+        Access::preview_image_serial(preview) != replacement_serial)
     {
         std::fprintf(stderr, "FAIL source preview: equal-count topology replacement was mistaken for continuity\n");
         return 1;
     }
     const QImage replaced = wait_for_frame(scene, [&](const QImage& image) {
-        return Access::preview_image_serial(preview) != 0 && near_color(image, 1, 57, qRgb(32, 33, 36));
+        return Access::preview_image_serial(preview) != replacement_serial &&
+            near_color(image, 1, 57, qRgb(32, 33, 36));
     });
     if (replaced.isNull()) { return 1; }
 
@@ -425,6 +427,50 @@ int run_source_preview_scene_graph(int argc, char** argv)
             std::fprintf(stderr, "FAIL source preview: wheel did not scroll the editor in either mode\n");
             return 1;
         }
+    }
+
+    view.setHeight(80);
+    preview.set_detailed_view(true);
+    preview.setWidth(preview.implicitWidth());
+    preview.set_bookmark_projection({});
+    preview.set_occurrence_rows({});
+    preview.set_viewport_color(Qt::white);
+    const auto before_short_source = Access::preview_image_serial(preview);
+    editor.setProperty("text", QStringLiteral("int entry = 16;\n").repeated(39) + QStringLiteral("end"));
+    const QImage short_source = wait_for_frame(scene, [&](const QImage& image) {
+        return !image.isNull() && Access::preview_image_serial(preview) != 0 &&
+            Access::preview_image_serial(preview) != before_short_source;
+    });
+    if (short_source.isNull()) {
+        std::fprintf(stderr, "FAIL source preview: short detailed source was not published\n");
+        return 1;
+    }
+    view.scrollVertical(10);
+    QCoreApplication::processEvents();
+    const QImage before_newline = scene.frame();
+    const auto newline_serial = Access::preview_image_serial(preview);
+    Access::request_preview_line(preview, k_height / 4);
+    const int line_before_newline = requested_line;
+    editor.sends(SCI_APPENDTEXT, 1, "\n");
+    Access::request_preview_line(preview, k_height / 4);
+    const QImage pending_newline = scene.frame();
+    if (line_before_newline <= 1 || line_before_newline >= 40 ||
+        requested_line != line_before_newline || Access::preview_image_serial(preview) != newline_serial ||
+        pending_newline.isNull() || pending_newline != before_newline)
+    {
+        std::fprintf(stderr, "FAIL source preview: newline changed pending scale or flashed the last raster\n");
+        return 1;
+    }
+    const QImage completed_newline = wait_for_frame(scene, [&](const QImage& image) {
+        return !image.isNull() && Access::preview_image_serial(preview) != newline_serial;
+    });
+    Access::request_preview_line(preview, k_height / 4);
+    const QRect viewport_lane(0, 0, 4, k_height);
+    if (completed_newline.isNull() || requested_line != line_before_newline ||
+        completed_newline.copy(viewport_lane) != pending_newline.copy(viewport_lane))
+    {
+        std::fprintf(stderr, "FAIL source preview: published newline changed the current viewport scale\n");
+        return 1;
     }
 
     // A one-line scroll moves the handle by 0.2 logical pixels. Three
