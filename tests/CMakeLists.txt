@@ -250,6 +250,14 @@ target_sources(scintillaquick_renderer_conformance_test PRIVATE renderer_conform
 target_include_directories(scintillaquick_renderer_conformance_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/core)
 target_link_libraries(scintillaquick_renderer_conformance_test PRIVATE Qt6::GuiPrivate)
 
+scintillaquick_add_private_quick_test_target(
+    scintillaquick_source_preview_raster_test
+    source_preview_raster/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/render)
+scintillaquick_register_validation_test(
+    scintillaquick_source_preview_raster_test scintillaquick_source_preview_raster_test
+    ";QT_FONT_DPI=96;QT_SCALE_FACTOR=1")
+
 foreach(backend IN ITEMS software rhi)
     set(test_name scintillaquick_preview_${backend}_test)
     add_test(NAME ${test_name}

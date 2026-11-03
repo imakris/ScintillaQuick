@@ -15,7 +15,7 @@ include(CTest)
 option(SCINTILLAQUICK_BUILD_EXAMPLES
     "Build the example applications (scintillaquick_minimal_editor)" OFF)
 option(SCINTILLAQUICK_BUILD_BENCHMARKS
-    "Build the benchmark applications (scintillaquick_embedded_benchmark)" OFF)
+    "Build the embedded-editor and source-preview benchmark applications" OFF)
 option(SCINTILLAQUICK_BUILD_TESTS
     "Build the test suite (gated on BUILD_TESTING as well)" ON)
 option(SCINTILLAQUICK_BUILD_SYNTAX
@@ -244,6 +244,13 @@ if(SCINTILLAQUICK_BUILD_BENCHMARKS)
             Qt6::Core
             Qt6::Gui
             Qt6::Quick)
+
+    add_executable(scintillaquick_source_preview_benchmark
+        benchmarks/source_preview/main.cpp)
+    target_include_directories(scintillaquick_source_preview_benchmark PRIVATE
+        ${scintillaquick_example_common_include_dir})
+    target_link_libraries(scintillaquick_source_preview_benchmark PRIVATE
+        ScintillaQuick::ScintillaQuick Qt6::Core Qt6::Gui Qt6::Quick)
 endif()
 
 if(SCINTILLAQUICK_BUILD_SYNTAX)
