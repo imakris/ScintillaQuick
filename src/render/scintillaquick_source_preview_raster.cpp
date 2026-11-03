@@ -25,17 +25,21 @@ struct Styled_text
     QList<QTextLayout::FormatRange> formats;
 };
 
-Styled_text decode_line(const QByteArray& pairs, const Configuration& configuration)
+using Style_formats = std::array<QTextCharFormat, k_style_count>;
+
+Styled_text decode_line(const QByteArray& pairs, const Configuration& configuration, Style_formats& formats)
 {
     QByteArray bytes(pairs.size() / 2, Qt::Uninitialized);
+    auto* utf8 = bytes.data();
     for (qsizetype i = 0; i < bytes.size(); ++i) {
-        bytes[i] = pairs[i * 2];
+        utf8[i] = pairs[i * 2];
     }
 
     Styled_text decoded;
+    decoded.text.reserve(bytes.size());
     int previous_style = -1;
     for (qsizetype i = 0; i < bytes.size();) {
-        const auto lead = (unsigned char)bytes[i];
+        const auto lead = (unsigned char)utf8[i];
         if (lead == '\r' || lead == '\n') {
             break;
         }
@@ -46,7 +50,7 @@ Styled_text decode_line(const QByteArray& pairs, const Configuration& configurat
             // Keep ASCII tabs/controls intact while avoiding a temporary
             // QString for each byte. Non-ASCII decoding below is unchanged.
             while (i + count < bytes.size()) {
-                const auto next = (unsigned char)bytes[i + count];
+                const auto next = (unsigned char)utf8[i + count];
                 if (next >= 0x80 || next == '\r' || next == '\n' ||
                     (unsigned char)pairs[(i + count) * 2 + 1] != style)
                 {
@@ -62,7 +66,7 @@ Styled_text decode_line(const QByteArray& pairs, const Configuration& configurat
 
             bool valid_tail = true;
             for (int tail = 1; tail < count && i + tail < bytes.size(); ++tail) {
-                valid_tail &= ((unsigned char)bytes[i + tail] & 0xc0) == 0x80;
+                valid_tail &= ((unsigned char)utf8[i + tail] & 0xc0) == 0x80;
             }
             if (!valid_tail) {
                 count = 1;
@@ -74,18 +78,22 @@ Styled_text decode_line(const QByteArray& pairs, const Configuration& configurat
             break;
         }
 
-        const QString fragment = QString::fromUtf8(bytes.constData() + i, count);
         if (style != previous_style) {
+            auto& format = formats[style];
+            if (format.isEmpty()) {
+                format.setFont(configuration.styles[style].font);
+                format.setForeground(configuration.styles[style].foreground);
+            }
             QTextLayout::FormatRange range;
             range.start = decoded.text.size();
             range.length = 0;
-            range.format.setFont(configuration.styles[style].font);
-            range.format.setForeground(configuration.styles[style].foreground);
+            range.format = format;
             decoded.formats.append(std::move(range));
             previous_style = style;
         }
-        decoded.text += fragment;
-        decoded.formats.last().length += fragment.size();
+        const auto previous_size = decoded.text.size();
+        decoded.text.append(QUtf8StringView(utf8 + i, count));
+        decoded.formats.last().length += decoded.text.size() - previous_size;
         i += count;
     }
     return decoded;
@@ -111,20 +119,15 @@ public:
         m_generation(std::move(current_generation))
     {}
 
-    void raster_line(const Line& source)
+    void raster_line(const Line& source, QTextLayout& layout, Style_formats& formats)
     {
-        const Styled_text decoded = decode_line(source.styled_bytes, m_configuration);
+        const Styled_text decoded = decode_line(source.styled_bytes, m_configuration, formats);
         if (decoded.text.isEmpty()) {
             return;
         }
 
         m_strip.fill(Qt::transparent);
-        QTextLayout layout(decoded.text, m_configuration.styles[STYLE_DEFAULT].font, &m_strip);
-        QTextOption options;
-        options.setWrapMode(QTextOption::NoWrap);
-        options.setTextDirection(Qt::LeftToRight);
-        options.setTabStopDistance(m_tab_distance);
-        layout.setTextOption(options);
+        layout.setText(decoded.text);
         layout.setFormats(decoded.formats);
         layout.beginLayout();
         auto line = layout.createLine();
@@ -199,12 +202,26 @@ void Raster_worker::consume(Chunk chunk)
 {
     auto& state = *m_state;
     bool current = chunk.serial == state.m_serial && !state.m_allocation_failed;
-    for (const auto& line : chunk.lines) {
-        current = current && state.m_generation->load(std::memory_order_relaxed) == chunk.serial;
-        if (!current) {
-            break;
+    if (current) {
+        // Keep format/font setup and shaping storage for this bounded chunk.
+        // setText replaces each line's layout; caching retains that layout
+        // through draw instead of discarding it at endLayout and shaping again.
+        // All additional storage is released before acknowledging the chunk.
+        QTextLayout layout(QString(), state.m_configuration.styles[STYLE_DEFAULT].font, &state.m_strip);
+        layout.setCacheEnabled(true);
+        QTextOption options;
+        options.setWrapMode(QTextOption::NoWrap);
+        options.setTextDirection(Qt::LeftToRight);
+        options.setTabStopDistance(state.m_tab_distance);
+        layout.setTextOption(options);
+        Style_formats formats;
+        for (const auto& line : chunk.lines) {
+            current = state.m_generation->load(std::memory_order_relaxed) == chunk.serial;
+            if (!current) {
+                break;
+            }
+            state.raster_line(line, layout, formats);
         }
-        state.raster_line(line);
     }
     const bool final = (current && chunk.final) || state.m_allocation_failed;
     emit chunk_finished(chunk.serial, final, final ? state.m_image : QImage(), state.m_allocation_failed);
