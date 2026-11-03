@@ -54,6 +54,7 @@
 #include "render_frame.h"
 
 #include <QObject>
+#include <QStringView>
 #include <QClipboard> // QClipboard::Mode enum is used by-value below.
 
 // All of these only appear as pointer parameters, pointer return types,
@@ -198,7 +199,7 @@ private:
     void complete_drag(Qt::DropAction drop_action);
     Scintilla::CharacterSet CharacterSetOfDocument() const;
     QString StringFromDocument(const char* s) const;
-    QByteArray BytesForDocument(const QString& text) const;
+    QByteArray BytesForDocument(QStringView text) const;
     std::unique_ptr<CaseFolder> CaseFolderForEncoding() override;
     std::string CaseMapString(const std::string& s, CaseMapping caseMapping) override;
 
