@@ -106,3 +106,9 @@ font/backend/geometry and no concurrent builds or benchmarks. Preserve raw JSON,
 compare image hashes for identical inputs and actions, and summarize a
 distribution. A software offscreen improvement does not establish native
 Windows/Direct3D, macOS/Metal or application-wide responsiveness.
+
+## Recorded measurements
+
+The [2026-11-03 Linux report](results/2026-11-03-linux.md) records the layout,
+format and bounded row-cache changes, accepted paired results through one
+million lines, raw observations, correctness checks and remaining scaling cost.
