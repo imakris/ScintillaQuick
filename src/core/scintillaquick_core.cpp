@@ -833,13 +833,11 @@ void ScintillaQuick_core::PasteFromMode(QClipboard::Mode clipboard_mode)
     bool is_line               = SelectionEmpty() && is_line_cut_copy_in_mime(mime_data);
     QString text               = clipboard->text(clipboard_mode);
     QByteArray utext           = BytesForDocument(text);
-    std::string dest(utext.constData(), utext.length());
-    SelectionText sel_text;
-    sel_text.Copy(dest, pdoc->dbcsCodePage, CharacterSetOfDocument(), is_rectangular, false);
+    utext.replace('\0', ' ');
 
     UndoGroup ug(pdoc);
     ClearSelection(multiPasteMode == MultiPaste::Each);
-    InsertPasteShape(sel_text.Data(), sel_text.Length(),
+    InsertPasteShape(utext.constData(), utext.size(),
         is_rectangular ? PasteShape::rectangular : (is_line ? PasteShape::line : PasteShape::stream));
     EnsureCaretVisible();
 }
@@ -1088,7 +1086,7 @@ QString ScintillaQuick_core::StringFromDocument(const char* s) const
     return scintillaquick::decode_utf8_body(QByteArrayView(s));
 }
 
-QByteArray ScintillaQuick_core::BytesForDocument(const QString& text) const
+QByteArray ScintillaQuick_core::BytesForDocument(QStringView text) const
 {
     return text.toUtf8();
 }

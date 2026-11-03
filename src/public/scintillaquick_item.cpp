@@ -2416,9 +2416,9 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
                 }
             }
             for (int i = 0; i < commit_str_len;) {
-                const int uc_width           = commit_str.at(i).isHighSurrogate() ? 2 : 1;
-                const QString one_char_utf16 = commit_str.mid(i, uc_width);
-                const QByteArray one_char    = m_core->BytesForDocument(one_char_utf16);
+                const int         uc_width       = commit_str.at(i).isHighSurrogate() ? 2 : 1;
+                const QStringView one_char_utf16 = QStringView(commit_str).mid(i, uc_width);
+                const QByteArray  one_char       = m_core->BytesForDocument(one_char_utf16);
 
                 m_core->InsertCharacter(
                     std::string_view(one_char.data(), one_char.length()), CharacterSource::DirectInput);
@@ -2525,10 +2525,10 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
             m_core->inOverstrike = false;
         }
         for (int i = 0; i < preedit_str_len;) {
-            const int uc_width           = preedit_str.at(i).isHighSurrogate() ? 2 : 1;
-            const QString one_char_utf16 = preedit_str.mid(i, uc_width);
-            const QByteArray one_char    = m_core->BytesForDocument(one_char_utf16);
-            const int one_char_len       = one_char.length();
+            const int         uc_width       = preedit_str.at(i).isHighSurrogate() ? 2 : 1;
+            const QStringView one_char_utf16 = QStringView(preedit_str).mid(i, uc_width);
+            const QByteArray  one_char       = m_core->BytesForDocument(one_char_utf16);
+            const int         one_char_len   = one_char.length();
 
             m_core->InsertCharacter(
                 std::string_view(one_char.data(), one_char_len), CharacterSource::TentativeInput);
