@@ -1973,10 +1973,12 @@ void test_deferred_settext_preserves_edit_outcomes()
                 SQ_EXPECT(editor.send(SCI_CANUNDO) == 0);
             }
             else {
-                SQ_EXPECT(editor.send(SCI_CANUNDO) != 0);
                 QObject::disconnect(connection);
                 editor.set_edit_handler({});
                 editor.setProperty("readonly", false);
+                // SCI_CANUNDO reports availability, including read-only state.
+                // After restoring editability, the original undo must survive.
+                SQ_EXPECT(editor.send(SCI_CANUNDO) != 0);
                 editor.send(SCI_UNDO);
                 SQ_EXPECT(text_of(editor) == QStringLiteral("seed"));
             }
