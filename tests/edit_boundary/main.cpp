@@ -5,7 +5,9 @@
 
 #include "scintillaquick_test_macros.h"
 
+#include <QByteArray>
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QDropEvent>
 #include <QGuiApplication>
 #include <QEventLoop>
@@ -2617,6 +2619,140 @@ void test_minimal_replace_shared_view_coordinates()
     SQ_EXPECT(text_of(second).toUtf8() == replacement);
 }
 
+void test_minimal_replace_utf8_boundaries()
+{
+    const auto document_bytes = [](ScintillaQuick_item& editor) {
+        QByteArray bytes(editor.send(SCI_GETLENGTH) + 1, Qt::Uninitialized);
+        editor.send(SCI_GETTEXT, bytes.size(), reinterpret_cast<Scintilla::sptr_t>(bytes.data()));
+        bytes.chop(1);
+        return bytes;
+    };
+    const struct
+    {
+        const char* original;
+        const char* replacement;
+    } cases[] = {
+        {"c3a9",     "c3a8"},
+        {"c3a9",     "c2a9"},
+        {"e282ac",   "e282ad"},
+        {"e18480",   "e28480"},
+        {"f09f9881", "f09f9a81"},
+        {"c2a9",     "e282a9"},
+    };
+    const QByteArray prefix("prefix\n");
+    const QByteArray suffix("\nsuffix\n");
+    for (const auto& test : cases) {
+        const QByteArray original    = prefix + QByteArray::fromHex(test.original) + suffix;
+        const QByteArray replacement = prefix + QByteArray::fromHex(test.replacement) + suffix;
+        for (const int history : {0, SCI_UNDO, SCI_REDO}) {
+            ScintillaQuick_item first;
+            ScintillaQuick_item second;
+            first.setProperty("text", QString::fromUtf8(original));
+            second.send(SCI_SETDOCPOINTER, 0, first.send(SCI_GETDOCPOINTER));
+            const auto changed_end = original.size() - suffix.size();
+            first.send(SCI_SETSEL, changed_end, changed_end);
+            second.send(SCI_SETSEL, changed_end + 1, changed_end + 7);
+            const auto prefix_marker = first.send(SCI_MARKERADD, 0, 0);
+            const auto suffix_marker = first.send(SCI_MARKERADD, 2, 0);
+            first.send(SCI_EMPTYUNDOBUFFER);
+            first.send(SCI_SETTARGETRANGE, 0, original.size());
+            first.send(SCI_REPLACETARGETMINIMAL, replacement.size(),
+                reinterpret_cast<Scintilla::sptr_t>(replacement.constData()));
+
+            SQ_EXPECT(document_bytes(first) == replacement);
+            SQ_EXPECT(document_bytes(second) == replacement);
+            SQ_EXPECT(first.send(SCI_GETTARGETSTART) == prefix.size());
+            SQ_EXPECT(first.send(SCI_GETTARGETEND) == replacement.size() - suffix.size());
+            SQ_EXPECT(second.send(SCI_GETSELECTIONSTART) == replacement.size() - suffix.size() + 1);
+            SQ_EXPECT(second.send(SCI_GETSELECTIONEND) == replacement.size() - suffix.size() + 7);
+            SQ_EXPECT(first.send(SCI_MARKERLINEFROMHANDLE, prefix_marker) == 0);
+            SQ_EXPECT(first.send(SCI_MARKERLINEFROMHANDLE, suffix_marker) == 2);
+            SQ_EXPECT(first.send(SCI_CANUNDO));
+            if (history != 0) {
+                first.send(SCI_UNDO);
+                SQ_EXPECT(document_bytes(first) == original);
+                SQ_EXPECT(!first.send(SCI_CANUNDO));
+                SQ_EXPECT(first.send(SCI_CANREDO));
+            }
+            if (history == SCI_REDO) {
+                first.send(SCI_REDO);
+                SQ_EXPECT(document_bytes(first) == replacement);
+            }
+
+            for (auto* editor : {&first, &second}) {
+                const QByteArray bytes = document_bytes(*editor);
+                for (const int message : {SCI_GETCURRENTPOS, SCI_GETANCHOR}) {
+                    const auto position = editor->send(message);
+                    SQ_EXPECT(bytes.first(position).isValidUtf8());
+                    SQ_EXPECT(bytes.sliced(position).isValidUtf8());
+                }
+            }
+            QKeyEvent key(QEvent::KeyPress, Qt::Key_X, Qt::NoModifier, QStringLiteral("x"));
+            QCoreApplication::sendEvent(&first, &key);
+            SQ_EXPECT(document_bytes(first).isValidUtf8());
+            SQ_EXPECT(document_bytes(first) == document_bytes(second));
+        }
+    }
+
+    for (const int code_page : {SC_CP_UTF8, 0}) {
+        ScintillaQuick_item editor;
+        const QByteArray original    = QByteArray::fromHex("c3a90a");
+        const QByteArray replacement = QByteArray::fromHex("c3a80a");
+        editor.send(SCI_SETCODEPAGE, code_page);
+        editor.sends(SCI_SETTEXT, 0, original.constData());
+        editor.send(SCI_EMPTYUNDOBUFFER);
+        const auto revision = editor.native_content_revision();
+        editor.send(SCI_SETTARGETRANGE, 1, 2);
+        editor.sends(SCI_REPLACETARGETMINIMAL, 1, original.constData() + 1);
+        SQ_EXPECT(document_bytes(editor) == original);
+        SQ_EXPECT(editor.native_content_revision() == revision);
+        SQ_EXPECT(!editor.send(SCI_CANUNDO));
+        editor.send(SCI_SETTARGETRANGE, 1, 2);
+        editor.sends(SCI_REPLACETARGETMINIMAL, 1, replacement.constData() + 1);
+        SQ_EXPECT(document_bytes(editor) == replacement);
+        SQ_EXPECT(editor.send(SCI_GETTARGETSTART) == 1);
+        SQ_EXPECT(editor.send(SCI_GETTARGETEND) == 2);
+    }
+}
+
+void test_minimal_replace_preserves_utf8_suffix()
+{
+    const struct
+    {
+        const char* original;
+        const char* replacement;
+        int inserted_length;
+    } cases[] = {
+        {"e38182e38184", "e38184",       0},
+        {"e38182",       "e3818ce38182", 3},
+    };
+    for (const auto& test : cases) {
+        ScintillaQuick_item owner;
+        ScintillaQuick_item view;
+        const QByteArray original    = QByteArray::fromHex(test.original);
+        const QByteArray replacement = QByteArray::fromHex(test.replacement);
+        owner.setProperty("text", QString::fromUtf8(original));
+        view.send(SCI_SETDOCPOINTER, 0, owner.send(SCI_GETDOCPOINTER));
+        view.send(SCI_SETSEL, original.size(), original.size());
+        owner.send(SCI_SETTARGETRANGE, 0, original.size());
+        owner.send(SCI_REPLACETARGETMINIMAL, replacement.size(),
+            reinterpret_cast<Scintilla::sptr_t>(replacement.constData()));
+
+        const auto caret        = view.send(SCI_GETCURRENTPOS);
+        const auto target_start = owner.send(SCI_GETTARGETSTART);
+        const auto target_end   = owner.send(SCI_GETTARGETEND);
+        if (caret != replacement.size() || target_start != 0 || target_end != test.inserted_length) {
+            std::fprintf(stderr, "UTF-8 suffix %s -> %s: caret=%lld, target=[%lld,%lld]\n",
+                test.original, test.replacement, (long long)caret, (long long)target_start, (long long)target_end);
+        }
+        SQ_EXPECT(text_of(view).toUtf8() == replacement);
+        SQ_EXPECT(caret == replacement.size());
+        SQ_EXPECT(view.send(SCI_GETANCHOR) == replacement.size());
+        SQ_EXPECT(target_start == 0);
+        SQ_EXPECT(target_end == test.inserted_length);
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -2626,6 +2762,8 @@ int main(int argc, char** argv)
         test_native_bookmark_revisions(SC_MODEVENTMASKALL);
         test_native_bookmark_revisions(0);
         test_minimal_replace_shared_view_coordinates();
+        test_minimal_replace_utf8_boundaries();
+        test_minimal_replace_preserves_utf8_suffix();
         return g_failures ? 1 : 0;
     }
     if (app.arguments().contains(QStringLiteral("--horizontal-scroll-contract"))) {
@@ -2699,6 +2837,8 @@ int main(int argc, char** argv)
     test_current_selection_preserves_embedded_nul();
     test_document_pointer_updates_text_and_readonly_properties();
     test_readonly_drop_preserves_modify_attempt_notification();
+    test_minimal_replace_utf8_boundaries();
+    test_minimal_replace_preserves_utf8_suffix();
 
     if (g_failures != 0) {
         std::fprintf(stderr, "scintillaquick_edit_boundary_test: %d failure(s)\n", g_failures);

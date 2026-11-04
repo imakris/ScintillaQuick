@@ -1453,13 +1453,28 @@ void Document::CheckReadOnly() {
 }
 
 void Document::TrimReplacement(std::string_view &text, Range &range) const noexcept {
+	const std::string_view original_text = text;
+	const Range original_range          = range;
 	while (!text.empty() && !range.Empty() && (text.front() == CharAt(range.start))) {
 		text.remove_prefix(1);
 		range.start++;
 	}
+	if (dbcsCodePage == CpUtf8 && (!text.empty() || !range.Empty())) {
+		// Partial characters would leave shared carets and undo positions inside UTF-8 scalars.
+		// Restore a partial prefix before it can hide an unchanged whole-character suffix.
+		range.start = std::max(original_range.start, MovePositionOutsideChar(range.start, -1, false));
+		text = original_text.substr(range.start - original_range.start);
+	}
 	while (!text.empty() && !range.Empty() && (text.back() == CharAt(range.end-1))) {
 		text.remove_suffix(1);
 		range.end--;
+	}
+	if (dbcsCodePage == CpUtf8 && (!text.empty() || !range.Empty())) {
+		// Keep the caller's byte range intact when it deliberately cuts through a character.
+		range.end = std::min(original_range.end, MovePositionOutsideChar(range.end, 1, false));
+		const size_t prefix = range.start - original_range.start;
+		const size_t suffix = original_range.end - range.end;
+		text = original_text.substr(prefix, original_text.size() - prefix - suffix);
 	}
 }
 
