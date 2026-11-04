@@ -46,6 +46,24 @@ public:
     }
 };
 
+class Colourise_counting_editor final : public ScintillaQuick_item
+{
+public:
+    sptr_t send(unsigned int message, uptr_t w_param = 0, sptr_t l_param = 0) const override
+    {
+        if (message == SCI_COLOURISE && w_param == 0 && l_param == -1) {
+            ++m_full_colourise_requests;
+        }
+        return ScintillaQuick_item::send(message, w_param, l_param);
+    }
+
+    int full_colourise_requests() const { return m_full_colourise_requests; }
+    void reset_colourise_requests() { m_full_colourise_requests = 0; }
+
+private:
+    mutable int m_full_colourise_requests = 0;
+};
+
 QString text_of(ScintillaQuick_item& editor)
 {
     return editor.property("text").toString();
@@ -1861,6 +1879,144 @@ void test_rejected_settext_skips_post_actions()
     SQ_EXPECT(text_of(editor) == QStringLiteral("abc"));
 }
 
+void test_deferred_settext_preserves_edit_outcomes()
+{
+    enum class Outcome
+    {
+        NATIVE,
+        DECLINED,
+        APPLIED,
+        REJECTED,
+        READONLY,
+        EXTERNALLY_HANDLED,
+        NOOP_APPLY,
+    };
+    const QString replacement = QStringLiteral("new\nbody");
+    for (bool deferred : {false, true}) {
+        for (Outcome outcome : {Outcome::NATIVE, Outcome::DECLINED, Outcome::APPLIED,
+                 Outcome::REJECTED, Outcome::READONLY, Outcome::EXTERNALLY_HANDLED,
+                 Outcome::NOOP_APPLY})
+        {
+            Colourise_counting_editor editor;
+            editor.setProperty("text", QStringLiteral("seed"));
+            editor.sends(SCI_INSERTTEXT, 4, " change");
+            SQ_EXPECT(editor.send(SCI_CANUNDO) != 0);
+            editor.setFocus(false);
+            editor.reset_colourise_requests();
+
+            int handler_calls = 0;
+            if (outcome == Outcome::READONLY) {
+                editor.setProperty("readonly", true);
+            }
+            else
+            if (outcome != Outcome::NATIVE) {
+                editor.set_edit_handler([&](const ScintillaQuick_edit_transaction& transaction) {
+                    ++handler_calls;
+                    SQ_EXPECT(transaction.replacements.size() == 1);
+                    if (transaction.replacements.size() != 1) {
+                        return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::REJECTED, {}};
+                    }
+                    const auto& edit = transaction.replacements.front();
+                    SQ_EXPECT(edit.position == 0 && edit.deleted_length == 11);
+                    SQ_EXPECT(edit.inserted_text == replacement.toUtf8());
+                    switch (outcome) {
+                    case Outcome::APPLIED:
+                        return apply_exactly(transaction);
+                    case Outcome::REJECTED:
+                        return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::REJECTED, {}};
+                    case Outcome::EXTERNALLY_HANDLED:
+                        return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::HANDLED, {}};
+                    case Outcome::NOOP_APPLY:
+                        return ScintillaQuick_edit_result{ScintillaQuick_edit_disposition::HANDLED,
+                            [](ScintillaQuick_item&) {}};
+                    default:
+                        return ScintillaQuick_edit_result{};
+                    }
+                });
+            }
+
+            int text_changes = 0;
+            QString signalled_text;
+            bool signalled_undo = true;
+            bool signalled_focus = false;
+            int signalled_colourises = -1;
+            const auto connection = QObject::connect(&editor, &ScintillaQuick_item::textChanged, [&] {
+                ++text_changes;
+                signalled_text = text_of(editor);
+                signalled_undo = editor.send(SCI_CANUNDO) != 0;
+                signalled_focus = editor.hasFocus();
+                signalled_colourises = editor.full_colourise_requests();
+            });
+
+            if (deferred) {
+                editor.set_text_deferred_styling(replacement);
+            }
+            else {
+                editor.setProperty("text", replacement);
+            }
+            const bool changed = outcome == Outcome::NATIVE || outcome == Outcome::DECLINED ||
+                outcome == Outcome::APPLIED;
+            SQ_EXPECT(text_of(editor) == (changed ? replacement : QStringLiteral("seed change")));
+            SQ_EXPECT(handler_calls == (outcome == Outcome::NATIVE || outcome == Outcome::READONLY ? 0 : 1));
+            SQ_EXPECT(text_changes == (changed ? 1 : 0));
+            SQ_EXPECT(editor.full_colourise_requests() == (changed && !deferred ? 1 : 0));
+            SQ_EXPECT(editor.hasFocus() == changed);
+            if (outcome == Outcome::REJECTED) {
+                SQ_EXPECT(editor.send(SCI_GETSTATUS) == SC_STATUS_FAILURE);
+            }
+            if (changed) {
+                // The shared setter must publish only after successful-mutation
+                // post-actions, even when final syntax configuration is deferred.
+                SQ_EXPECT(signalled_text == replacement);
+                SQ_EXPECT(!signalled_undo && signalled_focus);
+                SQ_EXPECT(signalled_colourises == (deferred ? 0 : 1));
+                SQ_EXPECT(editor.send(SCI_CANUNDO) == 0);
+            }
+            else {
+                SQ_EXPECT(editor.send(SCI_CANUNDO) != 0);
+                QObject::disconnect(connection);
+                editor.set_edit_handler({});
+                editor.setProperty("readonly", false);
+                editor.send(SCI_UNDO);
+                SQ_EXPECT(text_of(editor) == QStringLiteral("seed"));
+            }
+        }
+    }
+}
+
+void test_deferred_settext_preserves_observer_styling()
+{
+    Colourise_counting_editor editor;
+    editor.setProperty("text", QStringLiteral("seed"));
+    editor.reset_colourise_requests();
+    QObject::connect(&editor, &ScintillaQuick_item::styleNeeded, [&](Scintilla::Position end) {
+        editor.send(SCI_STARTSTYLING, 0);
+        editor.send(SCI_SETSTYLING, static_cast<uptr_t>(end), 3);
+    });
+
+    int text_changes = 0;
+    QObject::connect(&editor, &ScintillaQuick_item::textChanged, [&] {
+        if (++text_changes != 1) {
+            return;
+        }
+        SQ_EXPECT(editor.full_colourise_requests() == 0);
+        // Deferring this setter's pass must not swallow a receiver's explicit
+        // styling request or the automatic pass of a reentrant ordinary setter.
+        editor.send(SCI_COLOURISE, 0, -1);
+        SQ_EXPECT(editor.full_colourise_requests() == 1);
+        SQ_EXPECT(editor.send(SCI_GETENDSTYLED) == editor.send(SCI_GETLENGTH));
+        SQ_EXPECT(editor.send(SCI_GETSTYLEAT, 0) == 3);
+        editor.setProperty("text", QStringLiteral("observer text"));
+    });
+
+    editor.set_text_deferred_styling(QStringLiteral("outer text"));
+    SQ_EXPECT(text_changes == 2);
+    SQ_EXPECT(text_of(editor) == QStringLiteral("observer text"));
+    SQ_EXPECT(editor.full_colourise_requests() == 2);
+    SQ_EXPECT(editor.send(SCI_GETENDSTYLED) == editor.send(SCI_GETLENGTH));
+    SQ_EXPECT(editor.send(SCI_GETSTYLEAT, 0) == 3);
+}
+
 void test_find_replace_edit_boundary_outcomes()
 {
     ScintillaQuick_item editor;
@@ -2816,6 +2972,8 @@ int main(int argc, char** argv)
     test_supplementary_plane_key_text_inserts();
     test_text_changed_notification_coalescing();
     test_rejected_settext_skips_post_actions();
+    test_deferred_settext_preserves_edit_outcomes();
+    test_deferred_settext_preserves_observer_styling();
     test_find_replace_edit_boundary_outcomes();
     test_native_paste_requires_text_clipboard();
     test_regex_selection_keeps_document_context();

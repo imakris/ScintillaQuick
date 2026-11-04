@@ -3319,11 +3319,21 @@ QString ScintillaQuick_item::getText() const
 
 void ScintillaQuick_item::setText(const QString& txt)
 {
+    set_text(txt, true);
+}
+
+void ScintillaQuick_item::set_text_deferred_styling(const QString& text)
+{
+    set_text(text, false);
+}
+
+void ScintillaQuick_item::set_text(const QString& text, bool colourise)
+{
     // The batch keeps textChanged() coalesced until the complete setter has
     // finished, so observers never see the intermediate state between
     // SCI_SETTEXT and the undo/colourise/focus/property post-actions.
     with_property_batch([&] {
-        const QByteArray utf8 = txt.toUtf8();
+        const QByteArray utf8 = text.toUtf8();
         const Edit_dispatch_outcome outcome =
             send_with_outcome(SCI_SETTEXT, 0, reinterpret_cast<sptr_t>(utf8.constData()));
         // Run the success side effects only when the local document actually
@@ -3336,7 +3346,9 @@ void ScintillaQuick_item::setText(const QString& txt)
             return;
         }
         send(SCI_EMPTYUNDOBUFFER);
-        send(SCI_COLOURISE, 0, -1);
+        if (colourise) {
+            send(SCI_COLOURISE, 0, -1);
+        }
         setFocus(true);
         syncQuickViewProperties();
     });

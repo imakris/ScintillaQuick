@@ -170,6 +170,20 @@ margins and predefined styles. Custom lexer owners can use
 keyword sets while retaining their lexer. Application-specific lexer policy
 belongs to the host.
 
+When replacing text immediately before configuring its syntax, C++ hosts can
+avoid styling the new text with the previous lexer:
+
+```cpp
+pane.set_text_deferred_styling(contents);
+scintillaquick::configure_default_syntax(pane, path, dark_mode);
+```
+
+`set_text_deferred_styling` preserves the `text` property's edit handling,
+undo reset, focus and notification batching, but omits its automatic full styling
+request. The caller owns the final styling pass; the method does not schedule one.
+Property observers can see unstyled text and may still request styling themselves.
+The ordinary `text` property continues to style successful replacements immediately.
+
 ## Testing
 
 Run the registered test suite with:
