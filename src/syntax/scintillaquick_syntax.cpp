@@ -410,6 +410,11 @@ void scintillaquick::configure_default_syntax(ScintillaQuick_item& pane, const Q
         break;
 
     case Syntax_family::PlainText:
+        // Lexilla's null lexer only marks the last byte styled; it assumes the
+        // document already contains style zero. Remove indexes from the previous
+        // language without clearing the host's markers, folds or line state.
+        pane.send(SCI_STARTSTYLING, 0);
+        pane.send(SCI_SETSTYLING, static_cast<uptr_t>(pane.send(SCI_GETLENGTH)), 0);
         break;
     }
 
