@@ -271,6 +271,12 @@ public:
 
     virtual sptr_t sends(unsigned int i_message, uptr_t w_param = 0, const char* s = 0) const;
 
+    // Replaces text with the same edit-handler, undo-reset, focus and notification
+    // behavior as the text property, but omits the setter's full styling pass.
+    // The caller must finish styling after configuring the final lexer. Property
+    // observers may see unstyled text; their own styling requests still run.
+    void set_text_deferred_styling(const QString& text);
+
     // The handler receives normalized replacements before the document changes.
     // It covers stream selections without virtual space, ordinary typing and
     // deletion (including overtype), stream clipboard and text-drop operations,
@@ -574,6 +580,7 @@ private:
     const Ime_query_context* ime_query_context() const;
     QString getText() const;
     void setText(const QString& txt);
+    void set_text(const QString& text, bool colourise);
     QFont getFont() const { return m_font; }
     void setFont(const QFont& newFont);
     void setStylesFont(const QFont& f, int style);
