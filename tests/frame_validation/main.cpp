@@ -1788,6 +1788,139 @@ static bool test_margin_numbers_wrap()
     return ok;
 }
 
+static bool test_styled_text_margin_capture()
+{
+    const char* id = "styled_text_margin_capture";
+    bool ok = true;
+    const QByteArray first_run(20, 'W');
+    const QByteArray last_run(40, 'W');
+    const QByteArray text = first_run + 'x' + last_run;
+    const QByteArray styles = QByteArray(first_run.size(), 40) + char(41) + QByteArray(last_run.size(), 43);
+
+    // The native margin clip applies to every style run, including runs wholly
+    // outside a narrow column. Neighboring columns must retain their background.
+    for (const int margin_type : {SC_MARGIN_TEXT, SC_MARGIN_RTEXT}) {
+        Fixture_editor f;
+        for (int margin = 0; margin < 5; ++margin) {
+            f.editor.send(SCI_SETMARGINWIDTHN, margin, 0);
+            f.editor.send(SCI_SETMARGINMASKN,  margin, 0);
+        }
+        f.editor.send(SCI_SETMARGINTYPEN,  0, SC_MARGIN_NUMBER);
+        f.editor.send(SCI_SETMARGINWIDTHN, 0, 48);
+        f.editor.send(SCI_SETMARGINTYPEN,  1, margin_type);
+        f.editor.send(SCI_SETMARGINWIDTHN, 1, 16);
+        f.editor.send(SCI_SETMARGINWIDTHN, 2, 40);
+        f.editor.send(SCI_MARGINSETSTYLEOFFSET, 0);
+        f.editor.send(SCI_STYLESETFORE, 40, 0x173959);
+        f.editor.send(SCI_STYLESETFORE, 41, 0x296B37);
+        f.editor.send(SCI_STYLESETFORE, 43, 0x83532B);
+        f.editor.send(SCI_STYLESETBACK, 40, 0x335577);
+        f.editor.send(SCI_STYLESETBACK, 41, 0x224466);
+        f.editor.send(SCI_STYLESETBACK, 43, 0x113355);
+        f.set_text("source line");
+        f.editor.sends(SCI_MARGINSETTEXT,   0, text.constData());
+        f.editor.sends(SCI_MARGINSETSTYLES, 0, styles.constData());
+
+        const Render_frame frame = f.capture();
+        size_t run_count = 0;
+        for (const Margin_text_primitive& margin : frame.margin_text_primitives) {
+            if (margin.margin_index != 1) {
+                continue;
+            }
+            const size_t expected_starts[] = {0, static_cast<size_t>(first_run.size()),
+                static_cast<size_t>(first_run.size() + 1)};
+            const int expected_styles[] = {40, 41, 43};
+            ok &= check(run_count < 3, id, "text margin must capture exactly three native style runs");
+            if (run_count < 3) {
+                ok &= check(margin.run_start == expected_starts[run_count], id,
+                    "style run identity must retain its native byte offset");
+                ok &= check(margin.style_id == expected_styles[run_count], id,
+                    "style run must retain its native style identity");
+            }
+            ++run_count;
+            ok &= check(margin.document_line == 0 && margin.subline_index == 0, id,
+                "text margins must remain tied to the first document subline");
+            ok &= check(nearly_equal(margin.clip_rect.left(), 48, 0.01) &&
+                nearly_equal(margin.clip_rect.right(), 64, 0.01), id,
+                "text clip must stay inside its native margin column");
+            ok &= check(margin.background_rect.isEmpty() ||
+                margin.clip_rect.contains(margin.background_rect), id,
+                "style backgrounds must not cross into neighboring margin columns");
+        }
+        ok &= check(run_count == 3, id, "text margin must capture all three native style runs");
+    }
+    return ok;
+}
+
+static bool test_empty_text_margin_background()
+{
+    const char* id = "empty_text_margin_background";
+    bool ok = true;
+    for (const int margin_type : {SC_MARGIN_TEXT, SC_MARGIN_RTEXT}) {
+        Fixture_editor f;
+        f.editor.send(SCI_SETMARGINTYPEN,  0, margin_type);
+        f.editor.send(SCI_SETMARGINWIDTHN, 0, 40);
+        f.editor.send(SCI_MARGINSETSTYLEOFFSET, 0);
+        f.editor.send(SCI_STYLESETBACK, 40, 0x335577);
+        f.set_text("source line");
+        f.editor.sends(SCI_MARGINSETTEXT, 0, "");
+        f.editor.send(SCI_MARGINSETSTYLE, 0, 40);
+
+        const Render_frame frame = f.capture();
+        bool found_background = false;
+        for (const Margin_text_primitive& margin : frame.margin_text_primitives) {
+            if (margin.margin_index == 0 && margin.document_line == 0 &&
+                margin.background_rect.isValid())
+            {
+                found_background = true;
+                ok &= check(margin.text.isEmpty(), id, "an empty margin must not invent glyphs");
+                ok &= check(margin.background == scintilla_iprgb_color(0x335577), id,
+                    "an empty margin must retain its native first-style background");
+                ok &= check(margin.background_rect == margin.clip_rect, id,
+                    "an empty margin must fill its native margin column");
+            }
+        }
+        ok &= check(found_background, id, "an empty text margin must capture its native background fill");
+    }
+    return ok;
+}
+
+static bool test_text_margin_annotation_background()
+{
+    const char* id = "text_margin_annotation_background";
+    Fixture_editor f;
+    f.editor.send(SCI_SETMARGINTYPEN,  0, SC_MARGIN_TEXT);
+    f.editor.send(SCI_SETMARGINWIDTHN, 0, 40);
+    f.editor.send(SCI_MARGINSETSTYLEOFFSET, 0);
+    f.editor.send(SCI_STYLESETBACK, 40, 0x335577);
+    f.set_text("source line\nnext line");
+    f.editor.sends(SCI_MARGINSETTEXT, 0, "label");
+    f.editor.send(SCI_MARGINSETSTYLE, 0, 40);
+    f.editor.sends(SCI_ANNOTATIONSETTEXT, 0, "first annotation\nsecond annotation");
+    f.editor.send(SCI_ANNOTATIONSETVISIBLE, ANNOTATION_STANDARD);
+
+    const Render_frame frame = f.capture();
+    const qreal line_height = f.editor.send(SCI_TEXTHEIGHT, 0);
+    bool ok = true;
+    for (int row = 0; row < 3; ++row) {
+        bool found_background = false;
+        for (const Margin_text_primitive& margin : frame.margin_text_primitives) {
+            if (margin.margin_index == 0 && margin.document_line == 0 &&
+                nearly_equal(margin.background_rect.top(), row * line_height, 0.01) &&
+                margin.background_rect.isValid())
+            {
+                found_background = true;
+                ok &= check(margin.background == scintilla_iprgb_color(0x335577), id,
+                    "annotation rows must retain the associated margin's first-style background");
+                ok &= check(row == 0 || margin.text.isEmpty(), id,
+                    "annotation continuation rows must not repeat the margin glyphs");
+            }
+        }
+        ok &= check(found_background, id, "each native annotation row must retain its margin background");
+    }
+    return ok;
+}
+
 static bool test_plain_indicator_basic()
 {
     const char* id = "plain_indicator_basic";
@@ -2985,6 +3118,9 @@ int main(int argc, char** argv)
         {"caret_wrap_continuation",                  test_caret_wrap_continuation},
         {"margin_numbers_basic",                     test_margin_numbers_basic},
         {"margin_numbers_wrap",                      test_margin_numbers_wrap},
+        {"styled_text_margin_capture",               test_styled_text_margin_capture},
+        {"empty_text_margin_background",             test_empty_text_margin_background},
+        {"text_margin_annotation_background",        test_text_margin_annotation_background},
         {"plain_indicator_basic",                    test_plain_indicator_basic},
 
         // Phase 3: multi-selection, rectangular selection, current-line

@@ -8,6 +8,7 @@
 #ifndef RENDERCAPTURE_H
 #define RENDERCAPTURE_H
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -148,6 +149,11 @@ struct Captured_margin_text {
 	int subline_index = 0;
 	std::string utf8_text;
 	int style_id = 0;
+	int margin_index = -1;
+	size_t run_start = 0;
+	bool paint_background = false;
+	float background_left = 0.0f;
+	float background_right = 0.0f;
 };
 
 struct Captured_fold_display_text {

@@ -274,8 +274,9 @@ constexpr LineMarker::FoldPart PartForBar(bool markBefore, bool markAfter) {
 
 }
 
-void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOneMargin, const MarginStyle &marginStyle,
+void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOneMargin, size_t margin_index,
 	const EditModel &model, const ViewStyle &vs, Render_collector *collector) const {
+	const MarginStyle &marginStyle = vs.ms[margin_index];
 	const Point ptOrigin = model.GetVisibleOriginInMain();
 	const Sci::Line lineStartPaint = static_cast<Sci::Line>(rcOneMargin.top + ptOrigin.y) / vs.lineHeight;
 	Sci::Line visibleLine = model.TopLineOfMain() + lineStartPaint;
@@ -403,7 +404,7 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 					Captured_margin_text capturedText;
 					capturedText.x = static_cast<float>(rcNumber.left);
 					capturedText.y = static_cast<float>(rcNumber.top);
-					capturedText.left = static_cast<float>(rcNumber.left);
+					capturedText.left = static_cast<float>(std::max(rcMarker.left, rcNumber.left));
 					capturedText.top = static_cast<float>(rcNumber.top);
 					capturedText.right = static_cast<float>(rcNumber.right);
 					capturedText.bottom = static_cast<float>(rcNumber.bottom);
@@ -412,6 +413,7 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 					capturedText.subline_index = 0;
 					capturedText.utf8_text = sNumber;
 					capturedText.style_id = StyleLineNumber;
+					capturedText.margin_index = static_cast<int>(margin_index);
 					if (collector->wants_static_content()) {
 						collector->add_margin_text(capturedText);
 					}
@@ -431,6 +433,24 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 		} else if (marginStyle.style == MarginType::Text || marginStyle.style == MarginType::RText) {
 			const StyledText stMargin = model.pdoc->MarginStyledText(lineDoc);
 			if (stMargin.text && ValidStyledText(vs, vs.marginStyleOffset, stMargin)) {
+				const bool capture_static_content = collector && collector->wants_static_content();
+				Captured_margin_text captured_text;
+				if (capture_static_content) {
+					captured_text.x = static_cast<float>(rcMarker.left);
+					captured_text.y = static_cast<float>(rcMarker.top);
+					captured_text.left = static_cast<float>(rcMarker.left);
+					captured_text.top = static_cast<float>(rcMarker.top);
+					captured_text.right = static_cast<float>(rcMarker.right);
+					captured_text.bottom = static_cast<float>(rcMarker.bottom);
+					captured_text.baseline_y = static_cast<float>(rcMarker.top + vs.maxAscent);
+					captured_text.document_line = static_cast<int>(lineDoc);
+					captured_text.subline_index = static_cast<int>(visibleLine - firstVisibleLine);
+					captured_text.style_id = static_cast<int>(stMargin.StyleAt(0) + vs.marginStyleOffset);
+					captured_text.margin_index = static_cast<int>(margin_index);
+					captured_text.paint_background = true;
+					captured_text.background_left = static_cast<float>(rcMarker.left);
+					captured_text.background_right = static_cast<float>(rcMarker.right);
+				}
 				if (firstSubLine) {
 					surface->FillRectangle(rcMarker,
 						vs.styles[stMargin.StyleAt(0) + vs.marginStyleOffset].back);
@@ -439,6 +459,42 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 						const int width = WidestLineWidth(surface, vs, vs.marginStyleOffset, stMargin);
 						rcText.left = rcText.right - width - 3;
 					}
+					if (capture_static_content) {
+						// Match DrawStyledText's run positioning; clipping stays at the
+						// native column boundary even when right-aligned text overflows.
+						if (stMargin.length == 0) {
+							collector->add_margin_text(captured_text);
+						}
+						XYPOSITION x = stMargin.multipleStyles
+							? static_cast<int>(rcText.left) : rcText.left;
+						size_t start = 0;
+						while (start < stMargin.length) {
+							const size_t style = stMargin.StyleAt(start);
+							size_t end = start + 1;
+							while (end < stMargin.length && stMargin.StyleAt(end) == style) {
+								++end;
+							}
+							const size_t style_id = style + vs.marginStyleOffset;
+							const std::string_view text(stMargin.text + start, end - start);
+							const int width = static_cast<int>(
+								surface->WidthText(vs.styles[style_id].font.get(), text));
+							captured_text.x = static_cast<float>(x);
+							captured_text.utf8_text.assign(text);
+							captured_text.style_id = static_cast<int>(style_id);
+							captured_text.run_start = start;
+							captured_text.background_left = static_cast<float>(
+								start == 0 ? rcMarker.left : std::max(rcMarker.left, x));
+							captured_text.background_right = static_cast<float>(
+								start == 0 ? rcMarker.right : std::min(rcMarker.right, x + width + 1));
+							// Empty intersections must not be normalized into paint in
+							// a neighboring column by the frame's rectangle conversion.
+							captured_text.paint_background =
+								captured_text.background_left < captured_text.background_right;
+							collector->add_margin_text(captured_text);
+							x += width;
+							start = end;
+						}
+					}
 					DrawStyledText(surface, vs, vs.marginStyleOffset, rcText,
 						stMargin, 0, stMargin.length, DrawPhase::all);
 				} else {
@@ -446,6 +502,9 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 					const int annotationLines = model.pdoc->AnnotationLines(lineDoc);
 					if (annotationLines && (visibleLine > lastVisibleLine - annotationLines)) {
 						surface->FillRectangle(rcMarker, vs.styles[stMargin.StyleAt(0) + vs.marginStyleOffset].back);
+						if (capture_static_content) {
+							collector->add_margin_text(captured_text);
+						}
 					}
 				}
 			}
@@ -532,7 +591,8 @@ void MarginView::PaintMargin(Surface *surface, Sci::Line topLine, PRectangle rc,
 		rcOneMargin.bottom = rc.bottom;
 
 	const Point ptOrigin = model.GetVisibleOriginInMain();
-	for (const MarginStyle &marginStyle : vs.ms) {
+	for (size_t margin_index = 0; margin_index < vs.ms.size(); ++margin_index) {
+		const MarginStyle &marginStyle = vs.ms[margin_index];
 		if (marginStyle.width > 0) {
 
 			rcOneMargin.left = rcOneMargin.right;
@@ -574,7 +634,7 @@ void MarginView::PaintMargin(Surface *surface, Sci::Line topLine, PRectangle rc,
 					model.pdoc->SciLineFromPosition(model.sel.MainCaret()), lastLine);
 			}
 
-			PaintOneMargin(surface, rc, rcOneMargin, marginStyle, model, vs, collector);
+			PaintOneMargin(surface, rc, rcOneMargin, margin_index, model, vs, collector);
 		}
 	}
 

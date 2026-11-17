@@ -45,6 +45,15 @@ scene-graph renderer for one item update.
   marker numbers, and indicator numbers are metadata. Do not translate them
   during scrolling.
 
+Margin text uses the native margin index and byte offset of its style run,
+alongside the logical line and subline, to retain scene-graph node identity.
+These are internal capture metadata, independent of text, font, and geometry.
+Text/RText runs keep the whole native column as their glyph clip; their style
+background rectangles and glyph baselines are item-coordinate geometry.
+Background rectangles stay within that column; a wholly clipped run has no
+background paint. Empty text and annotation rows retain background-only
+primitives, with the displayed subline distinguishing annotation rows.
+
 If a new render primitive stores visible geometry, document whether it is in
 item coordinates and update all frame translation, validation, and renderer
 paths at the same time.

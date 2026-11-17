@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -139,6 +140,10 @@ struct Margin_text_primitive
     int document_line = 0;
     int subline_index = 0;
     int style_id      = 0;
+    int margin_index  = -1;
+    size_t run_start  = 0;
+    QRectF background_rect;
+    QColor background;
 };
 
 struct Fold_display_text_primitive
