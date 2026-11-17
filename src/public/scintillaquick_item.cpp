@@ -2300,15 +2300,38 @@ static std::vector<int> MapImeIndicators(QInputMethodEvent * event)
 
 void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
 {
+    process_input_method_event(event, false);
+}
+
+void ScintillaQuick_item::cancel_input_method_composition()
+{
+    if (!input_method_composing()) {
+        return;
+    }
+    QInputMethodEvent cancellation;
+    process_input_method_event(&cancellation, true);
+}
+
+void ScintillaQuick_item::process_input_method_event(QInputMethodEvent* event, bool cancellation)
+{
     // Copy & paste by johnsonj with a lot of helps of Neil
     // Great thanks for my forerunners, jiniya and BLUEnLIVE
 
     // IME composition mutates through m_core directly; batch the whole
     // event so property signals flush once composition is fully applied.
+    const QPointer<ScintillaQuick_item> alive(this);
+    const std::uint64_t binding_at_entry = m_native_binding_revision;
+    Document* const original_document = m_core->pdoc;
+    original_document->AddRef();
+    const auto document_guard = qScopeGuard([original_document] { original_document->Release(); });
     begin_property_batch();
-    const auto batch_guard = qScopeGuard([this] { end_property_batch(); });
+    const auto batch_guard = qScopeGuard([alive] {
+        if (alive) {
+            alive->end_property_batch();
+        }
+    });
 
-    if (m_core->pdoc->IsReadOnly() || m_core->SelectionContainsProtected()) {
+    if (!cancellation && (m_core->pdoc->IsReadOnly() || m_core->SelectionContainsProtected())) {
         m_core->ShowCaretAtCurrentPosition();
         cursorChangedUpdateMarker();
         request_scene_graph_update(false, false, false);
@@ -2316,11 +2339,20 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         return;
     }
 
-    const auto event_guard = qScopeGuard([this, event] {
-        m_core->ShowCaretAtCurrentPosition();
-        cursorChangedUpdateMarker();
-        syncQuickViewProperties();
-        request_scene_graph_update(true, true, false);
+    const auto event_guard = qScopeGuard([alive, event, binding_at_entry] {
+        if (!alive || alive->m_native_binding_revision != binding_at_entry) {
+            return;
+        }
+        alive->m_core->ShowCaretAtCurrentPosition();
+        alive->cursorChangedUpdateMarker();
+        if (!alive || alive->m_native_binding_revision != binding_at_entry) {
+            return;
+        }
+        alive->syncQuickViewProperties();
+        if (!alive || alive->m_native_binding_revision != binding_at_entry) {
+            return;
+        }
+        alive->request_scene_graph_update(true, true, false);
         event->accept();
     });
 
@@ -2332,13 +2364,34 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
         event->preeditString() != m_ime_preedit;
     m_ime_preedit.clear();
 
+    const bool restore_selection = m_ime_restore_selection;
+    const Sci::Position composition_caret = m_ime_caret;
+    const Sci::Position composition_anchor = m_ime_anchor;
+    std::unique_ptr<Ime_query_context> cancelled_context;
+    if (cancellation) {
+        // Retire old view state before rollback notifications can rebind the
+        // item. Only the retained document and captured selection are restored.
+        cancelled_context = std::move(m_ime_query_context);
+        m_ime_restore_selection = false;
+        m_ime_preserve_selection = false;
+        m_preedit_pos = -1;
+        m_core->view.imeCaretBlockOverride = false;
+    }
+
     bool initial_compose = false;
     if (m_core->pdoc->TentativeActive()) {
-        m_core->pdoc->TentativeUndo();
-        if (m_ime_restore_selection) {
+        original_document->TentativeUndo(cancellation);
+        if (!alive || m_native_binding_revision != binding_at_entry) {
+            return;
+        }
+        if (restore_selection) {
             m_core->SetSelection(
-                SelectionPosition(m_ime_caret),
-                SelectionPosition(m_ime_anchor));
+                SelectionPosition(composition_caret),
+                SelectionPosition(composition_anchor));
+        }
+        else
+        if (cancelled_context) {
+            cancelled_context->restore_native_selection(*m_core);
         }
         else
         if (m_ime_query_context) {
@@ -2359,7 +2412,7 @@ void ScintillaQuick_item::inputMethodEvent(QInputMethodEvent * event)
 
     const bool has_replacement = event->replacementStart() != 0 || event->replacementLength() != 0;
     const bool has_selection_deletion =
-        consume_surrounding_selection && !m_core->sel.Empty() &&
+        !cancellation && consume_surrounding_selection && !m_core->sel.Empty() &&
         event->commitString().isEmpty() && !has_replacement;
     const bool apply_replacements = has_replacement || has_selection_deletion;
     if (!event->commitString().isEmpty() || apply_replacements) {
