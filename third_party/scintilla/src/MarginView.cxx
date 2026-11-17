@@ -433,6 +433,24 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 		} else if (marginStyle.style == MarginType::Text || marginStyle.style == MarginType::RText) {
 			const StyledText stMargin = model.pdoc->MarginStyledText(lineDoc);
 			if (stMargin.text && ValidStyledText(vs, vs.marginStyleOffset, stMargin)) {
+				const bool capture_static_content = collector && collector->wants_static_content();
+				Captured_margin_text captured_text;
+				if (capture_static_content) {
+					captured_text.x = static_cast<float>(rcMarker.left);
+					captured_text.y = static_cast<float>(rcMarker.top);
+					captured_text.left = static_cast<float>(rcMarker.left);
+					captured_text.top = static_cast<float>(rcMarker.top);
+					captured_text.right = static_cast<float>(rcMarker.right);
+					captured_text.bottom = static_cast<float>(rcMarker.bottom);
+					captured_text.baseline_y = static_cast<float>(rcMarker.top + vs.maxAscent);
+					captured_text.document_line = static_cast<int>(lineDoc);
+					captured_text.subline_index = static_cast<int>(visibleLine - firstVisibleLine);
+					captured_text.style_id = static_cast<int>(stMargin.StyleAt(0) + vs.marginStyleOffset);
+					captured_text.margin_index = static_cast<int>(margin_index);
+					captured_text.paint_background = true;
+					captured_text.background_left = static_cast<float>(rcMarker.left);
+					captured_text.background_right = static_cast<float>(rcMarker.right);
+				}
 				if (firstSubLine) {
 					surface->FillRectangle(rcMarker,
 						vs.styles[stMargin.StyleAt(0) + vs.marginStyleOffset].back);
@@ -441,9 +459,12 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 						const int width = WidestLineWidth(surface, vs, vs.marginStyleOffset, stMargin);
 						rcText.left = rcText.right - width - 3;
 					}
-					if (collector && collector->wants_static_content()) {
+					if (capture_static_content) {
 						// Match DrawStyledText's run positioning; clipping stays at the
 						// native column boundary even when right-aligned text overflows.
+						if (stMargin.length == 0) {
+							collector->add_margin_text(captured_text);
+						}
 						XYPOSITION x = stMargin.multipleStyles
 							? static_cast<int>(rcText.left) : rcText.left;
 						size_t start = 0;
@@ -457,24 +478,18 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 							const std::string_view text(stMargin.text + start, end - start);
 							const int width = static_cast<int>(
 								surface->WidthText(vs.styles[style_id].font.get(), text));
-							Captured_margin_text captured_text;
 							captured_text.x = static_cast<float>(x);
-							captured_text.y = static_cast<float>(rcMarker.top);
-							captured_text.left = static_cast<float>(rcMarker.left);
-							captured_text.top = static_cast<float>(rcMarker.top);
-							captured_text.right = static_cast<float>(rcMarker.right);
-							captured_text.bottom = static_cast<float>(rcMarker.bottom);
-							captured_text.baseline_y = static_cast<float>(rcMarker.top + vs.maxAscent);
-							captured_text.document_line = static_cast<int>(lineDoc);
 							captured_text.utf8_text.assign(text);
 							captured_text.style_id = static_cast<int>(style_id);
-							captured_text.margin_index = static_cast<int>(margin_index);
 							captured_text.run_start = start;
-							captured_text.paint_background = true;
 							captured_text.background_left = static_cast<float>(
 								start == 0 ? rcMarker.left : std::max(rcMarker.left, x));
 							captured_text.background_right = static_cast<float>(
 								start == 0 ? rcMarker.right : std::min(rcMarker.right, x + width + 1));
+							// Empty intersections must not be normalized into paint in
+							// a neighboring column by the frame's rectangle conversion.
+							captured_text.paint_background =
+								captured_text.background_left < captured_text.background_right;
 							collector->add_margin_text(captured_text);
 							x += width;
 							start = end;
@@ -487,6 +502,9 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 					const int annotationLines = model.pdoc->AnnotationLines(lineDoc);
 					if (annotationLines && (visibleLine > lastVisibleLine - annotationLines)) {
 						surface->FillRectangle(rcMarker, vs.styles[stMargin.StyleAt(0) + vs.marginStyleOffset].back);
+						if (capture_static_content) {
+							collector->add_margin_text(captured_text);
+						}
 					}
 				}
 			}
