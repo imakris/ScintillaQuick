@@ -540,12 +540,13 @@ void ScintillaQuick_core::execCommand(QAction* action)
     Command(command_num);
 }
 
-#if defined(Q_OS_WIN)
-static const QString sMSDEVColumnSelect("MSDEVColumnSelect");
-static const QString sWrappedMSDEVColumnSelect("application/x-qt-windows-mime;value=\"MSDEVColumnSelect\"");
 static const QString sVSEditorLineCutCopy("VisualStudioEditorOperationsLineCutCopyClipboardTag");
 static const QString sWrappedVSEditorLineCutCopy(
     "application/x-qt-windows-mime;value=\"VisualStudioEditorOperationsLineCutCopyClipboardTag\"");
+
+#if defined(Q_OS_WIN)
+static const QString sMSDEVColumnSelect("MSDEVColumnSelect");
+static const QString sWrappedMSDEVColumnSelect("application/x-qt-windows-mime;value=\"MSDEVColumnSelect\"");
 #elif defined(Q_OS_MAC)
 static const QString sScintillaRecPboardType("com.scintilla.utf16-plain-text.rectangular");
 static const QString sScintillaRecMimeType("text/x-scintilla.utf16-plain-text.rectangular");
