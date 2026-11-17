@@ -2,6 +2,7 @@
 // Licensed under the BSD 2-Clause License, see LICENSE file for details.
 
 #include "scintillaquick_validation_access.h"
+#include "render_scene.h"
 
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -9,16 +10,12 @@
 #include <QGuiApplication>
 #include <QImage>
 #include <QJSEngine>
-#include <QQuickRenderControl>
-#include <QQuickRenderTarget>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QThread>
 #include <QWheelEvent>
-#include <rhi/qrhi.h>
 
 #include <cstdio>
-#include <memory>
 
 namespace {
 
@@ -38,96 +35,6 @@ QVariantMap bookmark_projection(ScintillaQuick_item& owner, const QVariantList& 
     };
 }
 
-// This one fixture uses Qt's existing render-control grab (software) and
-// offscreen QRhi readback (RHI). No window is shown or native input delivered.
-class Preview_scene
-{
-public:
-    Preview_scene()
-    :
-        m_window(&m_control)
-    {
-        m_window.setGeometry(0, 0, k_width, k_height);
-        m_window.contentItem()->setSize(QSizeF(k_width, k_height));
-    }
-
-    ~Preview_scene()
-    {
-        m_window.setRenderTarget(QQuickRenderTarget());
-        m_control.invalidate();
-    }
-
-    bool initialize(bool software)
-    {
-        m_software = software;
-        if (software) {
-            return m_window.rendererInterface()->graphicsApi() == QSGRendererInterface::Software;
-        }
-        if (!m_control.initialize() || !m_control.rhi()) {
-            return false;
-        }
-        const auto api = m_window.rendererInterface()->graphicsApi();
-        if (api == QSGRendererInterface::Unknown || api == QSGRendererInterface::Software ||
-            api == QSGRendererInterface::Null)
-        {
-            return false;
-        }
-        auto* rhi = m_control.rhi();
-        m_texture.reset(rhi->newTexture(QRhiTexture::RGBA8, QSize(k_width, k_height), 1,
-            QRhiTexture::RenderTarget | QRhiTexture::UsedAsTransferSource));
-        m_depth.reset(rhi->newRenderBuffer(QRhiRenderBuffer::DepthStencil, QSize(k_width, k_height), 1));
-        if (!m_texture->create() || !m_depth->create()) {
-            return false;
-        }
-        QRhiTextureRenderTargetDescription description(QRhiColorAttachment(m_texture.get()));
-        description.setDepthStencilBuffer(m_depth.get());
-        m_target.reset(rhi->newTextureRenderTarget(description));
-        m_pass.reset(m_target->newCompatibleRenderPassDescriptor());
-        m_target->setRenderPassDescriptor(m_pass.get());
-        if (!m_target->create()) {
-            return false;
-        }
-        m_window.setRenderTarget(QQuickRenderTarget::fromRhiRenderTarget(m_target.get()));
-        return true;
-    }
-
-    QQuickWindow& window() { return m_window; }
-
-    QImage frame()
-    {
-        if (m_software) {
-            return m_window.grabWindow().convertToFormat(QImage::Format_ARGB32);
-        }
-        auto* rhi = m_control.rhi();
-        m_control.polishItems();
-        m_control.beginFrame();
-        m_control.sync();
-        m_control.render();
-        QImage image;
-        QRhiReadbackResult readback;
-        readback.completed = [&] {
-            const QImage pixels(reinterpret_cast<const uchar*>(readback.data.constData()),
-                readback.pixelSize.width(), readback.pixelSize.height(), QImage::Format_RGBA8888_Premultiplied);
-            image = rhi->isYUpInFramebuffer() ? pixels.flipped() : pixels.copy();
-        };
-        auto* updates = rhi->nextResourceUpdateBatch();
-        updates->readBackTexture(m_texture.get(), &readback);
-        m_control.commandBuffer()->resourceUpdate(updates);
-        // Qt's offscreen frame submission completes the readback here.
-        m_control.endFrame();
-        return image.convertToFormat(QImage::Format_ARGB32);
-    }
-
-private:
-    QQuickRenderControl m_control;
-    QQuickWindow m_window;
-    std::unique_ptr<QRhiTexture> m_texture;
-    std::unique_ptr<QRhiRenderBuffer> m_depth;
-    std::unique_ptr<QRhiRenderPassDescriptor> m_pass;
-    std::unique_ptr<QRhiTextureRenderTarget> m_target;
-    bool m_software = false;
-};
-
 bool near_color(const QImage& image, int x, int y, QRgb expected)
 {
     if (image.size() != QSize(k_width, k_height)) {
@@ -140,7 +47,7 @@ bool near_color(const QImage& image, int x, int y, QRgb expected)
 }
 
 template<typename Predicate>
-QImage wait_for_frame(Preview_scene& scene, Predicate predicate)
+QImage wait_for_frame(Render_scene& scene, Predicate predicate)
 {
     QElapsedTimer timeout;
     timeout.start();
@@ -165,12 +72,9 @@ int run_source_preview_scene_graph(int argc, char** argv)
     }
     qputenv("QT_SCALE_FACTOR", "1");
     qputenv("QT_FONT_DPI", "96");
-    qputenv("QT_QUICK_BACKEND", backend == "software" ? "software" : "");
-    if (backend == "software") {
-        QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
-    }
+    Render_scene::select_backend(backend == "software");
     QGuiApplication app(argc, argv);
-    Preview_scene scene;
+    Render_scene scene(QSize(k_width, k_height));
     if (!scene.initialize(backend == "software")) {
         std::fprintf(stderr, "UNAVAILABLE source preview scene graph: %s backend initialization\n", backend.constData());
         return 77;

@@ -2,6 +2,7 @@
 // Licensed under the BSD 2-Clause License, see LICENSE file for details.
 
 #include "render_frame.h"
+#include "render_scene.h"
 #include "scintillaquick_scene_graph_renderer.h"
 #include "scintillaquick_platqt.h"
 
@@ -113,7 +114,8 @@ public:
         QPointF item_position = {}, qreal item_opacity = 1.0)
 
     :
-        m_item(m_window.contentItem()),
+        m_scene(QSize(k_width, k_height), requested_dpr),
+        m_item(m_scene.window().contentItem()),
         m_backend(std::move(backend)),
         m_requested_dpr(requested_dpr),
         m_item_position(item_position),
@@ -121,9 +123,7 @@ public:
     {
         m_item.setPosition(item_position);
         m_item.setOpacity(item_opacity);
-        m_window.setColor(Qt::white);
-        m_window.resize(k_width, k_height);
-        m_window.show();
+        m_initialized = m_scene.initialize(m_backend == QStringLiteral("software"));
     }
 
     bool run(
@@ -132,32 +132,40 @@ public:
         const std::function<void(sci::Surface_impl&, QPainter&)>& draw_reference,
         std::uint64_t static_revision = 0)
     {
+        if (!m_initialized) {
+            std::fprintf(stderr, "FAIL %s: requested renderer could not initialize\n", name);
+            return false;
+        }
         m_item.set_frame(std::move(frame), static_revision);
+        QImage actual;
         QElapsedTimer timer;
         timer.start();
-        while ((!m_window.isExposed() || !m_item.frame_rendered()) && timer.elapsed() < 3000) {
+        do {
             QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            actual = m_scene.frame();
+            if (m_item.frame_rendered() && !actual.isNull()) {
+                break;
+            }
             QThread::msleep(1);
-        }
-        if (!m_window.isExposed() || !m_item.frame_rendered()) {
-            std::fprintf(stderr, "FAIL %s: window did not render the requested frame\n", name);
+        } while (timer.elapsed() < 3000);
+        auto& window = m_scene.window();
+        if (window.isVisible() || window.isExposed() || !m_item.frame_rendered()) {
+            std::fprintf(stderr, "FAIL %s: hidden scene did not render the requested frame\n", name);
             return false;
         }
 
-        const qreal dpr = m_window.effectiveDevicePixelRatio();
-        const auto api = m_window.rendererInterface()->graphicsApi();
-        const bool software = api == QSGRendererInterface::Software;
-        if (!qFuzzyCompare(dpr, m_requested_dpr) || software != (m_backend == QStringLiteral("software")) ||
-            api == QSGRendererInterface::Unknown)
+        const qreal dpr = window.effectiveDevicePixelRatio();
+        const auto api = window.rendererInterface()->graphicsApi();
+        if (!qFuzzyCompare(dpr, m_requested_dpr) ||
+            api != Render_scene::graphics_api(m_backend == QStringLiteral("software")))
         {
             std::fprintf(stderr, "FAIL %s: requested %s DPR %.2f, received API %d DPR %.2f\n",
                 name, qPrintable(m_backend), m_requested_dpr, static_cast<int>(api), dpr);
             return false;
         }
 
-        const QImage actual = m_window.grabWindow().convertToFormat(QImage::Format_ARGB32);
         if (actual.isNull()) {
-            std::fprintf(stderr, "FAIL %s: grabWindow returned no image\n", name);
+            std::fprintf(stderr, "FAIL %s: frame readback returned no image\n", name);
             return false;
         }
         // Match Qt's native raster surface format so text uses the same
@@ -205,17 +213,18 @@ public:
                 name, differences, first_difference.x(), first_difference.y());
             return false;
         }
-        std::printf("PASS %s (%s, DPR %.2f)\n", name, qPrintable(m_backend), dpr);
+        std::printf("PASS %s (%s, API %d, DPR %.2f)\n", name, qPrintable(m_backend), static_cast<int>(api), dpr);
         return true;
     }
 
 private:
-    QQuickWindow m_window;
+    Render_scene m_scene;
     Frame_item m_item;
     QString m_backend;
     qreal m_requested_dpr;
     QPointF m_item_position;
     qreal m_item_opacity;
+    bool m_initialized = false;
 };
 
 bool check_indicator(
@@ -433,9 +442,12 @@ bool check_editor_background(
     QColor remainder_color,
     bool underline = false)
 {
-    QQuickWindow window;
-    window.setColor(Qt::white);
-    window.resize(k_width, k_height);
+    Render_scene scene(QSize(k_width, k_height), dpr);
+    if (!scene.initialize(backend == QStringLiteral("software"))) {
+        std::fprintf(stderr, "FAIL %s: requested renderer could not initialize\n", name);
+        return false;
+    }
+    auto& window = scene.window();
     Editor_item editor(window.contentItem());
     editor.setSize(QSizeF(k_width, k_height));
     editor.send(SCI_SETCARETPERIOD, 0);
@@ -452,15 +464,18 @@ bool check_editor_background(
     editor.sends(SCI_SETTEXT, 0, "        \n");
     editor.send(SCI_SETSEL, 0, 0);
     configure(editor);
-    window.show();
+    QImage actual;
     QElapsedTimer timer;
     timer.start();
-    while ((!window.isExposed() || !editor.rendered()) && timer.elapsed() < 3000) {
+    do {
         QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        actual = scene.frame();
+        if (editor.rendered() && !actual.isNull()) {
+            break;
+        }
         QThread::msleep(1);
-    }
-    const QImage actual = window.grabWindow().convertToFormat(QImage::Format_ARGB32);
-    if (!editor.rendered() || actual.isNull()) {
+    } while (timer.elapsed() < 3000);
+    if (window.isVisible() || window.isExposed() || !editor.rendered() || actual.isNull()) {
         std::fprintf(stderr, "FAIL %s: editor did not render\n", name);
         return false;
     }
@@ -606,9 +621,12 @@ bool check_folding_margin(const QString& backend, qreal dpr)
     constexpr int margin_width = 24;
     const QColor base(180, 50, 90);
     const QColor stripes(40, 170, 220);
-    QQuickWindow window;
-    window.setColor(Qt::white);
-    window.resize(k_width, k_height);
+    Render_scene scene(QSize(k_width, k_height), dpr);
+    if (!scene.initialize(backend == QStringLiteral("software"))) {
+        std::fprintf(stderr, "FAIL %s: requested renderer could not initialize\n", name);
+        return false;
+    }
+    auto& window = scene.window();
     Editor_item editor(window.contentItem());
     editor.setSize(QSizeF(k_width, k_height));
     editor.send(SCI_SETCARETPERIOD, 0);
@@ -627,15 +645,18 @@ bool check_folding_margin(const QString& backend, qreal dpr)
     editor.send(SCI_SETFOLDMARGINCOLOUR, 1, message_color(base));
     editor.send(SCI_SETFOLDMARGINHICOLOUR, 1, message_color(stripes));
     editor.sends(SCI_SETTEXT, 0, "\n");
-    window.show();
+    QImage actual;
     QElapsedTimer timer;
     timer.start();
-    while ((!window.isExposed() || !editor.rendered()) && timer.elapsed() < 3000) {
+    do {
         QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        actual = scene.frame();
+        if (editor.rendered() && !actual.isNull()) {
+            break;
+        }
         QThread::msleep(1);
-    }
-    const QImage actual = window.grabWindow().convertToFormat(QImage::Format_ARGB32);
-    if (!editor.rendered() || actual.isNull()) {
+    } while (timer.elapsed() < 3000);
+    if (window.isVisible() || window.isExposed() || !editor.rendered() || actual.isNull()) {
         std::fprintf(stderr, "FAIL %s: editor did not render\n", name);
         return false;
     }
@@ -707,18 +728,7 @@ int main(int argc, char* argv[])
     }
     qputenv("QT_SCALE_FACTOR", dpr_text);
     qputenv("QT_ENABLE_HIGHDPI_SCALING", "0");
-    if (backend == QStringLiteral("software")) {
-        QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
-    }
-    else {
-#ifdef Q_OS_WIN
-        QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
-#elif defined(Q_OS_MACOS)
-        QQuickWindow::setGraphicsApi(QSGRendererInterface::Metal);
-#else
-        QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
-#endif
-    }
+    Render_scene::select_backend(backend == QStringLiteral("software"));
     QGuiApplication application(argc, argv);
     Conformance_runner runner(backend, dpr);
     int failures = 0;

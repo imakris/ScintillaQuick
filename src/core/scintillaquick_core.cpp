@@ -24,7 +24,6 @@
 #include <QTimerEvent>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <optional>
 #include <utility>
@@ -68,7 +67,8 @@ public:
     :
         m_frame(frame),
         m_capture_static_content(capture_static_content),
-        m_core(core)
+        m_core(core),
+        m_style_cache(core.style_count())
     {}
 
     bool wants_static_content() const override
@@ -324,7 +324,7 @@ public:
 private:
     const ScintillaQuick_core::Style_attributes& attributes_for(int style_id)
     {
-        const int bounded_style = std::clamp(style_id, 0, STYLE_MAX);
+        const int bounded_style = std::clamp(style_id, 0, static_cast<int>(m_style_cache.size()) - 1);
         std::optional<ScintillaQuick_core::Style_attributes>& cached = m_style_cache[bounded_style];
         if (!cached.has_value()) {
             cached = m_core.style_attributes_for(bounded_style);
@@ -336,7 +336,7 @@ private:
     bool m_capture_static_content = true;
     Visual_line_frame* m_current_visual_line = nullptr;
     const ScintillaQuick_core& m_core;
-    std::array<std::optional<ScintillaQuick_core::Style_attributes>, STYLE_MAX + 1> m_style_cache;
+    std::vector<std::optional<ScintillaQuick_core::Style_attributes>> m_style_cache;
 };
 
 } // namespace
@@ -363,6 +363,22 @@ ScintillaQuick_core::ScintillaQuick_core(::ScintillaQuick_item* parent)
     view.bufferedDraw = false;
 
     Init();
+
+    marginView.m_text_override = [
+            this
+        ](
+            int margin, Sci::Line line, int subline, bool first_visible,
+            std::string& text, int& style)
+        {
+            QByteArray bytes;
+            if (!m_owner || !m_owner->margin_text_for_row(
+                    {margin, static_cast<int>(line), subline, first_visible}, bytes, style))
+            {
+                return false;
+            }
+            text.assign(bytes.constData(), static_cast<size_t>(bytes.size()));
+            return true;
+        };
 
     std::fill(timers, std::end(timers), 0);
 }
@@ -403,7 +419,7 @@ void ScintillaQuick_core::selectCurrentWord()
 ScintillaQuick_core::Style_attributes ScintillaQuick_core::style_attributes_for(int style) const
 {
     Style_attributes attributes;
-    const int bounded_style      = std::clamp(style, 0, STYLE_MAX);
+    const int bounded_style      = std::clamp(style, 0, static_cast<int>(vs.styles.size()) - 1);
     const Style& scintilla_style = vs.styles[static_cast<size_t>(bounded_style)];
 
     attributes.foreground = QColorFromColourRGBA(scintilla_style.fore);

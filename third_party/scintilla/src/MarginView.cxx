@@ -431,7 +431,16 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 				}
 			}
 		} else if (marginStyle.style == MarginType::Text || marginStyle.style == MarginType::RText) {
-			const StyledText stMargin = model.pdoc->MarginStyledText(lineDoc);
+			std::string override_text;
+			int override_style = 0;
+			const bool overridden = m_text_override && m_text_override(
+				static_cast<int>(margin_index), lineDoc,
+				static_cast<int>(visibleLine - firstVisibleLine),
+				visibleLine == std::max<Sci::Line>(0, model.TopLineOfMain()),
+				override_text, override_style);
+			const StyledText stMargin = overridden
+				? StyledText(override_text.size(), override_text.data(), false, override_style, nullptr)
+				: model.pdoc->MarginStyledText(lineDoc);
 			if (stMargin.text && ValidStyledText(vs, vs.marginStyleOffset, stMargin)) {
 				const bool capture_static_content = collector && collector->wants_static_content();
 				Captured_margin_text captured_text;
@@ -451,7 +460,7 @@ void MarginView::PaintOneMargin(Surface *surface, PRectangle rc, PRectangle rcOn
 					captured_text.background_left = static_cast<float>(rcMarker.left);
 					captured_text.background_right = static_cast<float>(rcMarker.right);
 				}
-				if (firstSubLine) {
+				if (firstSubLine || overridden) {
 					surface->FillRectangle(rcMarker,
 						vs.styles[stMargin.StyleAt(0) + vs.marginStyleOffset].back);
 					PRectangle rcText = rcMarker;

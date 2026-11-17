@@ -41,6 +41,7 @@
 #include <QList>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <limits>
 #include <string_view>
@@ -2785,6 +2786,51 @@ void ScintillaQuick_item::touchEvent(QTouchEvent * event)
     }
 
     event->accept();
+}
+
+std::optional<ScintillaQuick_item::text_margin_row_t> ScintillaQuick_item::text_margin_row_at(
+    const QPointF& point) const
+{
+    if (point.x() < 0 || point.y() < 0 || point.x() >= width() || point.y() >= height()) {
+        return std::nullopt;
+    }
+    const auto& view_style = m_core->vs;
+    qreal left = 0;
+    for (size_t margin = 0; margin < view_style.ms.size(); ++margin) {
+        const auto& column = view_style.ms[margin];
+        const qreal right = left + column.width;
+        if (point.x() >= left && point.x() < right &&
+            (column.style == MarginType::Text || column.style == MarginType::RText))
+        {
+            const auto origin = m_core->GetVisibleOriginInMain();
+            const Sci::Line display = m_core->TopLineOfMain() +
+                static_cast<Sci::Line>(std::floor((point.y() + origin.y) / view_style.lineHeight));
+            if (display < 0 || display >= m_core->pcs->LinesDisplayed()) {
+                return std::nullopt;
+            }
+            const Sci::Line line = m_core->pcs->DocFromDisplay(display);
+            const int subline = static_cast<int>(display - m_core->pcs->DisplayFromDoc(line));
+            const int annotation_lines = view_style.annotationVisible == AnnotationVisible::Hidden
+                ? 0 : m_core->pdoc->AnnotationLines(line);
+            if (subline >= m_core->pcs->GetHeight(line) - annotation_lines) {
+                return std::nullopt;
+            }
+            return text_margin_row_t{
+                static_cast<int>(margin), static_cast<int>(line), subline,
+                display == std::max<Sci::Line>(0, m_core->TopLineOfMain())};
+        }
+        left = right;
+    }
+    return std::nullopt;
+}
+
+void ScintillaQuick_item::update_margin_text_cursor(const QPointF& point, bool actionable)
+{
+    const auto cursor = actionable ? Window::Cursor::hand
+        : point.x() < m_core->vs.fixedColumnWidth
+            ? m_core->GetMarginCursor(Point(point.x(), point.y()))
+            : Window::Cursor::text;
+    m_core->wMain.SetCursor(cursor);
 }
 
 void ScintillaQuick_item::updatePolish()

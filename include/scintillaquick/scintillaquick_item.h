@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -39,6 +40,7 @@
 #include <QList>
 #include <QMimeData>
 #include <QPoint>
+#include <QPointF>
 #include <QPointer>
 #include <QQuickItem>
 #include <QScopeGuard>
@@ -534,6 +536,18 @@ signals:
     void notificationReceived(const ScintillaQuick_notification& notification);
 
 protected:
+    struct text_margin_row_t
+    {
+        int margin;
+        int line;
+        int subline;
+        bool first_visible;
+    };
+    // View-local text uses the native margin painter and its capture identities.
+    virtual bool margin_text_for_row(const text_margin_row_t&, QByteArray&, int&) const { return false; }
+    std::optional<text_margin_row_t> text_margin_row_at(const QPointF& point) const;
+    void update_margin_text_cursor(const QPointF& point, bool actionable);
+
     bool event(QEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void focusInEvent(QFocusEvent* event) override;

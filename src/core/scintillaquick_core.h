@@ -125,6 +125,7 @@ public:
     sptr_t WndProc(Scintilla::Message i_message, uptr_t w_param, sptr_t l_param) override;
     sptr_t DefWndProc(Scintilla::Message i_message, uptr_t w_param, sptr_t l_param) override;
     Style_attributes style_attributes_for(int style) const;
+    int style_count() const { return static_cast<int>(vs.styles.size()); }
 
 signals:
     void cursorPositionChanged();

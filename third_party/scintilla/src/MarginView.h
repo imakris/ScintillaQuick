@@ -8,6 +8,9 @@
 #ifndef MARGINVIEW_H
 #define MARGINVIEW_H
 
+#include <functional>
+#include <string>
+
 namespace Scintilla::Internal {
 
 class Render_collector;
@@ -33,6 +36,9 @@ public:
 	 * override it instead of creating a new method in the Surface class that
 	 * existing platforms must implement as empty. */
 	DrawWrapMarkerFn customDrawWrapMarker;
+
+	// Presentation-only text must remain local to the view sharing a document.
+	std::function<bool(int, Sci::Line, int, bool, std::string &, int &)> m_text_override;
 
 	MarginView() noexcept;
 
