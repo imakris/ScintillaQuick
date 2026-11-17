@@ -39,6 +39,9 @@ public:
     void capture() { updatePolish(); }
     void deliver_drop(QDropEvent* event) { dropEvent(event); }
     void deliver_input_method(QInputMethodEvent* event) { inputMethodEvent(event); }
+    using ScintillaQuick_item::cancel_input_method_composition;
+    using ScintillaQuick_item::cross_platform_line_copy_enabled;
+    using ScintillaQuick_item::set_cross_platform_line_copy_enabled;
     QVariant query_input_method(Qt::InputMethodQuery query) const { return inputMethodQuery(query); }
     QVariant query_input_method(Qt::InputMethodQuery query, QVariant argument) const
     {
@@ -683,6 +686,190 @@ void expect_ime_carets(const Event_editor& editor, std::initializer_list<int> ca
                 range, caret, (long long)actual_caret, (long long)actual_anchor, main);
         }
         ++range;
+    }
+}
+
+void test_frozen_preedit_cancellation_preserves_committed_document()
+{
+    for (const bool readonly : {false, true}) {
+        for (const bool overtype : {false, true}) {
+            for (const bool handled : {false, true}) {
+                Event_editor editor;
+                Event_editor shared_view;
+                editor.setProperty("text", QStringLiteral("abcd"));
+                editor.send(SCI_EMPTYUNDOBUFFER);
+                editor.sends(SCI_INSERTTEXT, 4, "!");
+                shared_view.send(SCI_SETDOCPOINTER, 0, editor.send(SCI_GETDOCPOINTER));
+                editor.send(SCI_SETSEL, 1, 1);
+                editor.send(SCI_SETOVERTYPE, overtype);
+                Ime_edits observed;
+                if (handled) {
+                    observe_ime_edits(editor, observed);
+                }
+
+                QInputMethodEvent preedit(QStringLiteral("XY"), {});
+                editor.deliver_input_method(&preedit);
+                SQ_EXPECT(editor.input_method_composing());
+                SQ_EXPECT(text_of(editor) != QStringLiteral("abcd!"));
+                if (readonly) {
+                    editor.send(SCI_SETREADONLY, 1);
+                }
+                else {
+                    editor.send(SCI_STYLESETCHANGEABLE, 0, 0);
+                }
+
+                int rollback_notifications = 0;
+                int modify_attempts = 0;
+                const auto connection = QObject::connect(&editor, &ScintillaQuick_item::notificationReceived, &editor, [
+                        &editor, &shared_view, &rollback_notifications, &modify_attempts, readonly
+                    ](
+                        const ScintillaQuick_notification& notification)
+                    {
+                        if (notification.code == Scintilla::Notification::ModifyAttemptRO) {
+                            ++modify_attempts;
+                        }
+                        if (notification.code == Scintilla::Notification::Modified &&
+                            ((int)notification.modificationType & SC_PERFORMED_UNDO) != 0)
+                        {
+                            ++rollback_notifications;
+                            SQ_EXPECT(editor.send(SCI_GETREADONLY) == readonly);
+                            SQ_EXPECT(shared_view.send(SCI_GETREADONLY) == readonly);
+                        }
+                    });
+
+                editor.cancel_input_method_composition();
+                SQ_EXPECT(!editor.input_method_composing());
+                SQ_EXPECT(text_of(editor) == QStringLiteral("abcd!"));
+                SQ_EXPECT(text_of(shared_view) == QStringLiteral("abcd!"));
+                SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 1);
+                SQ_EXPECT(editor.send(SCI_GETANCHOR) == 1);
+                SQ_EXPECT(editor.send(SCI_GETOVERTYPE) == overtype);
+                SQ_EXPECT(editor.send(SCI_GETREADONLY) == readonly);
+                SQ_EXPECT(editor.send(SCI_STYLEGETCHANGEABLE, 0) == readonly);
+                SQ_EXPECT(observed.calls == 0);
+                SQ_EXPECT(rollback_notifications != 0);
+                SQ_EXPECT(modify_attempts == 0);
+                expect_ime_context(editor, QStringLiteral("abcd!"), 1, 1, 1);
+
+                const auto revision = editor.native_content_revision();
+                editor.cancel_input_method_composition();
+                SQ_EXPECT(editor.native_content_revision() == revision);
+
+                QObject::disconnect(connection);
+                editor.set_edit_handler({});
+                editor.send(SCI_SETREADONLY, 0);
+                editor.send(SCI_STYLESETCHANGEABLE, 0, 1);
+                editor.send(SCI_UNDO);
+                SQ_EXPECT(text_of(editor) == QStringLiteral("abcd"));
+                SQ_EXPECT(text_of(shared_view) == QStringLiteral("abcd"));
+                SQ_EXPECT(editor.send(SCI_CANUNDO) == 0);
+                editor.send(SCI_REDO);
+                SQ_EXPECT(text_of(editor) == QStringLiteral("abcd!"));
+            }
+        }
+    }
+}
+
+void test_frozen_preedit_cancellation_restores_selection()
+{
+    for (const bool reverse : {false, true}) {
+        Event_editor editor;
+        editor.setProperty("text", QStringLiteral("abcdef"));
+        const int anchor = reverse ? 4 : 1;
+        const int caret  = reverse ? 1 : 4;
+        editor.send(SCI_SETSEL, anchor, caret);
+        Ime_edits observed;
+        observe_ime_edits(editor, observed);
+
+        QInputMethodEvent preedit(QStringLiteral("XY"), {});
+        editor.deliver_input_method(&preedit);
+        SQ_EXPECT(text_of(editor) == QStringLiteral("aXYef"));
+        editor.send(SCI_SETREADONLY, 1);
+        editor.cancel_input_method_composition();
+        SQ_EXPECT(text_of(editor) == QStringLiteral("abcdef"));
+        SQ_EXPECT(editor.send(SCI_GETANCHOR) == anchor);
+        SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == caret);
+        SQ_EXPECT(editor.send(SCI_GETREADONLY) == 1);
+        SQ_EXPECT(observed.calls == 0);
+        SQ_EXPECT(!editor.input_method_composing());
+    }
+}
+
+void test_frozen_preedit_cancellation_restores_multiple_carets()
+{
+    for (const bool overtype : {false, true}) {
+        for (const int main : {0, 1}) {
+            Event_editor editor;
+            editor.setProperty("text", QStringLiteral("abcdef"));
+            editor.send(SCI_SETMULTIPLESELECTION, 1);
+            editor.send(SCI_SETADDITIONALSELECTIONTYPING, 1);
+            editor.send(SCI_SETSEL, 1, 1);
+            editor.send(SCI_ADDSELECTION, 2, 2);
+            editor.send(SCI_SETMAINSELECTION, main);
+            editor.send(SCI_SETOVERTYPE, overtype);
+            QInputMethodEvent preedit(QStringLiteral("XY"), {});
+            editor.deliver_input_method(&preedit);
+            SQ_EXPECT(editor.input_method_composing());
+
+            editor.send(SCI_SETREADONLY, 1);
+            editor.cancel_input_method_composition();
+            SQ_EXPECT(text_of(editor) == QStringLiteral("abcdef"));
+            SQ_EXPECT(!editor.input_method_composing());
+            SQ_EXPECT(editor.send(SCI_GETREADONLY) == 1);
+            SQ_EXPECT(editor.send(SCI_GETOVERTYPE) == overtype);
+            expect_ime_carets(editor, {1, 2}, main);
+        }
+    }
+}
+
+void test_preedit_cancellation_survives_document_rebinding()
+{
+    for (const bool shared : {false, true}) {
+        Event_editor editor;
+        Event_editor retained_view;
+        Event_editor destination;
+        editor.setProperty("text", QStringLiteral("original"));
+        destination.setProperty("text", QStringLiteral("destination"));
+        destination.send(SCI_SETSEL, 3, 7);
+        if (shared) {
+            retained_view.send(SCI_SETDOCPOINTER, 0, editor.send(SCI_GETDOCPOINTER));
+        }
+        editor.send(SCI_SETSEL, 1, 1);
+        QInputMethodEvent preedit(QStringLiteral("XY"), {});
+        editor.deliver_input_method(&preedit);
+        editor.send(SCI_SETREADONLY, 1);
+
+        bool rebound = false;
+        QObject::connect(&editor, &ScintillaQuick_item::notificationReceived, &editor, [
+                &editor, &destination, &rebound
+            ](
+                const ScintillaQuick_notification& notification)
+            {
+                if (rebound || notification.code != Scintilla::Notification::Modified ||
+                    ((int)notification.modificationType & SC_MOD_DELETETEXT) == 0)
+                {
+                    return;
+                }
+                rebound = true;
+                editor.send(SCI_SETDOCPOINTER, 0, destination.send(SCI_GETDOCPOINTER));
+                editor.send(SCI_SETSEL, 3, 7);
+            });
+
+        editor.cancel_input_method_composition();
+        SQ_EXPECT(rebound);
+        SQ_EXPECT(!editor.input_method_composing());
+        SQ_EXPECT(text_of(editor) == QStringLiteral("destination"));
+        SQ_EXPECT(text_of(destination) == QStringLiteral("destination"));
+        SQ_EXPECT(editor.send(SCI_GETDOCPOINTER) == destination.send(SCI_GETDOCPOINTER));
+        SQ_EXPECT(editor.send(SCI_GETREADONLY) == 0);
+        SQ_EXPECT(editor.send(SCI_GETANCHOR) == 3);
+        SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 7);
+        if (shared) {
+            SQ_EXPECT(text_of(retained_view) == QStringLiteral("original"));
+            SQ_EXPECT(retained_view.send(SCI_GETREADONLY) == 1);
+        }
+        editor.cancel_input_method_composition();
+        SQ_EXPECT(text_of(editor) == QStringLiteral("destination"));
     }
 }
 
@@ -1723,6 +1910,84 @@ void test_cut_clipboard_projection()
                 SQ_EXPECT(text_of(editor) == (rejected ? QStringLiteral("a\nfoo") : QStringLiteral("a\n")));
                 SQ_EXPECT(clipboard->text() == (rejected ?
                     QStringLiteral("previous clipboard") : QStringLiteral("source:foo")));
+            }
+        }
+    }
+}
+
+void test_line_clipboard_markers_follow_view_policy()
+{
+    const QString markers[] = {
+        QString(),
+        QStringLiteral("VisualStudioEditorOperationsLineCutCopyClipboardTag"),
+        QStringLiteral("application/x-qt-windows-mime;value=\"VisualStudioEditorOperationsLineCutCopyClipboardTag\""),
+    };
+#if defined(Q_OS_WIN)
+    constexpr bool k_native_line_copy = true;
+#else
+    constexpr bool k_native_line_copy = false;
+#endif
+
+    for (const QString& marker : markers) {
+        for (const bool cross_platform : {false, true}) {
+            for (const bool selected : {false, true}) {
+                for (const bool handled : {false, true}) {
+                    Event_editor editor;
+                    SQ_EXPECT(!editor.cross_platform_line_copy_enabled());
+                    editor.set_cross_platform_line_copy_enabled(cross_platform);
+                    SQ_EXPECT(editor.cross_platform_line_copy_enabled() == cross_platform);
+                    editor.setProperty("text", QStringLiteral("ab\ncd"));
+                    editor.send(SCI_SETEOLMODE, SC_EOL_LF);
+                    editor.send(SCI_EMPTYUNDOBUFFER);
+                    editor.send(SCI_SETSEL, selected ? 3 : 4, selected ? 5 : 4);
+
+                    auto* mime_data = new QMimeData;
+                    mime_data->setText(QStringLiteral("x\n"));
+                    if (!marker.isEmpty()) {
+                        mime_data->setData(marker, QByteArray());
+                    }
+                    QGuiApplication::clipboard()->setMimeData(mime_data);
+
+                    int handler_calls = 0;
+                    if (handled) {
+                        editor.set_edit_handler([
+                                &handler_calls, selected
+                            ](
+                                const ScintillaQuick_edit_transaction& transaction)
+                            {
+                                ++handler_calls;
+                                SQ_EXPECT(transaction.replacements.size() == 1);
+                                const auto& replacement = transaction.replacements.front();
+                                SQ_EXPECT(replacement.position == (selected ? 3 : 4));
+                                SQ_EXPECT(replacement.deleted_length == (selected ? 2 : 0));
+                                SQ_EXPECT(replacement.inserted_text == QByteArray("x\n"));
+                                return apply_exactly(transaction);
+                            });
+                    }
+
+                    const bool line_paste =
+                        !selected && !marker.isEmpty() && (k_native_line_copy || cross_platform);
+                    const bool blocked = handled && line_paste;
+                    editor.send(SCI_PASTE);
+                    SQ_EXPECT(handler_calls == (handled && !blocked ? 1 : 0));
+                    SQ_EXPECT(editor.send(SCI_GETSTATUS) == (blocked ? SC_STATUS_FAILURE : SC_STATUS_OK));
+                    const QString expected = blocked
+                        ? QStringLiteral("ab\ncd")
+                        : selected
+                            ? QStringLiteral("ab\nx\n")
+                            : line_paste ? QStringLiteral("ab\nx\ncd") : QStringLiteral("ab\ncx\nd");
+                    SQ_EXPECT(text_of(editor) == expected);
+                    SQ_EXPECT(editor.send(SCI_CANUNDO) == !blocked);
+                    if (blocked) {
+                        SQ_EXPECT(editor.send(SCI_GETANCHOR) == 4);
+                        SQ_EXPECT(editor.send(SCI_GETCURRENTPOS) == 4);
+                    }
+                    else {
+                        editor.set_edit_handler({});
+                        editor.send(SCI_UNDO);
+                        SQ_EXPECT(text_of(editor) == QStringLiteral("ab\ncd"));
+                    }
+                }
             }
         }
     }
@@ -2931,6 +3196,14 @@ int main(int argc, char** argv)
     }
     if (app.arguments().contains(QStringLiteral("--clipboard-contracts"))) {
         test_cut_clipboard_projection();
+        test_line_clipboard_markers_follow_view_policy();
+        return g_failures ? 1 : 0;
+    }
+    if (app.arguments().contains(QStringLiteral("--composition-cancellation"))) {
+        test_frozen_preedit_cancellation_preserves_committed_document();
+        test_frozen_preedit_cancellation_restores_selection();
+        test_frozen_preedit_cancellation_restores_multiple_carets();
+        test_preedit_cancellation_survives_document_rebinding();
         return g_failures ? 1 : 0;
     }
 
@@ -2949,6 +3222,10 @@ int main(int argc, char** argv)
     test_keyboard_backspace_unindents_only_blocks_unindent();
     test_direct_delete_back_normalization();
     test_committed_ime_restores_preedit_selection();
+    test_frozen_preedit_cancellation_preserves_committed_document();
+    test_frozen_preedit_cancellation_restores_selection();
+    test_frozen_preedit_cancellation_restores_multiple_carets();
+    test_preedit_cancellation_survives_document_rebinding();
     test_ime_queries_exclude_preedit();
     test_ime_point_queries_exclude_preedit();
     test_ime_queries_with_multiple_carets();
@@ -2968,6 +3245,7 @@ int main(int argc, char** argv)
     test_ime_replacement_respects_readonly_and_protected_text();
     test_clipboard_and_drop_ingress();
     test_cut_clipboard_projection();
+    test_line_clipboard_markers_follow_view_policy();
     test_unsupported_multi_selection_fails_closed();
     test_native_edit_commands_obey_edit_handler_boundary();
     test_anchor_queries_track_selection_anchor();
