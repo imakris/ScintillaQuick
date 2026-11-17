@@ -1392,8 +1392,11 @@ void Window::SetPositionRelative(PRectangle rc, const Window* relativeTo)
 
 PRectangle Window::GetClientPosition() const
 {
-    // The client position is the window position
-    return GetPosition();
+    // Editor hit testing and drawing receive coordinates local to the item.
+    QQuickItem* item = resolve_window_item_for_owner(*this);
+    return item
+        ? PRectangle(0, 0, item->width(), item->height())
+        : PRectangle(0, 0, 1000, 1000);
 }
 
 void Window::Show(bool show)
