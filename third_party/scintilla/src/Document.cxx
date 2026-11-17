@@ -309,13 +309,17 @@ void Document::SetSavePoint() {
 	NotifySavePoint(true);
 }
 
-void Document::TentativeUndo() {
+void Document::TentativeUndo(bool cancel_read_only) {
 	if (!TentativeActive())
 		return;
-	CheckReadOnly();
+	// Cancelling preedit restores only TentativeSteps(), while preserving the
+	// read-only flag for notification callbacks and every other document view.
+	if (!cancel_read_only) {
+		CheckReadOnly();
+	}
 	if (enteredModification == 0) {
 		enteredModification++;
-		if (!cb.IsReadOnly()) {
+		if (cancel_read_only || !cb.IsReadOnly()) {
 			const bool startSavePoint = cb.IsSavePoint();
 			bool multiLine = false;
 			const int steps = cb.TentativeSteps();

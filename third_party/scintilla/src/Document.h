@@ -483,7 +483,7 @@ public:
 
 	void TentativeStart() noexcept { cb.TentativeStart(); }
 	void TentativeCommit() noexcept { cb.TentativeCommit(); }
-	void TentativeUndo();
+	void TentativeUndo(bool cancel_read_only = false);
 	bool TentativeActive() const noexcept { return cb.TentativeActive(); }
 
 	int UndoActions() const noexcept;

@@ -656,14 +656,18 @@ static bool is_rectangular_in_mime(const QMimeData* mime_data)
     return false;
 }
 
-static bool is_line_cut_copy_in_mime(const QMimeData* mime_data)
+static bool is_line_cut_copy_in_mime(const QMimeData* mime_data, bool cross_platform)
 {
-    if (!mime_data) {
+#if defined(Q_OS_WIN)
+    constexpr bool native_line_copy = true;
+#else
+    constexpr bool native_line_copy = false;
+#endif
+    if ((!native_line_copy && !cross_platform) || !mime_data) {
         return false;
     }
     QStringList formats = mime_data->formats();
     for (int i = 0; i < formats.size(); ++i) {
-#if defined(Q_OS_WIN)
         // Visual Studio Line Cut/Copy markers
         // If line cut/copy made by this application, see base name.
         if (formats[i] == sVSEditorLineCutCopy) {
@@ -673,7 +677,6 @@ static bool is_line_cut_copy_in_mime(const QMimeData* mime_data)
         if (formats[i] == sWrappedVSEditorLineCutCopy) {
             return true;
         }
-#endif
     }
     return false;
 }
@@ -685,7 +688,8 @@ bool ScintillaQuick_core::mime_data_paste_is_stream(
     return mime_data &&
         mime_data->hasText() &&
         !is_rectangular_in_mime(mime_data) &&
-        !(selection_empty && is_line_cut_copy_in_mime(mime_data));
+        !(selection_empty && is_line_cut_copy_in_mime(
+            mime_data, m_owner->cross_platform_line_copy_enabled()));
 }
 
 QByteArray ScintillaQuick_core::stream_paste_bytes(const QString& text) const
@@ -830,7 +834,8 @@ void ScintillaQuick_core::PasteFromMode(QClipboard::Mode clipboard_mode)
         return;
     }
     bool is_rectangular        = is_rectangular_in_mime(mime_data);
-    bool is_line               = SelectionEmpty() && is_line_cut_copy_in_mime(mime_data);
+    bool is_line               = SelectionEmpty() && is_line_cut_copy_in_mime(
+        mime_data, m_owner->cross_platform_line_copy_enabled());
     QString text               = clipboard->text(clipboard_mode);
     QByteArray utext           = BytesForDocument(text);
     utext.replace('\0', ' ');

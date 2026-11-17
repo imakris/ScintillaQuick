@@ -549,6 +549,16 @@ protected:
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
     void inputMethodEvent(QInputMethodEvent* event) override;
+    // End only this view's tentative preedit, including after edit admission
+    // closes. Committed text and the document's read-only flag stay untouched.
+    void cancel_input_method_composition();
+    // Source-view policies may recognize line-copy content on every platform.
+    // Other consumers retain the native platform behavior by default.
+    bool cross_platform_line_copy_enabled() const { return m_cross_platform_line_copy_enabled; }
+    void set_cross_platform_line_copy_enabled(bool enabled)
+    {
+        m_cross_platform_line_copy_enabled = enabled;
+    }
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
     Q_INVOKABLE QVariant inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const;
     void touchEvent(QTouchEvent* event) override;
@@ -667,6 +677,7 @@ private:
     bool ime_commit_replacements(
         const QInputMethodEvent&                      event,
         std::vector<ScintillaQuick_edit_replacement>& replacements) const;
+    void process_input_method_event(QInputMethodEvent* event, bool cancellation);
     Delete_key_replacement_result delete_key_replacement(
         Scintilla::Message             command,
         ScintillaQuick_edit_replacement& replacement) const;
@@ -726,6 +737,7 @@ private:
     int m_line_number_margin_padding = 16;
 
     Scintilla::Internal::ScintillaQuick_core* m_core;
+    bool m_cross_platform_line_copy_enabled = false;
 
     QElapsedTimer m_elapsed_timer;
 
