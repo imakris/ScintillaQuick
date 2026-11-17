@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <array>
+#include <compare>
+#include <functional>
 #include <cmath>
 #include <QFontMetricsF>
 #include <QImage>
@@ -43,6 +45,39 @@ namespace Scintilla::Internal
 
 namespace
 {
+
+struct text_node_key_t
+{
+    int margin_index = -1;
+    uint64_t line = 0;
+    size_t run_start = 0;
+
+    friend auto operator<=>(const text_node_key_t&, const text_node_key_t&) = default;
+};
+
+struct Text_node_key_hash
+{
+    size_t operator()(const text_node_key_t& key) const noexcept
+    {
+        const size_t line_hash = std::hash<uint64_t>{}(key.line);
+        const size_t role_hash = std::hash<int>{}(key.margin_index);
+        const size_t run_hash  = std::hash<size_t>{}(key.run_start);
+        return line_hash ^ (role_hash << 1) ^ (run_hash << 2);
+    }
+};
+
+text_node_key_t text_node_key(const Visual_line_key& key, int margin_index = -1, size_t run_start = 0)
+{
+    const uint64_t line =
+        (static_cast<uint64_t>(static_cast<uint32_t>(key.document_line)) << 32) |
+        static_cast<uint64_t>(static_cast<uint32_t>(key.subline_index));
+    return {margin_index, line, run_start};
+}
+
+QPointF margin_text_origin(const Margin_text_primitive& margin)
+{
+    return QPointF(margin.position.x(), margin.baseline_y);
+}
 
 QSGTextNode::RenderType map_render_type()
 {
@@ -804,9 +839,13 @@ public:
         m_cached_viewport = viewport;
     }
 
-    const Visual_line_key& cached_key() const { return m_cached_key;      }
-    bool has_valid_key() const                { return m_has_cached_key;  }
-    void clear_cached_key()                   { m_has_cached_key = false; }
+    text_node_key_t cached_key() const
+    {
+        return text_node_key(m_cached_key, m_cached_margin_index, m_cached_margin_run_start);
+    }
+
+    bool has_valid_key() const { return m_has_cached_key;  }
+    void clear_cached_key()    { m_has_cached_key = false; }
 
     void update_from_margin_text(QQuickWindow* window, const Margin_text_primitive& margin, const QRectF& viewport)
     {
@@ -814,8 +853,18 @@ public:
             return;
         }
 
+        const bool had_background = m_margin_background_node != nullptr;
+        update_rectangle_node(
+            window, this, m_margin_background_node,
+            margin.background_rect.intersected(viewport), margin.background);
+        if (!had_background && m_margin_background_node) {
+            removeChildNode(m_margin_background_node);
+            prependChildNode(m_margin_background_node);
+        }
         ensure_nodes(window);
 
+        m_cached_margin_index = margin.margin_index;
+        m_cached_margin_run_start = margin.run_start;
         const Visual_line_key margin_key{margin.document_line, margin.subline_index};
         const bool same_key = m_has_cached_key && m_cached_key == margin_key;
         const bool same_viewport_size = m_cached_viewport.size() == viewport.size();
@@ -897,7 +946,7 @@ public:
             margin.baseline_y   - line_ascent);
         m_text_node->addTextLayout(pos, layout.get());
         m_layouts.push_back(std::move(layout));
-        m_layout_positions.push_back(margin.position);
+        m_layout_positions.push_back(margin_text_origin(margin));
         m_cached_margin_text       = margin.text;
         m_cached_margin_font       = margin.font;
         m_cached_margin_foreground = margin.foreground;
@@ -955,7 +1004,7 @@ public:
             m_cached_viewport                     == viewport  &&
             m_cached_clip_rect                    == clip_rect &&
             m_layout_positions.size()             == 1         &&
-            m_layout_positions[0] + m_translation == margin.position;
+            m_layout_positions[0] + m_translation == margin_text_origin(margin);
     }
 
     static bool runs_match_content(const std::vector<Text_run>& cached_runs, const Visual_line_frame& vl)
@@ -1141,7 +1190,7 @@ public:
         if (m_layout_positions.size() != 1) {
             return false;
         }
-        delta = margin.position - m_layout_positions[0];
+        delta = margin_text_origin(margin) - m_layout_positions[0];
         return true;
     }
 
@@ -1159,12 +1208,15 @@ public:
     };
 
     QSGClipNode* m_clip_node = nullptr;
+    QSGRectangleNode* m_margin_background_node = nullptr;
     QSGTextNode* m_text_node = nullptr;
     QSGTransformNode* m_transform_node = nullptr;
     std::vector<std::shared_ptr<QTextLayout>> m_layouts;
     std::vector<Text_run> m_cached_runs;
     std::vector<QPointF> m_layout_positions;
     Visual_line_key m_cached_key;
+    int m_cached_margin_index = -1;
+    size_t m_cached_margin_run_start = 0;
     bool m_has_cached_key = false;
     QRectF m_cached_viewport;
     QRectF m_cached_clip_rect;
@@ -1266,12 +1318,6 @@ Margin_text_primitive to_margin_text(const Primitive& primitive)
     return margin;
 }
 
-uint64_t pack_visual_line_key(const Visual_line_key& key)
-{
-    return (static_cast<uint64_t>(static_cast<uint32_t>(key.document_line)) << 32) |
-           static_cast<uint64_t>(static_cast<uint32_t>(key.subline_index));
-}
-
 template <typename Item, typename Key_fn, typename Update_fn>
 void sync_keyed_text_nodes(
     QQuickWindow*                              window,
@@ -1288,28 +1334,28 @@ void sync_keyed_text_nodes(
     const size_t new_count = items.size();
 
     bool matching_order = nodes.size() == new_count;
-    uint64_t previous_key = 0;
+    text_node_key_t previous_key;
     for (size_t i = 0; matching_order && i < new_count; ++i) {
-        const uint64_t key = pack_visual_line_key(key_of(items[i]));
+        const text_node_key_t key = key_of(items[i]);
         matching_order = nodes[i]->has_valid_key() &&
-            pack_visual_line_key(nodes[i]->cached_key()) == key &&
+            nodes[i]->cached_key() == key &&
             (i == 0 || previous_key < key);
         previous_key = key;
     }
     if (matching_order) {
-        // Strict key order excludes duplicate margin keys, whose existing
-        // reconciliation below deliberately reuses the last matching node.
+        // Native column and run identity keep independently styled margins
+        // on their own layouts even when they share a document line.
         for (size_t i = 0; i < new_count; ++i) {
             update(nodes[i], items[i]);
         }
         return;
     }
 
-    std::unordered_map<uint64_t, size_t> key_to_old_index;
+    std::unordered_map<text_node_key_t, size_t, Text_node_key_hash> key_to_old_index;
     key_to_old_index.reserve(nodes.size());
     for (size_t i = 0; i < nodes.size(); ++i) {
         if (nodes[i]->has_valid_key()) {
-            key_to_old_index[pack_visual_line_key(nodes[i]->cached_key())] = i;
+            key_to_old_index[nodes[i]->cached_key()] = i;
         }
     }
 
@@ -1317,7 +1363,7 @@ void sync_keyed_text_nodes(
     std::vector<bool> old_used(nodes.size(), false);
 
     for (size_t i = 0; i < new_count; ++i) {
-        const uint64_t key = pack_visual_line_key(key_of(items[i]));
+        const text_node_key_t key = key_of(items[i]);
         auto it = key_to_old_index.find(key);
         if (it != key_to_old_index.end() && !old_used[it->second]) {
             new_nodes[i] = nodes[it->second];
@@ -1592,7 +1638,7 @@ public:
                 m_text_group,
                 m_text_nodes,
                 frame.visual_lines,
-                [](const Visual_line_frame& line) { return line.key; },
+                [](const Visual_line_frame& line) { return text_node_key(line.key); },
                 [&](Scene_graph_frame_text_node* node, const Visual_line_frame& line) {
                     node->update_from_visual_line(window, line, frame.text_rect);
                 });
@@ -1604,7 +1650,8 @@ public:
                 m_gutter_nodes,
                 frame.margin_text_primitives,
                 [](const Margin_text_primitive& margin) {
-                    return Visual_line_key{margin.document_line, margin.subline_index};
+                    return text_node_key(
+                        {margin.document_line, margin.subline_index}, margin.margin_index, margin.run_start);
                 },
                 [&](Scene_graph_frame_text_node* node, const Margin_text_primitive& margin) {
                     node->update_from_margin_text(window, margin, frame.margin_rect);

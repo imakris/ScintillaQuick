@@ -216,6 +216,13 @@ public:
         primitive.document_line = text.document_line;
         primitive.subline_index = text.subline_index;
         primitive.style_id      = text.style_id;
+        primitive.margin_index  = text.margin_index;
+        primitive.run_start     = text.run_start;
+        if (text.paint_background) {
+            primitive.background_rect = rect_from_capture(
+                text.background_left, text.top, text.background_right, text.bottom);
+            primitive.background = attributes.background;
+        }
         m_frame.margin_text_primitives.push_back(std::move(primitive));
     }
 
