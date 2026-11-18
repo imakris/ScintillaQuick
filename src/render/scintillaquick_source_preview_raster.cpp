@@ -15,17 +15,26 @@
 #include <algorithm>
 #include <cmath>
 #include <utility>
+#include <vector>
 
 namespace ScintillaQuick_preview {
 namespace {
 
 constexpr int k_supersampling = 4;
-constexpr int k_row_cache_bytes = 256 * 1024;
-constexpr int k_row_cache_minimum_cost = 512;
+constexpr int k_strip_cache_bytes = 256 * 1024;
+constexpr int k_strip_cache_minimum_cost = 512;
 struct Styled_text
 {
     QString text;
     QList<QTextLayout::FormatRange> formats;
+};
+
+struct coverage_t
+{
+    qreal red   = 0;
+    qreal green = 0;
+    qreal blue  = 0;
+    qreal alpha = 0;
 };
 
 using Style_formats = std::array<QTextCharFormat, k_style_count>;
@@ -126,8 +135,8 @@ public:
     {
         const bool dense = m_configuration.line_advance < 1;
         if (dense) {
-            if (const auto* row = m_rows.object(source.styled_bytes)) {
-                composite_row(*row, source.number);
+            if (const auto* strip = m_strips.object(source.styled_bytes)) {
+                composite_strip(*strip, source.number);
                 return;
             }
         }
@@ -151,46 +160,81 @@ public:
             layout.draw(&painter, QPointF(0, 0));
         }
 
-        const qreal y = source.number * m_configuration.line_advance;
-        if (dense) {
-            // Every line contributes actual glyph coverage to its physical
-            // row. Source-over accumulation retains tiny isolated blocks among
-            // blank lines instead of sampling one line from the bucket.
-            const QImage row = m_strip.scaled(
-                m_configuration.pixels.width(), 1, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-            composite_row(row, source.number);
-            // Exact styled bytes and this generation's immutable configuration
-            // determine the transparent row. Charge both pixels and retained
-            // input, with a minimum cost bounding the number of small entries.
-            if (!row.isNull()) {
-                const int cost = (int)std::max<qsizetype>(k_row_cache_minimum_cost,
-                    row.sizeInBytes() + source.styled_bytes.capacity() + sizeof(QImage) + 128);
-                m_rows.insert(source.styled_bytes, new QImage(row), cost);
-            }
+        // Area-reduce both axes to the available whole samples per line before
+        // placing it on the fractional pixel grid. Bilinear drawImage
+        // minification samples too few source pixels and produces beats.
+        const int strip_height = std::max(1, (int)std::floor(m_configuration.line_advance));
+        const QImage strip = m_strip.scaled(
+            m_configuration.pixels.width(), strip_height,
+            Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        if (strip.isNull()) {
+            m_allocation_failed = true;
+            return;
         }
-        else {
-            QPainter painter(&m_image);
-            painter.setRenderHint(QPainter::SmoothPixmapTransform);
-            painter.drawImage(
-                QRectF(0, y, m_image.width(), m_configuration.line_advance), m_strip);
+        composite_strip(strip, source.number);
+        if (dense) {
+            // Exact styled bytes and this generation's immutable configuration
+            // determine the transparent strip. Charge both pixels and retained
+            // input, with a minimum cost bounding the number of small entries.
+            if (!strip.isNull()) {
+                const int cost = (int)std::max<qsizetype>(k_strip_cache_minimum_cost,
+                    strip.sizeInBytes() + source.styled_bytes.capacity() + sizeof(QImage) + 128);
+                m_strips.insert(source.styled_bytes, new QImage(strip), cost);
+            }
         }
     }
 
-    void composite_row(const QImage& row, int line_number)
+    void composite_strip(const QImage& strip, int line_number)
     {
-        const int y = (int)(line_number * m_configuration.line_advance);
-        auto* destination = reinterpret_cast<QRgb*>(m_image.scanLine(y));
-        const auto* pixels = reinterpret_cast<const QRgb*>(row.constScanLine(0));
-        for (int x = 0; x < row.width(); ++x) {
-            destination[x] = source_over(pixels[x], destination[x]);
+        for (int source_y = 0; source_y < strip.height(); ++source_y) {
+            const qreal top = (line_number + (qreal)source_y / strip.height()) *
+                m_configuration.line_advance;
+            const qreal bottom = std::min<qreal>(m_image.height(),
+                (line_number + (qreal)(source_y + 1) / strip.height()) * m_configuration.line_advance);
+            const auto* pixels = reinterpret_cast<const QRgb*>(strip.constScanLine(source_y));
+            for (int y = (int)std::floor(top); y < (int)std::ceil(bottom); ++y) {
+                if (y != m_row_number) {
+                    flush_row();
+                    m_row_number = y;
+                }
+                const qreal weight = std::min(bottom, (qreal)y + 1) - std::max(top, (qreal)y);
+                for (int x = 0; x < strip.width(); ++x) {
+                    auto& coverage = m_row_coverage[x];
+                    coverage.red   += qRed(pixels[x])   * weight;
+                    coverage.green += qGreen(pixels[x]) * weight;
+                    coverage.blue  += qBlue(pixels[x])  * weight;
+                    coverage.alpha += qAlpha(pixels[x]) * weight;
+                }
+            }
         }
+    }
+
+    void flush_row()
+    {
+        if (m_row_number < 0) {
+            return;
+        }
+        // Lines occupy disjoint fractional areas of each output pixel. Sum
+        // their coverage before source-over, so packing more lines into a row
+        // cannot make an otherwise uniform document periodically brighter.
+        auto* destination = reinterpret_cast<QRgb*>(m_image.scanLine(m_row_number));
+        for (int x = 0; x < m_image.width(); ++x) {
+            const auto& coverage = m_row_coverage[x];
+            destination[x] = source_over(qRgba(
+                qRound(coverage.red), qRound(coverage.green),
+                qRound(coverage.blue), qRound(coverage.alpha)), destination[x]);
+        }
+        std::fill(m_row_coverage.begin(), m_row_coverage.end(), coverage_t{});
+        m_row_number = -1;
     }
 
     std::shared_ptr<std::atomic<quint64>> m_generation;
     Configuration m_configuration;
     QImage m_image;
     QImage m_strip;
-    QCache<QByteArray, QImage> m_rows{k_row_cache_bytes};
+    QCache<QByteArray, QImage> m_strips{k_strip_cache_bytes};
+    std::vector<coverage_t> m_row_coverage;
+    int m_row_number = -1;
     quint64 m_serial = 0;
     qreal m_scale_x = 1;
     qreal m_scale_y = 1;
@@ -208,11 +252,13 @@ Raster_worker::~Raster_worker() = default;
 void Raster_worker::begin(Configuration configuration, quint64 serial)
 {
     auto& state = *m_state;
-    state.m_rows.clear();
+    state.m_strips.clear();
     state.m_configuration = std::move(configuration);
     state.m_serial = serial;
     state.m_image = QImage(state.m_configuration.pixels, QImage::Format_ARGB32_Premultiplied);
     state.m_image.fill(state.m_configuration.background);
+    state.m_row_coverage.assign(state.m_image.width(), {});
+    state.m_row_number = -1;
     const QFontMetricsF metrics(state.m_configuration.styles[STYLE_DEFAULT].font, &state.m_image);
     const qreal column_width = std::max<qreal>(1, metrics.horizontalAdvance(QLatin1Char('M')));
     state.m_scale_x = state.m_image.width() * k_supersampling / (column_width * state.m_configuration.columns);
@@ -250,6 +296,9 @@ void Raster_worker::consume(Chunk chunk)
         }
     }
     const bool final = (current && chunk.final) || state.m_allocation_failed;
+    if (current && final && !state.m_allocation_failed) {
+        state.flush_row();
+    }
     emit chunk_finished(chunk.serial, final, final ? state.m_image : QImage(), state.m_allocation_failed);
     if (!current || final) {
         clear();
@@ -258,7 +307,9 @@ void Raster_worker::consume(Chunk chunk)
 
 void Raster_worker::clear()
 {
-    m_state->m_rows.clear();
+    m_state->m_strips.clear();
+    m_state->m_row_coverage.clear();
+    m_state->m_row_number = -1;
     m_state->m_image = {};
     m_state->m_strip = {};
 }

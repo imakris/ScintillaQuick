@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <initializer_list>
 #include <stdexcept>
 #include <utility>
 
@@ -106,18 +107,83 @@ QImage fresh(const preview::Configuration& config, const QVector<preview::Line>&
 
 QImage independent_rows(const preview::Configuration& config, const QVector<preview::Line>& lines)
 {
-    // A fresh worker for each source line cannot reuse any previous text,
-    // formats or row raster. Composite every contribution in document order
-    // through Qt's source-over painter, independently of the worker's loop.
-    QImage expected(config.pixels, QImage::Format_ARGB32_Premultiplied);
+    // Separate logical rows have disjoint coverage. Render them independently
+    // at one pixel per line, then let Qt area-average that grid instead of
+    // repeating the worker's fractional placement and accumulation.
+    auto logical = config;
+    logical.pixels.setHeight(config.line_count);
+    logical.line_advance = 1;
+    QImage expected(logical.pixels, QImage::Format_ARGB32_Premultiplied);
     expected.fill(config.background);
-    auto transparent = config;
+    auto transparent = logical;
     transparent.background = Qt::transparent;
     QPainter painter(&expected);
     for (const auto& line : lines) {
         painter.drawImage(0, 0, fresh(transparent, {line}));
     }
-    return expected;
+    painter.end();
+    return expected.scaled(config.pixels, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+}
+
+bool matching_pixels(const QImage& left, const QImage& right, int tolerance)
+{
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (int y = 0; y < left.height(); ++y) {
+        for (int x = 0; x < left.width(); ++x) {
+            const QRgb a = left.pixel(x, y);
+            const QRgb b = right.pixel(x, y);
+            if (qAbs(qRed(a)   - qRed(b))   > tolerance ||
+                qAbs(qGreen(a) - qGreen(b)) > tolerance ||
+                qAbs(qBlue(a)  - qBlue(b))  > tolerance ||
+                qAbs(qAlpha(a) - qAlpha(b)) > tolerance)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void check_fractional_coverage()
+{
+    auto config = configuration();
+    // The reported 125% display scale gives 115 physical pixels for a
+    // 92-logical-pixel source strip. Exercise both sides of one pixel per line.
+    config.pixels = QSize(115, 1);
+    config.background = Qt::transparent;
+    config.line_advance = 1;
+    config.line_count = 1;
+    const QByteArray text("MMMM uniform text 123; // fractional coverage");
+    const QImage row = fresh(config, {styled_line(text, 0)});
+    bool has_coverage = false;
+    for (int x = 0; x < row.width(); ++x) {
+        has_coverage |= qAlpha(row.pixel(x, 0)) > 0;
+    }
+    require(has_coverage, "fractional coverage fixture has no glyphs");
+
+    config.line_count = 599;
+    QVector<preview::Line> lines;
+    for (int number = 0; number < config.line_count; ++number) {
+        lines.append(styled_line(text, number));
+    }
+    Probe probe;
+    for (int height : {493, 603}) {
+        config.pixels.setHeight(height);
+        config.line_advance = (qreal)height / config.line_count;
+        const QImage complete = probe.render(config, lines);
+        // Equal source rows tile the entire output. Area conservation makes
+        // every physical row equal, including the final fractional boundary.
+        for (int y = 0; y < complete.height(); ++y) {
+            for (int x = 0; x < complete.width(); ++x) {
+                require(complete.pixel(x, y) == row.pixel(x, 0),
+                    "fractional placement introduced bands or lost final-row coverage");
+            }
+        }
+        require(probe.render(config, lines, 1) == complete,
+            "a chunk boundary changed pending fractional-row coverage");
+    }
 }
 
 void check_raster_contract()
@@ -138,11 +204,14 @@ void check_raster_contract()
     }
     Probe probe;
     const QImage complete = probe.render(config, lines);
-    require(complete == independent_rows(config, lines), "dense rows lost, reordered or reused wrong styles");
+    // The independent path rounds once before averaging and once afterwards;
+    // two 8-bit channel steps bound that difference from rounding only at flush.
+    require(matching_pixels(complete, independent_rows(config, lines), 2),
+        "dense rows lost area coverage or reused wrong styles");
     require(probe.render(config, lines, 1) == complete, "chunk boundaries changed the raster");
 
     const auto repeated = styled_line("MMMM 123", 0, 1);
-    require(fresh(config, {repeated}) != fresh(config, {repeated, repeated}),
+    require(fresh(config, {repeated}) != fresh(config, {repeated, styled_line("MMMM 123", 1, 1)}),
         "repeated rows must each contribute glyph coverage");
     require(fresh(config, {styled_line("text", 0, 1)}) !=
         fresh(config, {styled_line("text", 0, 2)}), "style changes did not affect the raster");
@@ -200,7 +269,8 @@ int main(int argc, char** argv)
     QGuiApplication app(argc, argv);
     try {
         check_raster_contract();
-        std::puts("PASS source preview raster: styles, Unicode, all-row coverage, chunks, configuration and cancellation");
+        check_fractional_coverage();
+        std::puts("PASS source preview raster: styles, Unicode, area coverage, fractional rows, chunks and cancellation");
         return 0;
     }
     catch (const std::exception& error) {
