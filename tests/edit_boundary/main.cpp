@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -136,6 +137,36 @@ void test_context_menu_focus_handoff()
     editor.mousePressEvent(&press);
     SQ_EXPECT(requested);
     SQ_EXPECT(menu.hasFocus());
+}
+
+void test_context_menu_finds_selected_word()
+{
+    Event_editor editor;
+    editor.setWidth(640);
+    editor.setHeight(240);
+    editor.setProperty("text", QStringLiteral("search this needle here"));
+    editor.send(SCI_SETSEL, 12, 18);
+    editor.setFindText(QStringLiteral("previous"));
+
+    std::optional<int> find_command;
+    QObject::connect(&editor, &ScintillaQuick_item::addToContextMenu, &editor,
+        [&](int id, const QString& label, bool enabled) {
+            if (label == QStringLiteral("Find") && enabled) {
+                find_command = id;
+            }
+        });
+    const QPointF point(
+        editor.send(SCI_POINTXFROMPOSITION, 0, 14),
+        editor.send(SCI_POINTYFROMPOSITION, 0, 14) + 1);
+    QMouseEvent press(QEvent::MouseButtonPress, point, point,
+        Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+    editor.mousePressEvent(&press);
+    SQ_EXPECT(find_command.has_value());
+    if (find_command) {
+        editor.cmdContextMenu(*find_command);
+        SQ_EXPECT(editor.findPanelVisible());
+        SQ_EXPECT(editor.findText() == QStringLiteral("needle"));
+    }
 }
 
 void test_handler_dispositions_and_reentrant_apply()
@@ -3236,6 +3267,7 @@ int main(int argc, char** argv)
 
     test_handler_absent_preserves_direct_edit();
     test_context_menu_focus_handoff();
+    test_context_menu_finds_selected_word();
     test_handler_dispositions_and_reentrant_apply();
     test_handler_snapshot_and_transaction_cleanup();
     test_direct_message_result_conventions();

@@ -298,6 +298,9 @@ public:
     Q_INVOKABLE void scrollColumn(int delta_columns);
     Q_INVOKABLE void enableUpdate(bool enable);
     Q_INVOKABLE virtual void cmdContextMenu(int menu_id);
+    bool hasFindSelection() const;
+    // Empty when the selection cannot seed a single-line search field.
+    Q_INVOKABLE QString selectedFindText() const;
     Q_INVOKABLE void showFind();
     Q_INVOKABLE void showFindReplace();
     Q_INVOKABLE void hideFindPanel();

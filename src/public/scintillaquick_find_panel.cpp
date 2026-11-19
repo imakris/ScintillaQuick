@@ -35,21 +35,10 @@ Scintilla::Position document_length(const ScintillaQuick_item& editor)
 
 void seed_find_text_from_selection(ScintillaQuick_item& editor)
 {
-    const auto start = static_cast<Scintilla::Position>(editor.send(SCI_GETSELECTIONSTART));
-    const auto end = static_cast<Scintilla::Position>(editor.send(SCI_GETSELECTIONEND));
-    const auto line = editor.send(SCI_LINEFROMPOSITION, start);
-    // Reject multiline selections by document position before copying their
-    // bytes into the panel's single-line field.
-    if (start == end || editor.send(SCI_GETSELECTIONS) != 1 || editor.send(SCI_SELECTIONISRECTANGLE) ||
-        end > editor.send(SCI_GETLINEENDPOSITION, line))
-    {
-        return;
+    const QString selected = editor.selectedFindText();
+    if (!selected.isEmpty()) {
+        editor.setFindText(selected);
     }
-
-    const auto length = static_cast<qsizetype>(editor.send(SCI_GETSELTEXT));
-    QByteArray selected(length + 1, Qt::Uninitialized);
-    editor.send(SCI_GETSELTEXT, 0, reinterpret_cast<Scintilla::sptr_t>(selected.data()));
-    editor.setFindText(scintillaquick::decode_utf8_body(QByteArrayView(selected.constData(), length)));
 }
 
 void clear_children(QSGNode* node)
@@ -973,6 +962,26 @@ SCINTILLAQUICK_FIND_PANEL_COLOR_ACCESSORS(findPanelSelectionForegroundColor, set
     m_find_panel_selection_foreground_color, findPanelSelectionForegroundColorChanged)
 
 #undef SCINTILLAQUICK_FIND_PANEL_COLOR_ACCESSORS
+
+bool ScintillaQuick_item::hasFindSelection() const
+{
+    const auto start = send(SCI_GETSELECTIONSTART);
+    const auto end   = send(SCI_GETSELECTIONEND);
+    const auto line  = send(SCI_LINEFROMPOSITION, start);
+    return start != end && send(SCI_GETSELECTIONS) == 1 && !send(SCI_SELECTIONISRECTANGLE) &&
+        end <= send(SCI_GETLINEENDPOSITION, line);
+}
+
+QString ScintillaQuick_item::selectedFindText() const
+{
+    if (!hasFindSelection()) {
+        return {};
+    }
+    const auto length = static_cast<qsizetype>(send(SCI_GETSELTEXT));
+    QByteArray selected(length + 1, Qt::Uninitialized);
+    send(SCI_GETSELTEXT, 0, reinterpret_cast<Scintilla::sptr_t>(selected.data()));
+    return scintillaquick::decode_utf8_body(QByteArrayView(selected.constData(), length));
+}
 
 void ScintillaQuick_item::showFind()
 {

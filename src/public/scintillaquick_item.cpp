@@ -119,6 +119,8 @@ namespace
 {
 
 constexpr int k_margin_count = SC_MAX_MARGIN + 1;
+// Scintilla uses positive command IDs for its own menu entries.
+constexpr int k_context_find = -1;
 
 bool edit_handler_query_is_safe(unsigned int message)
 {
@@ -1324,6 +1326,10 @@ void ScintillaQuick_item::scrollColumn(int delta_columns)
 
 void ScintillaQuick_item::cmdContextMenu(int menu_id)
 {
+    if (menu_id == k_context_find) {
+        showFind();
+        return;
+    }
     if (edit_handler_active()) {
         constexpr int k_context_cut    = 12;
         constexpr int k_context_paste  = 14;
@@ -1806,6 +1812,9 @@ void ProcessScintillaContextMenu(
         if (item.first.size() > 0) {
             emit qt_object->addToContextMenu(item.second.first, item.first, item.second.second);
         }
+    }
+    if (qt_object->hasFindSelection()) {
+        emit qt_object->addToContextMenu(k_context_find, QStringLiteral("Find"), true);
     }
 
     QPoint point(pt.x, pt.y);
