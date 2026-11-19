@@ -186,6 +186,53 @@ void check_fractional_coverage()
     }
 }
 
+void check_occurrence_marks()
+{
+    auto config = configuration();
+    config.columns = 20;
+    config.pixels = QSize(200, 16);
+    config.line_advance = 1;
+    constexpr int edge_width = 3;
+
+    // A single letter before the tab still reaches the same first tab stop.
+    // Its UTF-8 byte length must not shift either subsequent word marker.
+    const QByteArray ascii("A\tword  word");
+    const QByteArray utf8 = QStringLiteral("é\tword  word").toUtf8();
+    const auto marks_for = [&](const QByteArray& text) {
+        const int first = int(text.indexOf("word"));
+        const int last = int(text.lastIndexOf("word"));
+        return preview::Raster_worker::occurrence_marks(config,
+            {{styled_line(text, 3), {{first, first + 4}, {last, last + 4}}}}, edge_width);
+    };
+    const auto marks = marks_for(ascii);
+    require(marks.size() == 2 && marks[0].top() == 3 && marks[1].top() == 3 &&
+        marks[0].right() < marks[1].left(), "matches on one line lost their separate positions");
+    require(marks_for(utf8) == marks, "a UTF-8 prefix shifted a word marker");
+    config.tab_width = 8;
+    const auto wider_tabs = marks_for(utf8);
+    require(wider_tabs.size() == 2 && wider_tabs[0].left() > marks[0].left() &&
+        wider_tabs[1].left() > marks[1].left(), "word markers did not follow the tab stops");
+
+    // Within the Hebrew run, the earlier logical word is visually on the right.
+    const QByteArray mixed = QStringLiteral("A א בגד").toUtf8();
+    const int separator = int(mixed.lastIndexOf(' '));
+    const auto hebrew = preview::Raster_worker::occurrence_marks(config,
+        {{styled_line(mixed, 4), {{2, separator}, {separator + 1, int(mixed.size())}}}}, edge_width);
+    require(hebrew.size() == 2 && hebrew[0].left() > hebrew[1].right(),
+        "word markers in a right-to-left run lost their visual order");
+
+    // The preview width is expressed in M advances. The first range crosses
+    // that boundary and the second starts well beyond it.
+    const auto clipped = preview::Raster_worker::occurrence_marks(config,
+        {{styled_line(QByteArray(32, 'M'), 6), {{17, 22}, {26, 31}}}}, edge_width);
+    const int edge = config.pixels.width();
+    require(clipped.size() == 2 && clipped[0].right() == edge - 1 &&
+        clipped[0].left() > edge / 2 && clipped[0].width() > edge_width,
+        "a partially visible mark did not reach the clipping edge");
+    require(clipped[1] == QRect(edge - edge_width, 6, edge_width, 1),
+        "a fully clipped match lost the right-edge marker");
+}
+
 void check_raster_contract()
 {
     auto config = configuration();
@@ -270,6 +317,7 @@ int main(int argc, char** argv)
     try {
         check_raster_contract();
         check_fractional_coverage();
+        check_occurrence_marks();
         std::puts("PASS source preview raster: styles, Unicode, area coverage, fractional rows, chunks and cancellation");
         return 0;
     }

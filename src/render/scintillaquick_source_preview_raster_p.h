@@ -14,6 +14,7 @@
 #include <array>
 #include <atomic>
 #include <memory>
+#include <utility>
 
 namespace ScintillaQuick_preview {
 
@@ -46,6 +47,13 @@ struct Line
     int number = 0;
 };
 
+struct Occurrence_line
+{
+    Line source;
+    // Byte offsets within the captured prefix. A start beyond it is offscreen.
+    QVector<std::pair<int, int>> ranges;
+};
+
 struct Chunk
 {
     QVector<Line> lines;
@@ -63,9 +71,12 @@ public:
 
     void begin(Configuration configuration, quint64 serial);
     void consume(Chunk chunk);
+    static QVector<QRect> occurrence_marks(
+        const Configuration& configuration, const QVector<Occurrence_line>& lines, int edge_width);
     void clear();
 
 signals:
+    void occurrence_marks_ready(quint64 generation, const QVector<QRect>& marks);
     void chunk_finished(
         quint64 serial, bool final, const QImage& image,
         bool allocation_failed);

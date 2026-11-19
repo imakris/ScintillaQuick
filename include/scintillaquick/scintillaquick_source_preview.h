@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "scintillaquick_item.h"
+#include "scintillaquick_occurrences.h"
 
 #include <QByteArray>
 #include <QColor>
@@ -33,6 +33,8 @@ class SCINTILLAQUICK_EXPORT ScintillaQuick_source_preview : public QQuickItem
                READ viewport_color WRITE set_viewport_color NOTIFY viewport_color_changed)
     Q_PROPERTY(QByteArray occurrence_rows
                READ occurrence_rows WRITE set_occurrence_rows NOTIFY occurrence_rows_changed)
+    Q_PROPERTY(ScintillaQuick_occurrences* occurrence_source
+               READ occurrence_source WRITE set_occurrence_source NOTIFY occurrence_source_changed)
     Q_PROPERTY(QColor occurrence_color
                READ occurrence_color WRITE set_occurrence_color NOTIFY occurrence_color_changed)
 
@@ -55,6 +57,10 @@ public:
     // At most 8192 equally sized logical-line buckets; nonzero means a hit.
     QByteArray occurrence_rows() const;
     void set_occurrence_rows(const QByteArray& rows);
+    // Detailed views can place native word indicators over the source text.
+    // Without a source, occurrence_rows supplies the row-only markers.
+    ScintillaQuick_occurrences* occurrence_source() const;
+    void set_occurrence_source(ScintillaQuick_occurrences* source);
     QColor occurrence_color() const;
     void set_occurrence_color(const QColor& color);
 
@@ -69,6 +75,7 @@ signals:
     void bookmark_color_changed();
     void viewport_color_changed();
     void occurrence_rows_changed();
+    void occurrence_source_changed();
     void occurrence_color_changed();
     void line_requested(int line_number);
 

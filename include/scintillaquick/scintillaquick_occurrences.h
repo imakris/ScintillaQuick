@@ -34,10 +34,15 @@ public:
     // At most 8192 normalized logical-line buckets, populated incrementally.
     // Bucket floor(line * size / line_count) is nonzero when a match exists.
     QByteArray occurrence_rows() const;
+    // Only completed matches through this exclusive byte position belong to the
+    // current query. Older indicator runs may still be clearing beyond it.
+    Scintilla::Position highlighted_end(ScintillaQuick_item& view) const;
+    static constexpr int indicator = 8;
     static void configure_view(ScintillaQuick_item* view, const QColor& color);
 
 signals:
     void occurrence_rows_changed();
+    void highlighted_end_changed();
 
 private:
     void process_next_batch();

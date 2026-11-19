@@ -54,6 +54,7 @@ struct Projection
 struct Published_preview
 {
     QImage image;
+    std::shared_ptr<const preview::Configuration> configuration;
     Projection projection;
     QSizeF item_size;
     qreal dpr = 1;
@@ -172,30 +173,41 @@ public:
                         image.setPixel(0, row, pixel);
                     }
                 }
-                auto texture = std::unique_ptr<QSGTexture>(window->createTextureFromImage(image));
-                if (!texture) {
-                    clear();
-                    return;
-                }
-                if (!m_image) {
-                    m_image = window->createImageNode();
-                    m_image->setFiltering(filtering);
-                    m_image->setTexture(texture.get());
-                    m_image->setRect(rect);
-                    // An attached software scene inspects a child immediately.
-                    // Its texture must be valid before the node is published.
-                    appendChildNode(m_image);
-                }
-                else {
-                    m_image->setTexture(texture.get());
-                }
-                m_texture = std::move(texture);
+                set_image(window, image, rect, filtering);
             }
         }
         if (m_image) {
             m_image->setFiltering(filtering);
             m_image->setRect(rect);
         }
+    }
+
+    void set_image(QQuickWindow* window, const QImage& image, const QRectF& rect,
+        QSGTexture::Filtering filtering = QSGTexture::Nearest)
+    {
+        if (image.isNull()) {
+            clear();
+            return;
+        }
+        auto texture = std::unique_ptr<QSGTexture>(window->createTextureFromImage(image));
+        if (!texture) {
+            clear();
+            return;
+        }
+        if (!m_image) {
+            m_image = window->createImageNode();
+            m_image->setFiltering(filtering);
+            m_image->setTexture(texture.get());
+            m_image->setRect(rect);
+            // An attached software scene inspects a child immediately.
+            // Its texture must be valid before the node is published.
+            appendChildNode(m_image);
+        }
+        else {
+            m_image->setTexture(texture.get());
+        }
+        m_texture = std::move(texture);
+        m_image->setRect(rect);
     }
 
 private:
@@ -223,6 +235,7 @@ public:
         appendChildNode(m_viewport_bottom = new Tick_strip);
         appendChildNode(m_bookmarks = new Tick_strip);
         appendChildNode(m_occurrences = new Tick_strip);
+        appendChildNode(m_matches = new Tick_strip);
     }
 
     ~Preview_node() override { delete m_image; }
@@ -233,6 +246,8 @@ public:
     Tick_strip* m_viewport_bottom = nullptr;
     Tick_strip* m_bookmarks = nullptr;
     Tick_strip* m_occurrences = nullptr;
+    Tick_strip* m_matches = nullptr;
+    quint64 m_match_revision = std::numeric_limits<quint64>::max();
     QSGImageNode* m_image = nullptr;
     std::unique_ptr<QSGTexture> m_texture;
     quint64 m_image_serial = 0;
@@ -394,7 +409,11 @@ public:
 
     void rebuild_occurrences()
     {
+        reset_matches();
         m_occurrence_cursor = 0;
+        if (uses_match_positions()) {
+            return;
+        }
         m_pending_occurrence_pixels = QBitArray(std::max(0, projection().pixels.height()));
         if (active() && overlay_source_is_current()) {
             m_occurrence_timer.start(0);
@@ -406,6 +425,10 @@ public:
 
     void reduce_occurrences()
     {
+        if (uses_match_positions()) {
+            capture_matches();
+            return;
+        }
         if (!active() || !overlay_source_is_current() || m_pending_occurrence_pixels.isEmpty()) {
             return;
         }
@@ -428,6 +451,132 @@ public:
         m_occurrence_pixels = std::move(m_pending_occurrence_pixels);
         ++m_occurrence_revision;
         m_owner->update();
+    }
+
+    bool uses_match_positions() const
+    {
+        return m_detailed_view && m_occurrence_source;
+    }
+
+    void reset_matches()
+    {
+        ++m_match_generation;
+        m_next_match = 0;
+        m_match_image = {};
+        ++m_match_revision;
+        if (uses_match_positions()) {
+            m_occurrence_pixels.clear();
+            ++m_occurrence_revision;
+            if (active() && m_published) {
+                m_occurrence_timer.start(0);
+            }
+        }
+        m_owner->update();
+    }
+
+    void match_progress_changed()
+    {
+        if (!uses_match_positions() || !active()) {
+            return;
+        }
+        if (!m_occurrence_source->highlighted_end(*m_editor)) {
+            reset_matches();
+        }
+        else if (!m_match_chunk_pending) {
+            m_occurrence_timer.start(0);
+        }
+    }
+
+    void capture_matches()
+    {
+        if (m_match_chunk_pending || !active() || !published_image_is_current()) {
+            return;
+        }
+        const auto end = m_occurrence_source->highlighted_end(*m_editor);
+        QVector<preview::Occurrence_line> lines;
+        QElapsedTimer slice;
+        slice.start();
+        sptr_t line_start = 0;
+        sptr_t line_end = 0;
+        const int indicator = ScintillaQuick_occurrences::indicator;
+        while (m_next_match < end && lines.size() < preview::k_chunk_lines) {
+            const auto start = m_next_match;
+            const auto after = std::min(end, (Scintilla::Position)m_editor->send(SCI_INDICATOREND, indicator, start));
+            if (after <= start) {
+                break;
+            }
+            m_next_match = after;
+            if (m_editor->send(SCI_INDICATORVALUEAT, indicator, start)) {
+                if (start >= line_end) {
+                    auto& entry = lines.emplaceBack();
+                    entry.source.number = m_editor->send(SCI_LINEFROMPOSITION, start);
+                    line_start = m_editor->send(SCI_POSITIONFROMLINE, entry.source.number);
+                    line_end = m_editor->send(SCI_GETLINEENDPOSITION, entry.source.number);
+                    const auto bytes = std::min<sptr_t>(preview::k_prefix_bytes, line_end - line_start);
+                    if (start - line_start < bytes) {
+                        entry.source.styled_bytes.resize(bytes * 2 + 2);
+                        Scintilla::TextRangeFull range{{line_start, line_start + bytes}, entry.source.styled_bytes.data()};
+                        m_editor->send(SCI_GETSTYLEDTEXTFULL, 0, reinterpret_cast<sptr_t>(&range));
+                        entry.source.styled_bytes.resize(bytes * 2);
+                    }
+                }
+                auto& entry = lines.back();
+                const auto limit = entry.source.styled_bytes.size() / 2;
+                entry.ranges.emplaceBack(int(std::min<sptr_t>(start - line_start, limit)),
+                    int(std::min<sptr_t>(after - line_start, limit)));
+                if (start - line_start >= limit) {
+                    // All further indicators on this line share its edge mark.
+                    m_next_match = std::min<Scintilla::Position>(line_end, end);
+                }
+            }
+            if (slice.nsecsElapsed() >= k_capture_slice_ns) {
+                break;
+            }
+        }
+        if (lines.isEmpty()) {
+            if (m_next_match < end) {
+                m_occurrence_timer.start(0);
+            }
+            return;
+        }
+
+        const auto config = m_published->configuration;
+        const int width = config->pixels.width();
+        const int edge_width = std::clamp(qRound(k_bookmark_lane * width / (m_owner->width() - k_bookmark_lane)), 1, width);
+        m_match_chunk_pending = true;
+        QMetaObject::invokeMethod(m_worker,
+            [worker = m_worker, config, lines = std::move(lines),
+                edge_width, generation = m_match_generation] {
+                const auto marks = preview::Raster_worker::occurrence_marks(*config, lines, edge_width);
+                // Relay through the worker signal: queued delivery is cancelled
+                // automatically if the receiving preview has been destroyed.
+                emit worker->occurrence_marks_ready(generation, marks);
+            }, Qt::QueuedConnection);
+    }
+
+    void apply_matches(quint64 generation, const QVector<QRect>& marks)
+    {
+        m_match_chunk_pending = false;
+        if (!uses_match_positions() || !active() || !published_image_is_current()) {
+            return;
+        }
+        if (generation == m_match_generation) {
+            if (m_match_image.isNull()) {
+                m_match_image = QImage(projection().pixels, QImage::Format_ARGB32_Premultiplied);
+                if (m_match_image.isNull()) {
+                    return;
+                }
+                m_match_image.fill(Qt::transparent);
+            }
+            const QRgb pixel = qPremultiply(m_occurrence_color.rgba());
+            for (const auto& mark : marks) {
+                auto* row = reinterpret_cast<QRgb*>(m_match_image.scanLine(mark.y()));
+                std::fill_n(row + mark.x(), mark.width(), pixel);
+            }
+            ++m_match_revision;
+            m_owner->update();
+        }
+        capture_matches();
     }
 
     bool source_is_current() const
@@ -487,6 +636,14 @@ public:
     bool m_bookmark_same_document = false;
     QColor m_bookmark_color = Qt::transparent;
     QColor m_viewport_color = Qt::transparent;
+    QPointer<ScintillaQuick_occurrences> m_occurrence_source;
+    QMetaObject::Connection m_match_progress_connection;
+    QMetaObject::Connection m_match_source_destroyed;
+    Scintilla::Position m_next_match = 0;
+    bool m_match_chunk_pending = false;
+    quint64 m_match_generation = 0;
+    quint64 m_match_revision = 0;
+    QImage m_match_image;
     QByteArray m_occurrence_rows;
     QColor m_occurrence_color = Qt::transparent;
     QBitArray m_occurrence_pixels;
@@ -511,6 +668,10 @@ ScintillaQuick_source_preview::ScintillaQuick_source_preview(QQuickItem* parent)
     connect(&m_state->m_timer, &QTimer::timeout, this, &ScintillaQuick_source_preview::capture_next_chunk);
     connect(this, &QQuickItem::visibleChanged, this, &ScintillaQuick_source_preview::visibility_changed);
     connect(this, &QQuickItem::windowChanged, this, &ScintillaQuick_source_preview::visibility_changed);
+    connect(m_state->m_worker, &preview::Raster_worker::occurrence_marks_ready, this,
+        [this](quint64 generation, const QVector<QRect>& marks) {
+            m_state->apply_matches(generation, marks);
+        }, Qt::QueuedConnection);
     connect(m_state->m_worker, &preview::Raster_worker::chunk_finished, this,
         [this](quint64 serial, bool final, const QImage& image, bool allocation_failed) {
             auto& state = *m_state;
@@ -542,6 +703,7 @@ ScintillaQuick_source_preview::ScintillaQuick_source_preview(QQuickItem* parent)
             }
             auto published = std::make_unique<Published_preview>();
             published->image = image;
+            published->configuration = std::make_shared<preview::Configuration>(state.m_configuration);
             published->projection = {
                 state.m_configuration.pixels, state.m_configuration.background,
                 state.m_configuration.line_count, state.m_configuration.line_advance
@@ -561,6 +723,9 @@ ScintillaQuick_source_preview::ScintillaQuick_source_preview(QQuickItem* parent)
             state.m_published = std::move(published);
             if (!keep_overlays) {
                 state.reset_overlays();
+            }
+            else if (state.uses_match_positions()) {
+                state.reset_matches();
             }
             update_viewport();
             update();
@@ -705,8 +870,37 @@ void ScintillaQuick_source_preview::set_viewport_color(const QColor& color)
 void ScintillaQuick_source_preview::set_occurrence_rows(const QByteArray& rows)
 {
     m_state->m_occurrence_rows = rows.left(8192);
-    m_state->rebuild_occurrences();
+    if (!m_state->uses_match_positions()) {
+        m_state->rebuild_occurrences();
+    }
     emit occurrence_rows_changed();
+}
+
+ScintillaQuick_occurrences* ScintillaQuick_source_preview::occurrence_source() const
+{
+    return m_state->m_occurrence_source;
+}
+
+void ScintillaQuick_source_preview::set_occurrence_source(ScintillaQuick_occurrences* source)
+{
+    auto& state = *m_state;
+    if (state.m_occurrence_source == source) {
+        return;
+    }
+    disconnect(state.m_match_progress_connection);
+    disconnect(state.m_match_source_destroyed);
+    state.m_occurrence_source = source;
+    if (source) {
+        state.m_match_progress_connection = connect(source, &ScintillaQuick_occurrences::highlighted_end_changed,
+            this, [this] { m_state->match_progress_changed(); });
+        state.m_match_source_destroyed = connect(source, &QObject::destroyed, this, [this] {
+            m_state->m_occurrence_source = nullptr;
+            m_state->rebuild_occurrences();
+            emit occurrence_source_changed();
+        });
+    }
+    state.rebuild_occurrences();
+    emit occurrence_source_changed();
 }
 
 void ScintillaQuick_source_preview::set_occurrence_color(const QColor& color)
@@ -714,6 +908,9 @@ void ScintillaQuick_source_preview::set_occurrence_color(const QColor& color)
     if (m_state->m_occurrence_color != color) {
         m_state->m_occurrence_color = color;
         ++m_state->m_occurrence_revision;
+        if (m_state->uses_match_positions()) {
+            m_state->reset_matches();
+        }
         update();
         emit occurrence_color_changed();
     }
@@ -768,6 +965,7 @@ void ScintillaQuick_source_preview::visibility_changed()
         return;
     }
     cancel_capture();
+    state.reset_matches();
     state.m_bookmark_timer.stop();
     state.m_occurrence_timer.stop();
     if (!state.m_editor) {
@@ -777,7 +975,7 @@ void ScintillaQuick_source_preview::visibility_changed()
     else
     if (state.m_published) {
         const int cost = (int)std::max<qsizetype>(k_hidden_entry_minimum_cost,
-            state.m_published->image.sizeInBytes() + sizeof(Published_preview));
+            state.m_published->image.sizeInBytes() + sizeof(Published_preview) + sizeof(preview::Configuration));
         hidden_previews().insert(cache_key, state.m_published.release(), cost);
     }
     state.m_unpublished_projection = {};
@@ -1104,6 +1302,12 @@ QSGNode* ScintillaQuick_source_preview::updatePaintNode(QSGNode* old_node, Updat
         node->m_occurrences->update(window(), current ? state.m_occurrence_pixels : QBitArray(),
             state.m_occurrence_color, QRectF(width() - k_bookmark_lane, 0, k_bookmark_lane, height()));
         node->m_occurrence_revision = occurrence_revision;
+    }
+    const auto match_revision = current ? state.m_match_revision : std::numeric_limits<quint64>::max();
+    if (geometry_changed || node->m_match_revision != match_revision) {
+        node->m_matches->set_image(window(), current ? state.m_match_image : QImage(),
+            QRectF(k_bookmark_lane, 0, width() - k_bookmark_lane, height()));
+        node->m_match_revision = match_revision;
     }
     return node;
 }

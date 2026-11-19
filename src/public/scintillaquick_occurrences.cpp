@@ -16,7 +16,6 @@
 namespace
 {
 
-constexpr int k_occurrence_indicator = 8;
 constexpr Scintilla::Position k_maximum_word_bytes = 4096;
 constexpr Scintilla::Position k_search_window_bytes = 4096;
 constexpr Scintilla::Position k_maximum_row_buckets = 8192;
@@ -35,7 +34,7 @@ void set_indicator_range(
     const auto previous_value     = editor.send(SCI_GETINDICATORVALUE);
     const auto binding_revision   = editor.native_binding_revision();
     const QPointer<ScintillaQuick_item> alive(&editor);
-    editor.send(SCI_SETINDICATORCURRENT, k_occurrence_indicator);
+    editor.send(SCI_SETINDICATORCURRENT, ScintillaQuick_occurrences::indicator);
     editor.send(filled ? SCI_INDICATORFILLRANGE : SCI_INDICATORCLEARRANGE, start, end - start);
     if (alive && alive->native_binding_revision() == binding_revision) {
         alive->send(SCI_SETINDICATORCURRENT, previous_indicator);
@@ -95,6 +94,7 @@ struct ScintillaQuick_occurrences::Impl
     Scintilla::Position m_candidate_end = 0;
     Scintilla::Position m_search_end    = 0;
     Scintilla::Position m_next_clear    = 0;
+    Scintilla::Position m_highlighted_end = 0;
     bool m_has_indicators = false;
     bool m_clearing       = false;
 };
@@ -143,7 +143,12 @@ void ScintillaQuick_occurrences::highlight_selected_word(ScintillaQuick_item* vi
     state.m_word             = std::move(word);
     state.m_rows             = QByteArray((qsizetype)std::min(state.m_line_count, k_maximum_row_buckets), '\0');
     state.m_timer.start(0);
-    emit occurrence_rows_changed();
+    state.m_highlighted_end = 0;
+    const QPointer<ScintillaQuick_occurrences> alive(this);
+    emit highlighted_end_changed();
+    if (alive) {
+        emit occurrence_rows_changed();
+    }
 }
 
 void ScintillaQuick_occurrences::clear()
@@ -168,7 +173,11 @@ void ScintillaQuick_occurrences::clear()
     else {
         state.m_has_indicators = false;
     }
-    if (rows_changed) {
+    const QPointer<ScintillaQuick_occurrences> alive(this);
+    if (std::exchange(state.m_highlighted_end, 0) != 0) {
+        emit highlighted_end_changed();
+    }
+    if (alive && rows_changed) {
         emit occurrence_rows_changed();
     }
 }
@@ -183,14 +192,27 @@ QByteArray ScintillaQuick_occurrences::occurrence_rows() const
     return m_impl->m_rows;
 }
 
+Scintilla::Position ScintillaQuick_occurrences::highlighted_end(ScintillaQuick_item& view) const
+{
+    const auto& state = *m_impl;
+    if (!state.m_owner || state.m_highlighted_end == 0 ||
+        state.m_owner->native_binding_revision() != state.m_binding_revision ||
+        state.m_owner->native_content_revision() != state.m_content_revision ||
+        view.send(SCI_GETDOCPOINTER) != state.m_owner->send(SCI_GETDOCPOINTER))
+    {
+        return 0;
+    }
+    return state.m_highlighted_end;
+}
+
 void ScintillaQuick_occurrences::configure_view(ScintillaQuick_item* view, const QColor& color)
 {
     const int native_color = color.red() | (color.green() << 8) | (color.blue() << 16);
-    view->send(SCI_INDICSETSTYLE,        k_occurrence_indicator, INDIC_ROUNDBOX);
-    view->send(SCI_INDICSETFORE,         k_occurrence_indicator, native_color);
-    view->send(SCI_INDICSETUNDER,        k_occurrence_indicator, true);
-    view->send(SCI_INDICSETALPHA,        k_occurrence_indicator, 48);
-    view->send(SCI_INDICSETOUTLINEALPHA, k_occurrence_indicator, 160);
+    view->send(SCI_INDICSETSTYLE,        ScintillaQuick_occurrences::indicator, INDIC_ROUNDBOX);
+    view->send(SCI_INDICSETFORE,         ScintillaQuick_occurrences::indicator, native_color);
+    view->send(SCI_INDICSETUNDER,        ScintillaQuick_occurrences::indicator, true);
+    view->send(SCI_INDICSETALPHA,        ScintillaQuick_occurrences::indicator, 48);
+    view->send(SCI_INDICSETOUTLINEALPHA, ScintillaQuick_occurrences::indicator, 160);
 }
 
 void ScintillaQuick_occurrences::process_next_batch()
@@ -208,6 +230,7 @@ void ScintillaQuick_occurrences::process_next_batch()
     QElapsedTimer elapsed;
     elapsed.start();
     bool rows_changed = false;
+    const auto previous_end = state.m_highlighted_end;
 
     for (int operation = 0; operation < k_batch_operations; ++operation) {
         auto& owner = *state.m_owner;
@@ -217,7 +240,7 @@ void ScintillaQuick_occurrences::process_next_batch()
             // and clearing a dense query must not remove all runs in one call.
             const auto end = std::min(state.m_length,
                 (Scintilla::Position)owner.send(SCI_INDICATOREND,
-                    k_occurrence_indicator, state.m_next_clear));
+                    ScintillaQuick_occurrences::indicator, state.m_next_clear));
             if (end <= state.m_next_clear) {
                 state.m_clearing       = false;
                 state.m_has_indicators = false;
@@ -225,7 +248,7 @@ void ScintillaQuick_occurrences::process_next_batch()
             else {
                 const auto start = state.m_next_clear;
                 state.m_next_clear = end;
-                if (owner.send(SCI_INDICATORVALUEAT, k_occurrence_indicator, start)) {
+                if (owner.send(SCI_INDICATORVALUEAT, ScintillaQuick_occurrences::indicator, start)) {
                     set_indicator_range(owner, start, end, false);
                 }
             }
@@ -269,6 +292,7 @@ void ScintillaQuick_occurrences::process_next_batch()
                     return;
                 }
 
+                state.m_highlighted_end = match.end;
                 const auto line = (std::uint64_t)owner.send(SCI_LINEFROMPOSITION, match.start);
                 const auto bucket = (qsizetype)(line * (std::uint64_t)state.m_rows.size() /
                     (std::uint64_t)state.m_line_count);
@@ -302,7 +326,10 @@ void ScintillaQuick_occurrences::process_next_batch()
     if (state.m_clearing || (!state.m_word.isEmpty() && state.m_next_search < state.m_length)) {
         state.m_timer.start(0);
     }
-    if (rows_changed) {
+    if (state.m_highlighted_end != previous_end) {
+        emit highlighted_end_changed();
+    }
+    if (alive && rows_changed) {
         emit occurrence_rows_changed();
     }
 }
