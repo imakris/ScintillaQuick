@@ -41,6 +41,7 @@ public:
     void deliver_input_method(QInputMethodEvent* event) { inputMethodEvent(event); }
     using ScintillaQuick_item::cancel_input_method_composition;
     using ScintillaQuick_item::cross_platform_line_copy_enabled;
+    using ScintillaQuick_item::mousePressEvent;
     using ScintillaQuick_item::set_cross_platform_line_copy_enabled;
     QVariant query_input_method(Qt::InputMethodQuery query) const { return inputMethodQuery(query); }
     QVariant query_input_method(Qt::InputMethodQuery query, QVariant argument) const
@@ -110,6 +111,31 @@ void test_handler_absent_preserves_direct_edit()
     editor.setProperty("text", QStringLiteral("ac"));
     editor.sends(SCI_INSERTTEXT, 1, "b");
     SQ_EXPECT(text_of(editor) == QStringLiteral("abc"));
+}
+
+void test_context_menu_focus_handoff()
+{
+    QQuickItem scope;
+    QQuickItem previous(&scope);
+    QQuickItem menu(&scope);
+    Event_editor editor;
+    editor.setParentItem(&scope);
+    previous.forceActiveFocus();
+    SQ_EXPECT(previous.hasFocus());
+
+    bool requested = false;
+    QObject::connect(&editor, &ScintillaQuick_item::showContextMenu, &menu, [&] {
+        requested = true;
+        SQ_EXPECT(editor.hasFocus());
+        menu.forceActiveFocus();
+    });
+
+    const QPointF position(100, 10);
+    QMouseEvent press(QEvent::MouseButtonPress, position, position,
+        Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+    editor.mousePressEvent(&press);
+    SQ_EXPECT(requested);
+    SQ_EXPECT(menu.hasFocus());
 }
 
 void test_handler_dispositions_and_reentrant_apply()
@@ -3209,6 +3235,7 @@ int main(int argc, char** argv)
 
 
     test_handler_absent_preserves_direct_edit();
+    test_context_menu_focus_handoff();
     test_handler_dispositions_and_reentrant_apply();
     test_handler_snapshot_and_transaction_cleanup();
     test_direct_message_result_conventions();

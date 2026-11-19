@@ -1782,11 +1782,13 @@ void ScintillaQuick_item::mousePressEvent(QMouseEvent * event)
         if (!m_core->PointInSelection(ctx_pt)) {
             m_core->SetEmptySelection(m_core->PositionFromLocation(ctx_pt));
         }
-        // TODO: call context menu callback if set otherwise use default context menu...
+        // A popup saves the focused item for restoration when it closes.
+        finish_consumed_press();
+        request_scene_graph_update(false, false, false);
         if (m_core->ShouldDisplayPopup(ctx_pt)) {
             m_core->ContextMenu(ctx_global);
         }
-        request_scene_graph_update(false, false, false);
+        return;
     }
 
     finish_consumed_press();
