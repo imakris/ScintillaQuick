@@ -15,19 +15,19 @@ Upstream import
 ---------------
 
 Main source and interface files:
-  Release:       Scintilla 5.6.7
-  Archive:       https://www.scintilla.org/scintilla567.zip
-  SHA-256:       2309181e59e7da4659f890dbc128db7451ccd094748770e7be674b830494587c
-  Mercurial node: 967909317010991a346f13ec8b9ccd4207da347a
-  Archive tag:   rel-5-6-7
-  Import date:   2026-10-10
+  Release:       Scintilla 5.6.9
+  Archive:       https://www.scintilla.org/scintilla569.zip
+  SHA-256:       fddc637afa6e3a9205a5ad67c777d711a921ed2797d792f3034010c1be1539d6
+  Mercurial node: 69bed9304d290ba16399e493ab6fe4b1a3fb4b5f
+  Archive tag:   rel-5-6-9
+  Import date:   2026-11-20
   Importer:      Codex, for Ioannis Makris
 
 Lexer and style constants (include/SciLexer.h):
   Project:       Lexilla
-  Release:       5.5.4
+  Release:       5.5.5
   Repository:    https://github.com/ScintillaOrg/lexilla
-  Git revision:  322c94ab308aa9b8e4326805348a14b44369f57d
+  Git revision:  e67537693bfb1ae4e6f643dcab725a38ffeac3e3
   Source path:   include/SciLexer.h
 
 The Mercurial node and tag come from the archive's .hg_archival.txt.

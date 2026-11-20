@@ -8,7 +8,7 @@ render-frame capture in `src/core`, `src/platform`, and `src/render`.
 ## Source patch ledger
 
 Paths below are relative to this directory. The comparison baseline is
-Scintilla 5.6.7; line-ending differences are excluded.
+Scintilla 5.6.9; line-ending differences are excluded.
 
 | Files | Local integration |
 | --- | --- |
@@ -17,7 +17,7 @@ Scintilla 5.6.7; line-ending differences are excluded.
 | `src/MarginView.h`, `src/MarginView.cxx` | Collector arguments and capture of line numbers, Text/RText style runs, and marker symbols, including fold-part, stroke-width, and margin-style metadata. Margin text retains native column/run identity and clipped style backgrounds. View-local text overrides share that paint/capture path and may supply text on a visible wrapped continuation; ordinary document labels retain first-wrapped-subline positioning. Empty text and annotation rows retain their native margin background fills. The paint loop skips negative display-line indices before visiting document lines. The core copies marker fonts into frame values for rendering. |
 | `src/Platform.h` | `PainterID`, a Qt Quick surface-initialization overload, supporting includes, and an explicit `virtual` on the `ListBox` destructor. `PLAT_QT_QML` and `SCINTILLA_QT_QML` selection already exist in upstream 5.3.2. |
 | `src/Editor.h`, `src/Editor.cxx` | Painter-aware measurement-surface creation and forwarding through `AutoSurface`, paired with `Surface_impl` in `src/platform/scintillaquick_platqt.cpp`. |
-| `src/Document.cxx` | Minimal target replacement trims only complete UTF-8 characters so shared selections and undo/redo positions remain at character boundaries. Caller-specified byte ranges and other code pages retain their original scope. |
+| `src/Document.h`, `src/Document.cxx` | Tentative input cancellation can undo its composition after a document becomes read-only. Minimal target replacement trims only complete UTF-8 characters so shared selections and undo/redo positions remain at character boundaries. Caller-specified byte ranges and other code pages retain their original scope. |
 | `src/CellBuffer.cxx` | The Emscripten branch of `LineVector::InsertLines` always uses `InsertPartitionsWithCast`; other targets retain upstream's pointer-convertibility check. |
 | `src/Indicator.cxx` | `DotBox` skips nonpositive image dimensions and explicitly visits the two edge coordinates. Upstream's edge loops incremented by width or height minus one, so a one-pixel dimension caused an infinite loop. The alternating edge alpha is preserved. |
 
@@ -29,7 +29,7 @@ not be replaced by the local project attribution.
 
 ## Retained upstream headers and packaging
 
-`include/SciLexer.h` comes from Lexilla 5.5.4, at the revision recorded in
+`include/SciLexer.h` comes from Lexilla 5.5.5, at the revision recorded in
 `VERSION`. It supplies lexer/style constants used by downstream consumers;
 lexer implementations are supplied separately. Unreferenced `FontQuality.h`
 and `IntegerRectangle.h` imports have been removed.
@@ -42,9 +42,9 @@ ScintillaQuick interface. Scintilla implementation headers are not installed.
 
 ## Verification and refresh
 
-The 2026-10-10 import replaces the retained source and interface files with
-Scintilla 5.6.7 and adds its `RunThreads.h`, `UndoHistory.h`, and
-`UndoHistory.cxx`. Modified upstream source files are those listed
+The 2026-11-20 import updates the retained source and interface files to
+Scintilla 5.6.9. Upstream now guards the final italic-segment lookup on an
+empty line, so `PositionCache.cxx` matches the release archive. Modified upstream source files are those listed
 in the source ledger, excluding the ScintillaQuick-owned `RenderCapture.h`.
 `LICENSE` matches upstream `License.txt`. `SciLexer.h` matches the Lexilla
 source recorded above. All retained files are accounted for by those sources,

@@ -19,6 +19,13 @@ namespace
 
 int g_failures = 0;
 
+Scintilla::Internal::FontParameters test_font_parameters(
+    const char* family, Scintilla::FontStretch stretch = Scintilla::FontStretch::Normal)
+{
+    return {family, 11, Scintilla::FontWeight::Normal, false, Scintilla::FontQuality::QualityDefault,
+        Scintilla::Technology::Default, Scintilla::CharacterSet::Ansi, Scintilla::Internal::localeNameDefault, stretch};
+}
+
 void test_utf8_body_prefix_measurement()
 {
     const QString marker(QChar(0xFEFF));
@@ -32,7 +39,7 @@ void test_utf8_body_prefix_measurement()
         const QByteArray bytes = body.toUtf8();
         const QByteArray family = QByteArrayLiteral("Cousine");
         const auto font = Scintilla::Internal::Font::Allocate(
-            Scintilla::Internal::FontParameters(family.constData(), 11));
+            test_font_parameters(family.constData()));
         const QFont qt_font(QStringLiteral("Cousine"), 11);
         QImage image(1, 1, QImage::Format_ARGB32_Premultiplied);
         Scintilla::Internal::Surface_impl surface;
@@ -68,7 +75,7 @@ void test_surface_measurement_tracks_device_dpi()
     using namespace Scintilla::Internal;
     for (const QString& family : {QStringLiteral("Cascadia Code"), QStringLiteral("Cousine")}) {
         const QByteArray family_utf8 = family.toUtf8();
-        const auto font = Font::Allocate(FontParameters(family_utf8.constData(), 11));
+        const auto font = Font::Allocate(test_font_parameters(family_utf8.constData()));
         QFont qt_font(family);
         qt_font.setPointSizeF(11);
         QImage image(1, 1, QImage::Format_ARGB32_Premultiplied);
@@ -123,9 +130,7 @@ void test_font_stretch_matches_qt()
             Scintilla::FontStretch::Normal,
             Scintilla::FontStretch::Expanded})
     {
-        FontParameters parameters("Cousine", 11);
-        parameters.stretch = stretch;
-        const auto font = Font::Allocate(parameters);
+        const auto font = Font::Allocate(test_font_parameters("Cousine", stretch));
         QFont expected(QStringLiteral("Cousine"));
         expected.setPointSizeF(11);
         expected.setStretch(stretch == Scintilla::FontStretch::Condensed ? QFont::Condensed :
