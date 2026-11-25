@@ -138,7 +138,8 @@ ScintillaQuick does not require Lexilla. Applications that use lexers can call
 its installed package, then link `Lexilla::Lexilla`. The helper reuses an existing
 target. Otherwise, it builds a supplied source checkout; with no source path, it
 tries an installed Lexilla package before fetching upstream `master`. Source
-builds use ScintillaQuick's public Scintilla headers.
+builds use ScintillaQuick's public Scintilla headers and require Git to apply
+the C++ documentation lexer patch to a build-local copy.
 
 Set `FETCHCONTENT_SOURCE_DIR_LEXILLA` or pass `SOURCE_DIR <checkout>` to select a
 local checkout. Invalid explicit paths fail configuration when the helper needs

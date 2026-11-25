@@ -143,9 +143,14 @@ int main(int argc, char** argv)
         require(lexer_name(pane) == entry.lexer, "path selects its language");
     }
 
-    pane.send(SCI_SETTEXT, 0, reinterpret_cast<sptr_t>("int value;"));
+    const QByteArray example("int value;\n/// world() << myValue; Message<Enclosure<T>>.");
+    pane.sends(SCI_SETTEXT, 0, example.constData());
     scintillaquick::configure_default_syntax(pane, QStringLiteral("source.cpp"), true);
     require(pane.send(SCI_GETSTYLEAT, 0) == SCE_C_WORD, "C++ keywords are styled");
+    for (auto pos = example.indexOf("///"); pos < example.size(); ++pos) {
+        require(pane.send(SCI_GETSTYLEAT, pos) == SCE_C_COMMENTLINEDOC,
+            "stream operators and nested types in C++ documentation retain the comment style");
+    }
     const auto dark_keyword = pane.send(SCI_STYLEGETFORE, SCE_C_WORD);
     scintillaquick::configure_default_syntax(pane, QStringLiteral("source.cpp"), false);
     require(pane.send(SCI_STYLEGETFORE, SCE_C_WORD) != dark_keyword, "theme changes lexical colors");

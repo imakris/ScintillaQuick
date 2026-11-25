@@ -1,0 +1,105 @@
+diff --git a/lexers/LexCPP.cxx b/lexers/LexCPP.cxx
+index 487078e8..a0cdbacc 100644
+--- a/lexers/LexCPP.cxx
++++ b/lexers/LexCPP.cxx
+@@ -97,6 +97,74 @@ bool CheckRegexClosed(StyleContext &sc) {
+ 	return false;
+ }
+ 
++constexpr bool IsDocTagNameStart(int ch) noexcept {
++	return IsUpperOrLowerCase(ch) || AnyOf(ch, '_', ':');
++}
++
++constexpr bool IsDocTagNameChar(int ch) noexcept {
++	return IsDocTagNameStart(ch) || IsADigit(ch) || AnyOf(ch, '-', '.');
++}
++
++bool HasDocTagAttributeOrSlash(StyleContext &sc) {
++	Sci_Position offset = 0;
++	int ch = sc.ch;
++	while (IsASpaceOrTab(ch)) {
++		ch = sc.GetRelativeCharacter(++offset);
++	}
++	if (ch == '/') {
++		return sc.GetRelativeCharacter(offset + 1) == '>';
++	}
++	if (!offset || !IsDocTagNameStart(ch)) {
++		return false;
++	}
++	do {
++		ch = sc.GetRelativeCharacter(++offset);
++	} while (IsDocTagNameChar(ch));
++	while (IsASpaceOrTab(ch)) {
++		ch = sc.GetRelativeCharacter(++offset);
++	}
++	return ch == '=' && sc.GetRelativeCharacter(offset + 1) != '=';
++}
++
++bool HighlightDocTag(StyleContext &sc, int activity, const WordList &keywords,
++		const WordClassifier &classifier, StyleContext::Transform transform) {
++	const bool closing = sc.chNext == '/';
++	const int prefixLength = closing ? 2 : 1;
++	if (sc.chPrev == '<' || !IsDocTagNameStart(sc.GetRelativeCharacter(prefixLength))) {
++		return false;
++	}
++	const int commentStyle = sc.state;
++	const bool afterIdentifier = iswordstart(sc.chPrev) || sc.chPrev > charLastASCII;
++	sc.Forward(prefixLength);
++	sc.SetState(SCE_C_COMMENTDOCKEYWORD | activity);
++	while (sc.More() && IsDocTagNameChar(sc.ch)) {
++		sc.Forward();
++	}
++
++	// An unrecognised name attached to an identifier may be a template argument.
++	// Another '<' inside the name cannot belong to an opening tag.
++	int style = SCE_C_COMMENTDOCKEYWORDERROR;
++	const bool selfClosing = sc.Match('/', '>');
++	if (!closing && (sc.ch == '<' || (afterIdentifier && !HasDocTagAttributeOrSlash(sc)))) {
++		style = commentStyle;
++	}
++	if (sc.ch == '>' || selfClosing || IsASpace(sc.ch)) {
++		std::string name;
++		sc.GetCurrentString(name, transform);
++		if (keywords.InList(name)) {
++			style = SCE_C_COMMENTDOCKEYWORD;
++		} else {
++			const int subStyle = classifier.ValueFor(name);
++			if (subStyle >= 0) {
++				style = subStyle;
++			}
++		}
++	}
++	sc.ChangeState(style | activity);
++	sc.SetState(commentStyle);
++	return true;
++}
++
+ constexpr bool IsOperatorOrSpace(int ch) noexcept {
+ 	return isoperator(ch) || IsASpace(ch);
+ }
+@@ -1128,10 +1196,8 @@ void SCI_METHOD LexerCPP::Lex(Sci_PositionU startPos, Sci_Position length, int i
+ 						styleBeforeDCKeyword = SCE_C_COMMENTDOC;
+ 						sc.SetState(SCE_C_COMMENTDOCKEYWORD|activitySet);
+ 					}
+-				} else if ((sc.ch == '<' && !(IsASpace(sc.chNext) || sc.chNext == '/'))
+-							|| (sc.ch == '/' && sc.chPrev == '<')) { // XML comment style
+-					styleBeforeDCKeyword = SCE_C_COMMENTDOC;
+-					sc.ForwardSetState(SCE_C_COMMENTDOCKEYWORD | activitySet);
++				} else if (sc.ch == '<' && HighlightDocTag(sc, activitySet, keywords3, classifierDocKeyWords, transform)) {
++					continue;
+ 				}
+ 				break;
+ 			case SCE_C_COMMENTLINE:
+@@ -1151,10 +1217,8 @@ void SCI_METHOD LexerCPP::Lex(Sci_PositionU startPos, Sci_Position length, int i
+ 						styleBeforeDCKeyword = SCE_C_COMMENTLINEDOC;
+ 						sc.SetState(SCE_C_COMMENTDOCKEYWORD|activitySet);
+ 					}
+-				} else if ((sc.ch == '<' && sc.chNext != '/')
+-							|| (sc.ch == '/' && sc.chPrev == '<')) { // XML comment style
+-					styleBeforeDCKeyword = SCE_C_COMMENTLINEDOC;
+-					sc.ForwardSetState(SCE_C_COMMENTDOCKEYWORD | activitySet);
++				} else if (sc.ch == '<' && HighlightDocTag(sc, activitySet, keywords3, classifierDocKeyWords, transform)) {
++					continue;
+ 				}
+ 				break;
+ 			case SCE_C_COMMENTDOCKEYWORD:

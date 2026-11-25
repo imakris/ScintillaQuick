@@ -316,6 +316,7 @@ install(
         ${CMAKE_CURRENT_BINARY_DIR}/ScintillaQuickConfig.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/ScintillaQuickConfigVersion.cmake
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ScintillaQuickLexilla.cmake
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/lexilla-cpp-doc-comments.patch
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ScintillaQuickSyntax.cmake
         ${CMAKE_CURRENT_SOURCE_DIR}/src/syntax/scintillaquick_syntax.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LexillaConfig.cmake.in
