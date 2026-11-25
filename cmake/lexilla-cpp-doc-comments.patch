@@ -1,8 +1,8 @@
 diff --git a/lexers/LexCPP.cxx b/lexers/LexCPP.cxx
-index 487078e8..0cd33a5f 100644
+index 487078e8..d3fac936 100644
 --- a/lexers/LexCPP.cxx
 +++ b/lexers/LexCPP.cxx
-@@ -97,6 +97,80 @@ bool CheckRegexClosed(StyleContext &sc) {
+@@ -97,6 +97,81 @@ bool CheckRegexClosed(StyleContext &sc) {
  	return false;
  }
  
@@ -51,6 +51,7 @@ index 487078e8..0cd33a5f 100644
 +	return subStyle >= 0 ? subStyle : SCE_C_COMMENTDOCKEYWORDERROR;
 +}
 +
++// On a match, leave the character after the tag name for the main lexer to process.
 +bool HighlightDocTag(StyleContext &sc, int activity, const WordList &keywords,
 +		const WordClassifier &classifier, StyleContext::Transform transform) {
 +	const bool closing = sc.chNext == '/';
@@ -83,7 +84,7 @@ index 487078e8..0cd33a5f 100644
  constexpr bool IsOperatorOrSpace(int ch) noexcept {
  	return isoperator(ch) || IsASpace(ch);
  }
-@@ -833,7 +907,7 @@ void SCI_METHOD LexerCPP::Lex(Sci_PositionU startPos, Sci_Position length, int i
+@@ -833,7 +908,7 @@ void SCI_METHOD LexerCPP::Lex(Sci_PositionU startPos, Sci_Position length, int i
  	const CharacterSet setOKBeforeRE("([{=,:;!%^&*|?~+-> ");
  	const CharacterSet setCouldBePostOp("+-");
  
@@ -92,7 +93,7 @@ index 487078e8..0cd33a5f 100644
  
  	setWordStart = CharacterSet(CharacterSet::setAlpha, "_", true);
  
-@@ -1128,10 +1202,8 @@ void SCI_METHOD LexerCPP::Lex(Sci_PositionU startPos, Sci_Position length, int i
+@@ -1128,10 +1203,8 @@ void SCI_METHOD LexerCPP::Lex(Sci_PositionU startPos, Sci_Position length, int i
  						styleBeforeDCKeyword = SCE_C_COMMENTDOC;
  						sc.SetState(SCE_C_COMMENTDOCKEYWORD|activitySet);
  					}
@@ -105,7 +106,7 @@ index 487078e8..0cd33a5f 100644
  				}
  				break;
  			case SCE_C_COMMENTLINE:
-@@ -1151,10 +1223,8 @@ void SCI_METHOD LexerCPP::Lex(Sci_PositionU startPos, Sci_Position length, int i
+@@ -1151,10 +1224,8 @@ void SCI_METHOD LexerCPP::Lex(Sci_PositionU startPos, Sci_Position length, int i
  						styleBeforeDCKeyword = SCE_C_COMMENTLINEDOC;
  						sc.SetState(SCE_C_COMMENTDOCKEYWORD|activitySet);
  					}
@@ -118,7 +119,7 @@ index 487078e8..0cd33a5f 100644
  				}
  				break;
  			case SCE_C_COMMENTDOCKEYWORD:
-@@ -1165,35 +1235,13 @@ void SCI_METHOD LexerCPP::Lex(Sci_PositionU startPos, Sci_Position length, int i
+@@ -1165,35 +1236,13 @@ void SCI_METHOD LexerCPP::Lex(Sci_PositionU startPos, Sci_Position length, int i
  					seenDocKeyBrace = false;
  				} else if (sc.ch == '[' || sc.ch == '{') {
  					seenDocKeyBrace = true;
